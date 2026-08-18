@@ -1,0 +1,172 @@
+"""Validate MVTec AD and generate deterministic dataset artifacts."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from collections import Counter
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from ml.datasets.manifest import ManifestRecord, build_mvtec_manifest, write_manifest_csv
+from ml.datasets.manifest_validation import validate_manifest_records
+from ml.datasets.validation import validate_mvtec_category
+
+
+@dataclass(frozen=True)
+class PreparationConfig:
+    dataset_root: Path
+    category: str
+    validation_ratio: float
+    random_seed: int
+    manifest_path: Path
+    summary_path: Path
+
+
+@dataclass(frozen=True)
+class PreparationSummary:
+    category: str
+    random_seed: int
+    validation_ratio: float
+    train_count: int
+    validation_count: int
+    test_good_count: int
+    test_anomaly_count: int
+    manifest_count: int
+    defect_counts: dict[str, int]
+    image_size_counts: dict[str, int]
+
+
+def _load_yaml(path: Path) -> dict[str, Any]:
+    with path.open(encoding="utf-8") as file:
+        raw = yaml.safe_load(file)
+
+    if not isinstance(raw, dict):
+        raise ValueError(f"Config root must be a mapping: {path}")
+    return raw
+
+
+def load_preparation_config(path: Path) -> PreparationConfig:
+    """Load and validate the MVTec AD preparation configuration."""
+    raw = _load_yaml(path)
+
+    try:
+        dataset = raw["dataset"]
+        split = raw["split"]
+        output = raw["output"]
+
+        return PreparationConfig(
+            dataset_root=Path(dataset["root"]),
+            category=str(dataset["category"]),
+            validation_ratio=float(split["validation_ratio"]),
+            random_seed=int(split["random_seed"]),
+            manifest_path=Path(output["manifest_path"]),
+            summary_path=Path(output["summary_path"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid preparation config: {path}") from exc
+
+
+def _build_summary(
+    records: list[ManifestRecord],
+    config: PreparationConfig,
+) -> PreparationSummary:
+    test_records = [record for record in records if record.split == "test"]
+    defect_counts = Counter(record.defect_type for record in test_records)
+    image_size_counts = Counter(f"{record.width}x{record.height}" for record in records)
+
+    return PreparationSummary(
+        category=config.category,
+        random_seed=config.random_seed,
+        validation_ratio=config.validation_ratio,
+        train_count=sum(record.split == "train" for record in records),
+        validation_count=sum(record.split == "validation" for record in records),
+        test_good_count=sum(record.split == "test" and record.label == 0 for record in records),
+        test_anomaly_count=sum(record.split == "test" and record.label == 1 for record in records),
+        manifest_count=len(records),
+        defect_counts=dict(sorted(defect_counts.items())),
+        image_size_counts=dict(sorted(image_size_counts.items())),
+    )
+
+
+def _write_summary(summary: PreparationSummary, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(asdict(summary), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def prepare_mvtec_dataset(config: PreparationConfig) -> PreparationSummary:
+    """Validate raw data and create manifest/summary artifacts."""
+    validation_report = validate_mvtec_category(
+        config.dataset_root,
+        config.category,
+    )
+    if not validation_report.is_valid:
+        issues = [
+            *validation_report.errors,
+            *validation_report.corrupted_files,
+            *(f"missing mask: {path}" for path in validation_report.missing_masks),
+            *(f"unexpected mask: {path}" for path in validation_report.unexpected_masks),
+        ]
+        raise ValueError("Dataset validation failed:\n" + "\n".join(issues))
+
+    records = build_mvtec_manifest(
+        dataset_root=config.dataset_root,
+        category=config.category,
+        validation_ratio=config.validation_ratio,
+        random_seed=config.random_seed,
+    )
+
+    manifest_report = validate_manifest_records(records, config.dataset_root)
+    if not manifest_report.is_valid:
+        raise ValueError(
+            "Manifest integrity validation failed:\n" + "\n".join(manifest_report.errors)
+        )
+
+    write_manifest_csv(records, config.manifest_path)
+
+    summary = _build_summary(records, config)
+    _write_summary(summary, config.summary_path)
+    return summary
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Prepare an MVTec AD category for downstream ML stages."
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path("configs/data/mvtec_ad.yaml"),
+        help="Path to the dataset preparation YAML configuration.",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = _parse_args()
+    config = load_preparation_config(args.config)
+    summary = prepare_mvtec_dataset(config)
+
+    print("MVTec AD preparation: PASS")
+    print(f"Category: {summary.category}")
+    print(f"Train: {summary.train_count}")
+    print(f"Validation: {summary.validation_count}")
+    print(f"Test good: {summary.test_good_count}")
+    print(f"Test anomaly: {summary.test_anomaly_count}")
+    print(f"Manifest rows: {summary.manifest_count}")
+    print(f"Defect counts: {summary.defect_counts}")
+    print(f"Image sizes: {summary.image_size_counts}")
+    print(f"Manifest: {config.manifest_path}")
+    print(f"Summary: {config.summary_path}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

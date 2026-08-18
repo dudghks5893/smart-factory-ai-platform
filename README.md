@@ -1,11 +1,10 @@
 # SmartFactory AI Quality Platform
 
-제조 이미지 기반 이상 탐지 모델을 개발하는 데서 끝나지 않고,
-데이터 파이프라인부터 모델 평가, Serving, MLOps, Monitoring,
-Kubernetes 운영, 제조 매뉴얼 기반 RAG까지 연결하는
-Production AI 포트폴리오 프로젝트입니다.
+제조 이미지 기반 이상 탐지부터 데이터 파이프라인, 모델 평가, Serving,
+MLOps, Monitoring, Kubernetes 운영, 제조 매뉴얼 기반 RAG까지 연결하는
+Production AI 시스템 프로젝트입니다.
 
-> 현재 상태: **STEP 0 — 프로젝트 기준 및 Repository 구축**
+> 현재 상태: **STEP 1 — Dataset / Data Pipeline 완료**
 
 ---
 
@@ -47,7 +46,7 @@ Autoscaling / Rolling Update / Rollback
 RAG Evaluation
 ```
 
-단순 Notebook 데모가 아니라 모델이 실제 서비스 환경에서
+단순한 모델 실험이 아니라 모델이 실제 서비스 환경에서
 배포되고, 관찰되고, 버전 관리되고, 교체될 수 있는 시스템을 목표로 합니다.
 
 ---
@@ -85,7 +84,7 @@ RAG Evaluation
 - Retrieval
 - Citation
 - Faithfulness Evaluation
-- OpenAI 또는 Local Model을 포함한 Provider-Agnostic Architecture
+- Provider-Agnostic Architecture
 
 ### Quality
 
@@ -97,19 +96,14 @@ RAG Evaluation
 
 ## 3. Compute 전략
 
-환경은 목적에 따라 분리합니다.
-
 | 환경 | 주요 목적 |
 |---|---|
 | Local macOS | 개발, 테스트, Dataset Pipeline, Docker, Local PostgreSQL/MLflow |
 | Kaggle GPU | 초기 Vision AI GPU 실험, PatchCore 실험, 후보 모델 비교 |
 | GCP | 최종 Benchmark, Production-like Deployment, Kubernetes, Monitoring |
 
-Kaggle은 실험 환경으로 사용하고,
-최종 성능 검증 및 Production 환경은 GCP에서 구성합니다.
-
-환경별 별도 Source Code를 만들지 않고
-동일한 코드와 Environment-specific Configuration을 사용하는 것을 원칙으로 합니다.
+환경별 별도 Source Code를 만들지 않고 동일한 코드와
+Environment-specific Configuration을 사용하는 것을 원칙으로 합니다.
 
 ---
 
@@ -149,6 +143,7 @@ smart-factory-ai-platform/
 │   ├── architecture/
 │   ├── adr/
 │   ├── benchmarks/
+│   ├── data/
 │   └── runbooks/
 ├── scripts/
 └── .github/
@@ -199,9 +194,45 @@ make format
 
 ---
 
-## 6. 평가 지표
+## 6. Dataset / Data Pipeline
 
-프로젝트 전반에서 다음 지표를 기록합니다.
+초기 Dataset으로 MVTec AD를 사용하며 첫 Category는 `metal_nut`입니다.
+
+현재 Pipeline은 다음을 지원합니다.
+
+```text
+Raw MVTec AD
+    ↓
+Dataset Structure / Image Validation
+    ↓
+Deterministic Train / Validation Split
+    ↓
+Manifest 생성
+    ↓
+Manifest Integrity Validation
+    ↓
+PyTorch Dataset
+    ↓
+DataLoader
+```
+
+`metal_nut` 기준 현재 Split은 다음과 같습니다.
+
+| Split | Samples |
+|---|---:|
+| Train | 198 |
+| Validation | 22 |
+| Test Good | 22 |
+| Test Anomaly | 93 |
+| Total | 335 |
+
+원본 MVTec AD의 `test`는 분할하거나 Threshold 튜닝에 사용하지 않습니다.
+
+Dataset Pipeline 세부 내용은 `docs/data/MVTEC_AD_PIPELINE.md`에서 관리합니다.
+
+---
+
+## 7. 평가 지표
 
 ### Vision AI
 
@@ -245,12 +276,11 @@ make format
 - Latency
 - 필요 시 Cost
 
-세부 측정 원칙은
-`docs/benchmarks/METRICS_CONTRACT.md`에서 관리합니다.
+세부 측정 원칙은 `docs/benchmarks/METRICS_CONTRACT.md`에서 관리합니다.
 
 ---
 
-## 7. Architecture Decision Record
+## 8. Architecture Decision Record
 
 주요 설계 선택은 `docs/adr/`에 ADR 형태로 기록합니다.
 
@@ -266,7 +296,7 @@ make format
 
 ---
 
-## 8. Data / Artifact 정책
+## 9. Data / Artifact 정책
 
 다음 항목은 Git에 직접 저장하지 않습니다.
 
@@ -284,10 +314,10 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 
 ---
 
-## 9. 공식 구현 순서
+## 10. 공식 구현 순서
 
 - [x] STEP 0. 프로젝트 기준 및 Repository 구축
-- [ ] STEP 1. Dataset / Data Pipeline
+- [x] STEP 1. Dataset / Data Pipeline
 - [ ] STEP 2. Vision AI Baseline
 - [ ] STEP 3. 모델 평가 및 Benchmark
 - [ ] STEP 4. FastAPI Model Serving
@@ -302,28 +332,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - [ ] STEP 13. 제조 Manual / SOP RAG
 - [ ] STEP 14. RAG Evaluation
 - [ ] STEP 15. 최종 성능 / Latency / 비용 Benchmark
-- [ ] STEP 16. README / Architecture / 취업 Portfolio 완성
-
----
-
-## 10. 현재 진행 상태
-
-STEP 0에서는 다음 기반을 구축했습니다.
-
-- Monorepo Directory
-- Python 3.12
-- uv 기반 Virtual Environment / Dependency 관리
-- Ruff
-- mypy
-- pytest
-- Makefile 기반 Quality Gate
-- Project Scope
-- Architecture Overview
-- Data / Artifact Policy
-- Metrics Contract
-- ADR 0001~0007
-
-다음 단계는 **STEP 1 — MVTec AD Dataset / Data Pipeline 구축**입니다.
+- [ ] STEP 16. README / Architecture 최종 정리
 
 ---
 
@@ -333,4 +342,5 @@ STEP 0에서는 다음 기반을 구축했습니다.
 - `docs/architecture/overview.md`
 - `docs/DATA_ARTIFACT_POLICY.md`
 - `docs/benchmarks/METRICS_CONTRACT.md`
+- `docs/data/MVTEC_AD_PIPELINE.md`
 - `docs/adr/`

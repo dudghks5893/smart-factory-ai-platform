@@ -9,7 +9,7 @@
 가능한 경우 이상 위치까지 시각화하는 Industrial Anomaly Detection이다.
 
 MVTec AD를 기반으로 초기 Baseline을 구축해야 하며,
-모델 자체 연구보다 Production AI System 전체를 구현하는 것이 프로젝트의 핵심 목표다.
+모델 자체 연구보다 Production AI System 전체를 단계적으로 구현하는 것이 우선이다.
 
 따라서 초기부터 복잡한 Custom Model을 개발하기보다
 검증된 Anomaly Detection Baseline을 먼저 확보할 필요가 있다.
@@ -38,9 +38,9 @@ PatchCore Implementation
 - Industrial Anomaly Detection 문제와 직접적으로 맞닿아 있다.
 - MVTec AD 기반 Benchmark와 비교하기 용이하다.
 - Pretrained Feature를 활용해 초기 Baseline을 빠르게 확보할 수 있다.
-- Full Supervised Defect Dataset이 없는 제조 환경을 설명하기 좋다.
+- Full Supervised Defect Dataset이 없는 제조 환경을 다루기에 적합하다.
 - 모델 개발에만 프로젝트 전체 시간이 소모되는 것을 방지할 수 있다.
-- Memory Bank, Latency, Artifact Size 등 Production 관점의 평가 포인트를 만들 수 있다.
+- Memory Bank, Latency, Artifact Size 등 Production 관점의 평가 포인트가 존재한다.
 
 ## 4. Alternatives
 
@@ -66,13 +66,13 @@ PatchCore Implementation
 ### 장점
 
 - 초기 End-to-End Pipeline 구축 속도가 빨라진다.
-- 산업용 Anomaly Detection Portfolio Story가 명확해진다.
+- 산업용 Anomaly Detection 요구사항과 잘 맞는다.
 - 모델 교체 전후를 수치로 비교할 수 있다.
 
 ### 단점
 
 - PatchCore Memory Bank가 Serving Resource에 영향을 줄 수 있다.
 - 특정 Dataset에서는 다른 모델이 더 적합할 수 있다.
-- Library 내부 구현을 그대로 사용하는 것만으로는 모델 이해도를 충분히 보여주기 어렵다.
+- Library 내부 구현을 그대로 사용할 경우 내부 동작 이해가 부족해질 수 있다.
 
-따라서 최종 Portfolio에서는 PatchCore의 동작 원리와 Serving 특성을 직접 설명할 수 있어야 한다.
+따라서 구현 과정에서 PatchCore의 동작 원리와 Serving 특성을 별도로 검증하고 기록한다.

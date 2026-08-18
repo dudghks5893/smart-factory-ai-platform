@@ -13,9 +13,9 @@ lint:
 	uv run ruff check .
 
 typecheck:
-	uv run mypy tests
+	uv run mypy ml pipelines tests
 
 test:
-	uv run pytest
+	uv run python -m pytest
 
 check: format-check lint typecheck test

@@ -1,0 +1,12 @@
+dataset:
+  name: mvtec_ad
+  root: data/raw/mvtec_ad
+  category: metal_nut
+
+split:
+  validation_ratio: 0.1
+  random_seed: 42
+
+output:
+  manifest_path: data/interim/manifests/mvtec_ad_metal_nut.csv
+  summary_path: data/interim/manifests/mvtec_ad_metal_nut_summary.json

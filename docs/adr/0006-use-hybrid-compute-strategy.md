@@ -5,15 +5,13 @@
 
 ## 1. Context
 
-개발 PC는 macOS 환경이며,
-Vision AI 실험에서는 GPU가 필요할 수 있다.
+개발 환경은 macOS이며 Vision AI 실험에서는 GPU가 필요할 수 있다.
 
 모든 실험을 GCP GPU에서 실행하면 비용이 증가하고,
-Kaggle만 사용하면 Production Infrastructure 경험과
-재현 가능한 최종 Cloud Benchmark를 보여주기 어렵다.
+Kaggle만 사용하면 Production Infrastructure와 재현 가능한 최종 Cloud Benchmark를
+충분히 검증하기 어렵다.
 
-개발, 실험, Production의 목적이 서로 다르므로
-각 환경의 역할을 분리할 필요가 있다.
+개발, 실험, Production의 목적이 서로 다르므로 각 환경의 역할을 분리할 필요가 있다.
 
 ## 2. Decision
 
@@ -54,14 +52,14 @@ Kaggle Notebook 자체를 Production Code Source로 사용하지 않는다.
 - Rolling Update
 - Rollback
 - Monitoring
-- 최종 Demonstration
+- 최종 시스템 검증
 
 ## 3. Reason
 
 - 무료 또는 저비용 GPU 자원을 초기 실험에 활용할 수 있다.
 - GCP GPU 사용 시간을 최종 검증에 집중할 수 있다.
 - Local 개발 생산성을 유지할 수 있다.
-- Cloud Production 경험을 Portfolio에 포함할 수 있다.
+- Cloud Production 환경을 실제로 검증할 수 있다.
 - 동일한 Source Code를 서로 다른 실행환경에서 검증할 수 있다.
 
 ## 4. Environment Independence 원칙
@@ -94,7 +92,7 @@ gcp_code.py
 
 ### Kaggle / Colab Only
 
-GPU 실험에는 유리하지만 Production Deployment와 Cloud 운영 능력을 충분히 보여주기 어렵다.
+GPU 실험에는 유리하지만 Production Deployment와 Cloud 운영 환경을 충분히 검증하기 어렵다.
 
 ### Local Only
 

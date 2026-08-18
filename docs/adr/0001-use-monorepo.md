@@ -6,13 +6,13 @@
 ## 1. Context
 
 SmartFactory AI Quality Platform은 Vision AI, FastAPI, RAG, Monitoring,
-Infrastructure, Dashboard 등 서로 다른 영역을 하나의 프로젝트에서 구현한다.
+Infrastructure, Dashboard 등 서로 다른 영역을 하나의 시스템에서 구현한다.
 
 초기 단계부터 Repository를 여러 개로 분리하면 각 서비스 간 버전 관리,
 공통 설정, 테스트, CI/CD 구성의 복잡도가 불필요하게 증가할 수 있다.
 
-또한 이 프로젝트는 실제 대규모 조직 운영보다 하나의 Production AI 시스템을
-End-to-End로 설계하고 설명하는 취업 포트폴리오 성격이 강하다.
+현재 프로젝트 규모에서는 전체 시스템 변경을 하나의 Repository에서 추적하면서
+내부 영역의 책임을 명확히 분리하는 방식이 적합하다.
 
 ## 2. Decision
 
@@ -40,7 +40,7 @@ Repository는 하나로 유지하되 각 디렉터리의 책임과 의존성은 
 - 전체 시스템의 변경 이력을 하나의 Git History로 관리할 수 있다.
 - API, Model, Infrastructure 변경을 하나의 Pull Request에서 함께 검토할 수 있다.
 - 공통 CI/CD와 품질 기준을 적용하기 쉽다.
-- 포트폴리오 검토자가 전체 시스템을 하나의 Repository에서 이해할 수 있다.
+- 서비스 간 호환 변경을 한 번에 추적하기 쉽다.
 - 초기 개발 단계에서 불필요한 Repository 운영 복잡도를 줄일 수 있다.
 
 ## 4. Alternatives
@@ -54,7 +54,7 @@ Repository는 하나로 유지하되 각 디렉터리의 책임과 의존성은 
 - Repository 간 버전 동기화 필요
 - CI/CD 관리 포인트 증가
 - 공통 개발환경 관리 복잡도 증가
-- 전체 Architecture를 파악하기 어려워질 수 있음
+- 서비스 간 변경 추적 복잡도 증가
 
 ## 5. Consequences
 

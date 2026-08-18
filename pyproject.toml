@@ -2,13 +2,19 @@
 name = "smart-factory-ai-platform"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pillow>=12.3.0",
+    "pyyaml>=6.0.3",
+    "torch==2.13.0",
+    "torchvision==0.28.0",
+]
 
 [dependency-groups]
 dev = [
     "mypy>=2.3.1",
     "pytest>=9.1.1",
     "ruff>=0.16.3",
+    "types-pyyaml>=6.0.12.20260815",
 ]
 
 [tool.pytest.ini_options]
