@@ -8,11 +8,13 @@ from ml.datasets.manifest import ManifestRecord
 from ml.datasets.manifest_validation import validate_manifest_records
 
 
+# ADD 2026-08-18: 테스트 fixture 파일을 생성한다.
 def _write_png(path: Path, size: tuple[int, int] = (8, 8)) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", size).save(path)
 
 
+# ADD 2026-08-18: Manifest validation 테스트용 정상 record를 생성한다.
 def _valid_record(dataset_root: Path) -> ManifestRecord:
     image_path = dataset_root / "metal_nut/train/good/000.png"
     _write_png(image_path)
@@ -31,6 +33,7 @@ def _valid_record(dataset_root: Path) -> ManifestRecord:
     )
 
 
+# ADD 2026-08-18: manifest integrity accepts valid record 테스트 시나리오를 검증한다.
 def test_manifest_integrity_accepts_valid_record(tmp_path: Path) -> None:
     dataset_root = tmp_path / "mvtec_ad"
     record = _valid_record(dataset_root)
@@ -41,6 +44,7 @@ def test_manifest_integrity_accepts_valid_record(tmp_path: Path) -> None:
     assert report.record_count == 1
 
 
+# ADD 2026-08-18: manifest integrity detects duplicate sample id 테스트 시나리오를 검증한다.
 def test_manifest_integrity_detects_duplicate_sample_id(tmp_path: Path) -> None:
     dataset_root = tmp_path / "mvtec_ad"
     record = _valid_record(dataset_root)

@@ -13,7 +13,7 @@ lint:
 	uv run ruff check .
 
 typecheck:
-	uv run mypy ml pipelines tests
+	uv run mypy ml pipelines shared tests
 
 test:
 	uv run python -m pytest

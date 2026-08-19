@@ -28,6 +28,7 @@ class DatasetValidationReport:
     unexpected_masks: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
+    # ADD 2026-08-18: Dataset validation issue가 없는지 반환한다.
     @property
     def is_valid(self) -> bool:
         return not (
@@ -35,6 +36,7 @@ class DatasetValidationReport:
         )
 
 
+# ADD 2026-08-18: Directory의 PNG 파일을 결정적 순서로 조회한다.
 def _list_png_files(directory: Path) -> list[Path]:
     if not directory.is_dir():
         return []
@@ -45,6 +47,7 @@ def _list_png_files(directory: Path) -> list[Path]:
     )
 
 
+# ADD 2026-08-18: Image 파일의 decode 가능 여부와 크기를 검증한다.
 def _validate_image(path: Path) -> str | None:
     try:
         with Image.open(path) as image:
@@ -60,6 +63,7 @@ def _validate_image(path: Path) -> str | None:
     return None
 
 
+# ADD 2026-08-18: Dataset root 기준 상대 경로를 계산한다.
 def _relative(path: Path, dataset_root: Path) -> str:
     try:
         return str(path.relative_to(dataset_root))
@@ -67,6 +71,7 @@ def _relative(path: Path, dataset_root: Path) -> str:
         return str(path)
 
 
+# ADD 2026-08-18: Validate one MVTec AD category without modifying the raw dataset.
 def validate_mvtec_category(dataset_root: Path, category: str) -> DatasetValidationReport:
     """Validate one MVTec AD category without modifying the raw dataset."""
     if category not in MVTEC_AD_CATEGORIES:
@@ -92,6 +97,7 @@ def validate_mvtec_category(dataset_root: Path, category: str) -> DatasetValidat
         if not directory.is_dir():
             report.errors.append(f"missing directory: {_relative(directory, dataset_root)}")
 
+    # 필수 directory가 없으면 후속 filesystem traversal을 수행하지 않는다.
     if report.errors:
         return report
 
@@ -105,6 +111,7 @@ def validate_mvtec_category(dataset_root: Path, category: str) -> DatasetValidat
             "unexpected train defect directories: " + ", ".join(unexpected_train_directories)
         )
 
+    # Official train/test image와 anomaly/ground-truth directory를 수집한다.
     train_good_images = _list_png_files(train_good_root)
     test_good_images = _list_png_files(test_good_root)
 
@@ -135,6 +142,7 @@ def validate_mvtec_category(dataset_root: Path, category: str) -> DatasetValidat
     anomaly_images: list[Path] = []
     expected_masks: set[Path] = set()
 
+    # Anomaly image마다 기대되는 ground-truth mask path를 구성한다.
     for defect_directory in anomaly_directories:
         defect_type = defect_directory.name
         defect_images = _list_png_files(defect_directory)
@@ -155,6 +163,7 @@ def validate_mvtec_category(dataset_root: Path, category: str) -> DatasetValidat
     report.test_anomaly_count = len(anomaly_images)
     report.mask_count = len(actual_masks)
 
+    # 기대 mask와 실제 mask의 양방향 차이를 기록한다.
     report.missing_masks = sorted(
         _relative(path, dataset_root) for path in expected_masks - actual_masks
     )
@@ -162,6 +171,7 @@ def validate_mvtec_category(dataset_root: Path, category: str) -> DatasetValidat
         _relative(path, dataset_root) for path in actual_masks - expected_masks
     )
 
+    # 구조 검증 후 모든 image/mask 파일의 decode 가능 여부를 확인한다.
     files_to_validate = [
         *train_good_images,
         *test_good_images,

@@ -7,6 +7,7 @@ from ml.datasets.constants import MVTEC_AD_CATEGORIES
 from ml.datasets.validation import DatasetValidationReport, validate_mvtec_category
 
 
+# ADD 2026-08-18: CLI 입력 인자를 정의하고 파싱한다.
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate an MVTec AD category.")
     parser.add_argument(
@@ -24,6 +25,7 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+# ADD 2026-08-18: Dataset validation report를 CLI 형식으로 출력한다.
 def _print_report(report: DatasetValidationReport) -> None:
     print(f"Dataset validation: {'PASS' if report.is_valid else 'FAIL'}")
     print(f"Category: {report.category}")
@@ -52,7 +54,9 @@ def _print_report(report: DatasetValidationReport) -> None:
             print(f"  - {issue}")
 
 
+# ADD 2026-08-18: CLI 작업 흐름을 조정하고 종료 코드를 반환한다.
 def main() -> int:
+    # 지정한 MVTec category를 검증하고 CLI report를 출력한다.
     args = _parse_args()
     report = validate_mvtec_category(args.dataset_root, args.category)
     _print_report(report)

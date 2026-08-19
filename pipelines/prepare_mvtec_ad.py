@@ -40,6 +40,7 @@ class PreparationSummary:
     image_size_counts: dict[str, int]
 
 
+# ADD 2026-08-18: YAML config root를 mapping으로 로드한다.
 def _load_yaml(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as file:
         raw = yaml.safe_load(file)
@@ -49,6 +50,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return raw
 
 
+# ADD 2026-08-18: Load and validate the MVTec AD preparation configuration.
 def load_preparation_config(path: Path) -> PreparationConfig:
     """Load and validate the MVTec AD preparation configuration."""
     raw = _load_yaml(path)
@@ -70,6 +72,7 @@ def load_preparation_config(path: Path) -> PreparationConfig:
         raise ValueError(f"Invalid preparation config: {path}") from exc
 
 
+# ADD 2026-08-18: Manifest record에서 dataset preparation summary를 생성한다.
 def _build_summary(
     records: list[ManifestRecord],
     config: PreparationConfig,
@@ -92,6 +95,7 @@ def _build_summary(
     )
 
 
+# ADD 2026-08-18: Dataset preparation summary를 JSON artifact로 저장한다.
 def _write_summary(summary: PreparationSummary, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
@@ -100,8 +104,10 @@ def _write_summary(summary: PreparationSummary, output_path: Path) -> None:
     )
 
 
+# ADD 2026-08-18: Validate raw data and create manifest/summary artifacts.
 def prepare_mvtec_dataset(config: PreparationConfig) -> PreparationSummary:
     """Validate raw data and create manifest/summary artifacts."""
+    # Manifest 생성 전에 raw MVTec category 구조와 image/mask integrity를 검증한다.
     validation_report = validate_mvtec_category(
         config.dataset_root,
         config.category,
@@ -115,6 +121,7 @@ def prepare_mvtec_dataset(config: PreparationConfig) -> PreparationSummary:
         ]
         raise ValueError("Dataset validation failed:\n" + "\n".join(issues))
 
+    # Official test를 보존하면서 train good만 deterministic train/validation으로 분할한다.
     records = build_mvtec_manifest(
         dataset_root=config.dataset_root,
         category=config.category,
@@ -122,12 +129,14 @@ def prepare_mvtec_dataset(config: PreparationConfig) -> PreparationSummary:
         random_seed=config.random_seed,
     )
 
+    # Artifact 저장 전에 record semantics, 중복, path와 dimension을 재검증한다.
     manifest_report = validate_manifest_records(records, config.dataset_root)
     if not manifest_report.is_valid:
         raise ValueError(
             "Manifest integrity validation failed:\n" + "\n".join(manifest_report.errors)
         )
 
+    # 검증된 manifest와 재현성 summary만 interim artifact로 저장한다.
     write_manifest_csv(records, config.manifest_path)
 
     summary = _build_summary(records, config)
@@ -135,6 +144,7 @@ def prepare_mvtec_dataset(config: PreparationConfig) -> PreparationSummary:
     return summary
 
 
+# ADD 2026-08-18: CLI 입력 인자를 정의하고 파싱한다.
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Prepare an MVTec AD category for downstream ML stages."
@@ -148,7 +158,9 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+# ADD 2026-08-18: CLI 작업 흐름을 조정하고 종료 코드를 반환한다.
 def main() -> int:
+    # Dataset preparation config를 로드하고 전체 pipeline을 실행한다.
     args = _parse_args()
     config = load_preparation_config(args.config)
     summary = prepare_mvtec_dataset(config)

@@ -9,17 +9,20 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from torchvision.transforms.functional import pil_to_tensor  # type: ignore[import-untyped]
 
+from ml.datasets.constants import MVTEC_SPLITS
 from ml.datasets.manifest import ManifestRecord, read_manifest_csv
 
 type SampleValue = Tensor | int | str
 type MVTecSample = dict[str, SampleValue]
 
 
+# ADD 2026-08-18: PIL image를 [0, 1] float RGB tensor로 변환한다.
 def _image_to_float_tensor(image: Image.Image) -> Tensor:
     tensor = cast(Tensor, pil_to_tensor(image.convert("RGB")))
     return tensor.to(dtype=torch.float32).div_(255.0)
 
 
+# ADD 2026-08-18: PIL mask를 binary float tensor로 변환한다.
 def _mask_to_float_tensor(mask: Image.Image) -> Tensor:
     tensor = cast(Tensor, pil_to_tensor(mask.convert("L")))
     return tensor.gt(0).to(dtype=torch.float32)
@@ -28,6 +31,8 @@ def _mask_to_float_tensor(mask: Image.Image) -> Tensor:
 class MVTecManifestDataset(Dataset[MVTecSample]):
     """Load MVTec AD samples from a generated manifest without copying raw images."""
 
+    # ADD 2026-08-18: Manifest split을 검증하고 해당 record만 lazy dataset으로 초기화한다.
+    # MODIFY 2026-08-19: split literal 반복 → 공통 MVTec split constant를 사용하도록 정리했다.
     def __init__(
         self,
         *,
@@ -35,7 +40,7 @@ class MVTecManifestDataset(Dataset[MVTecSample]):
         manifest_path: Path,
         split: str,
     ) -> None:
-        if split not in {"train", "validation", "test"}:
+        if split not in MVTEC_SPLITS:
             raise ValueError(f"Unsupported split: {split}")
 
         self.dataset_root = dataset_root
@@ -47,16 +52,20 @@ class MVTecManifestDataset(Dataset[MVTecSample]):
         if not self.records:
             raise ValueError(f"No manifest records found for split: {split}")
 
+    # ADD 2026-08-18: 선택된 manifest record 수를 반환한다.
     def __len__(self) -> int:
         return len(self.records)
 
+    # ADD 2026-08-18: Manifest record의 image와 mask 및 metadata를 로드한다.
     def __getitem__(self, index: int) -> MVTecSample:
         record = self.records[index]
         image_path = self.dataset_root / record.image_path
 
+        # Raw image를 열어 RGB [0, 1] float tensor로 변환한다.
         with Image.open(image_path) as image:
             image_tensor = _image_to_float_tensor(image)
 
+        # Normal/anomaly label 규칙에 맞는 mask tensor를 로드한다.
         mask_tensor = self._load_mask(record)
 
         return {
@@ -69,6 +78,7 @@ class MVTecManifestDataset(Dataset[MVTecSample]):
             "image_path": record.image_path,
         }
 
+    # ADD 2026-08-18: 정상 sample의 zero mask 또는 anomaly mask를 로드한다.
     def _load_mask(self, record: ManifestRecord) -> Tensor:
         if record.label == 0:
             return torch.zeros(

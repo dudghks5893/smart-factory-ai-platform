@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 from ml.datasets.dataset import MVTecManifestDataset
 
 
+# ADD 2026-08-18: CLI 입력 인자를 정의하고 파싱한다.
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Smoke test the MVTec DataLoader.")
     parser.add_argument(
@@ -30,7 +31,9 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+# ADD 2026-08-18: CLI 작업 흐름을 조정하고 종료 코드를 반환한다.
 def main() -> int:
+    # Manifest split과 DataLoader를 구성해 첫 batch를 lazy loading한다.
     args = _parse_args()
     dataset = MVTecManifestDataset(
         dataset_root=args.dataset_root,
@@ -39,6 +42,7 @@ def main() -> int:
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 
+    # Collation 결과의 image/mask tensor 계약을 확인한다.
     batch = next(iter(loader))
     images = batch["image"]
     masks = batch["mask"]

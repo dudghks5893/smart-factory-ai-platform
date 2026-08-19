@@ -7,11 +7,13 @@ from PIL import Image
 from ml.datasets.manifest import build_mvtec_manifest
 
 
+# ADD 2026-08-18: 테스트 fixture 파일을 생성한다.
 def _write_png(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (12, 8)).save(path)
 
 
+# ADD 2026-08-18: 테스트에 필요한 dataset fixture를 구성한다.
 def _build_dataset(root: Path) -> Path:
     dataset_root = root / "mvtec_ad"
 
@@ -25,6 +27,7 @@ def _build_dataset(root: Path) -> Path:
     return dataset_root
 
 
+# ADD 2026-08-18: manifest preserves source split and internal split 테스트 시나리오를 검증한다.
 def test_manifest_preserves_source_split_and_internal_split(tmp_path: Path) -> None:
     dataset_root = _build_dataset(tmp_path)
 
@@ -48,6 +51,7 @@ def test_manifest_preserves_source_split_and_internal_split(tmp_path: Path) -> N
     assert all(record.source_split == "test" for record in test_records)
 
 
+# ADD 2026-08-18: manifest records anomaly mask and metadata 테스트 시나리오를 검증한다.
 def test_manifest_records_anomaly_mask_and_metadata(tmp_path: Path) -> None:
     dataset_root = _build_dataset(tmp_path)
 

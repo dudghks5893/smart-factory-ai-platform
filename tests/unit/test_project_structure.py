@@ -18,6 +18,7 @@ REQUIRED_DIRECTORIES = (
 )
 
 
+# ADD 2026-08-18: required project directories exist 테스트 시나리오를 검증한다.
 def test_required_project_directories_exist() -> None:
     project_root = Path(__file__).resolve().parents[2]
 

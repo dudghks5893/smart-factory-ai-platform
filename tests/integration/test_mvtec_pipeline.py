@@ -9,11 +9,13 @@ from PIL import Image
 from pipelines.prepare_mvtec_ad import PreparationConfig, prepare_mvtec_dataset
 
 
+# ADD 2026-08-18: 테스트 fixture 파일을 생성한다.
 def _write_png(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (10, 10)).save(path)
 
 
+# ADD 2026-08-18: 테스트에 필요한 dataset fixture를 구성한다.
 def _build_valid_dataset(root: Path) -> Path:
     dataset_root = root / "mvtec_ad"
 
@@ -27,7 +29,9 @@ def _build_valid_dataset(root: Path) -> Path:
     return dataset_root
 
 
+# ADD 2026-08-18: prepare pipeline generates manifest and summary 테스트 시나리오를 검증한다.
 def test_prepare_pipeline_generates_manifest_and_summary(tmp_path: Path) -> None:
+    # Valid MVTec fixture와 분리된 output 경로를 준비한다.
     dataset_root = _build_valid_dataset(tmp_path)
     manifest_path = tmp_path / "output/manifest.csv"
     summary_path = tmp_path / "output/summary.json"
@@ -41,6 +45,7 @@ def test_prepare_pipeline_generates_manifest_and_summary(tmp_path: Path) -> None
         summary_path=summary_path,
     )
 
+    # Dataset validation부터 manifest/summary 저장까지 전체 pipeline을 실행한다.
     summary = prepare_mvtec_dataset(config)
 
     assert summary.train_count == 8

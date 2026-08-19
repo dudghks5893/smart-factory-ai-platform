@@ -5,11 +5,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from ml.datasets.constants import GOOD_DIR_NAME
+from ml.datasets.constants import GOOD_DIR_NAME, MVTEC_SOURCE_SPLITS, MVTEC_SPLITS
 from ml.datasets.manifest import ManifestRecord
-
-_ALLOWED_SPLITS = {"train", "validation", "test"}
-_ALLOWED_SOURCE_SPLITS = {"train", "test"}
 
 
 @dataclass
@@ -19,11 +16,13 @@ class ManifestValidationReport:
     record_count: int
     errors: list[str] = field(default_factory=list)
 
+    # ADD 2026-08-18: Manifest integrity error가 없는지 반환한다.
     @property
     def is_valid(self) -> bool:
         return not self.errors
 
 
+# ADD 2026-08-18: Manifest record의 image와 mask 경로 및 크기를 검증한다.
 def _validate_record_paths(
     record: ManifestRecord,
     dataset_root: Path,
@@ -61,11 +60,13 @@ def _validate_record_paths(
         errors.append(f"normal sample unexpectedly has mask: {record.sample_id}")
 
 
+# ADD 2026-08-18: Manifest record의 split과 label 의미 규칙을 검증한다.
+# MODIFY 2026-08-19: local split set → 공통 MVTec split constant로 일관성을 맞췄다.
 def _validate_record_semantics(record: ManifestRecord, errors: list[str]) -> None:
-    if record.split not in _ALLOWED_SPLITS:
+    if record.split not in MVTEC_SPLITS:
         errors.append(f"invalid split: {record.sample_id} -> {record.split}")
 
-    if record.source_split not in _ALLOWED_SOURCE_SPLITS:
+    if record.source_split not in MVTEC_SOURCE_SPLITS:
         errors.append(f"invalid source_split: {record.sample_id} -> {record.source_split}")
 
     if record.source_split == "train" and record.split not in {"train", "validation"}:
@@ -86,6 +87,7 @@ def _validate_record_semantics(record: ManifestRecord, errors: list[str]) -> Non
         )
 
 
+# ADD 2026-08-18: Validate sample uniqueness, split semantics, paths, masks, and dimensions.
 def validate_manifest_records(
     records: list[ManifestRecord],
     dataset_root: Path,
@@ -95,6 +97,7 @@ def validate_manifest_records(
     seen_sample_ids: set[str] = set()
     seen_image_paths: set[str] = set()
 
+    # 각 record의 uniqueness, split semantics, image/mask integrity를 함께 검증한다.
     for record in records:
         if record.sample_id in seen_sample_ids:
             report.errors.append(f"duplicate sample_id: {record.sample_id}")

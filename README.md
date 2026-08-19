@@ -4,7 +4,7 @@
 MLOps, Monitoring, Kubernetes 운영, 제조 매뉴얼 기반 RAG까지 연결하는
 Production AI 시스템 프로젝트입니다.
 
-> 현재 상태: **STEP 1 — Dataset / Data Pipeline 완료**
+> 현재 상태: **STEP 2 — Vision AI Baseline 진행 중**
 
 ---
 
@@ -230,6 +230,9 @@ DataLoader
 
 Dataset Pipeline 세부 내용은 `docs/data/MVTEC_AD_PIPELINE.md`에서 관리합니다.
 
+PatchCore 전처리, memory bank artifact 및 raw prediction pipeline은
+`docs/vision/PATCHCORE_BASELINE.md`에서 관리합니다.
+
 ---
 
 ## 7. 평가 지표
@@ -318,7 +321,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 
 - [x] STEP 0. 프로젝트 기준 및 Repository 구축
 - [x] STEP 1. Dataset / Data Pipeline
-- [ ] STEP 2. Vision AI Baseline
+- [ ] STEP 2. Vision AI Baseline (Local Pipeline / Artifact 구현 완료, CUDA Baseline 예정)
 - [ ] STEP 3. 모델 평가 및 Benchmark
 - [ ] STEP 4. FastAPI Model Serving
 - [ ] STEP 5. PostgreSQL 검사 이력
@@ -338,6 +341,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 
 ## 11. 상세 문서
 
+- `docs/CODING_CONVENTIONS.md`
 - `docs/PROJECT_SCOPE.md`
 - `docs/architecture/overview.md`
 - `docs/DATA_ARTIFACT_POLICY.md`

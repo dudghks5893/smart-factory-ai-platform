@@ -31,15 +31,18 @@ class ManifestRecord:
 MANIFEST_FIELDS = tuple(ManifestRecord.__dataclass_fields__)
 
 
+# ADD 2026-08-18: Image 파일의 width와 height를 읽는다.
 def _image_size(path: Path) -> tuple[int, int]:
     with Image.open(path) as image:
         return image.size
 
 
+# ADD 2026-08-18: Dataset root 기준 상대 경로를 계산한다.
 def _relative(path: Path, dataset_root: Path) -> str:
     return str(path.relative_to(dataset_root))
 
 
+# ADD 2026-08-18: Image와 split metadata로 manifest record를 구성한다.
 def _build_record(
     *,
     dataset_root: Path,
@@ -71,6 +74,7 @@ def _build_record(
     )
 
 
+# ADD 2026-08-18: Build a manifest while preserving the official MVTec AD test split.
 def build_mvtec_manifest(
     dataset_root: Path,
     category: str,
@@ -84,6 +88,8 @@ def build_mvtec_manifest(
     ground_truth_root = category_root / "ground_truth"
 
     train_good_images = sorted(train_good_root.glob("*.png"))
+
+    # Official train good만 deterministic train/validation split으로 나눈다.
     train_images, validation_images = deterministic_train_validation_split(
         train_good_images,
         validation_ratio=validation_ratio,
@@ -120,6 +126,7 @@ def build_mvtec_manifest(
             )
         )
 
+    # Official test는 재분할하지 않고 good/anomaly record와 mask path를 기록한다.
     for defect_directory in sorted(path for path in test_root.iterdir() if path.is_dir()):
         defect_type = defect_directory.name
         label = 0 if defect_type == GOOD_DIR_NAME else 1
@@ -145,8 +152,10 @@ def build_mvtec_manifest(
     return records
 
 
+# ADD 2026-08-18: Write manifest records to CSV in a stable field order.
 def write_manifest_csv(records: list[ManifestRecord], output_path: Path) -> None:
     """Write manifest records to CSV in a stable field order."""
+    # 동일 record 순서에서 byte-stable CSV가 생성되도록 field order를 고정한다.
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with output_path.open("w", encoding="utf-8", newline="") as file:
@@ -156,6 +165,7 @@ def write_manifest_csv(records: list[ManifestRecord], output_path: Path) -> None
             writer.writerow(asdict(record))
 
 
+# ADD 2026-08-18: Manifest CSV의 필수 field 값을 검증해 반환한다.
 def _required_csv_value(row: dict[str, str | None], field: str) -> str:
     value = row.get(field)
     if value is None:
@@ -163,10 +173,12 @@ def _required_csv_value(row: dict[str, str | None], field: str) -> str:
     return value
 
 
+# ADD 2026-08-18: Read manifest records from CSV with explicit type conversion.
 def read_manifest_csv(manifest_path: Path) -> list[ManifestRecord]:
     """Read manifest records from CSV with explicit type conversion."""
     records: list[ManifestRecord] = []
 
+    # Downstream split 계약을 보호하기 위해 schema를 먼저 정확히 대조한다.
     with manifest_path.open(encoding="utf-8", newline="") as file:
         reader = csv.DictReader(file)
         if reader.fieldnames != list(MANIFEST_FIELDS):
@@ -175,6 +187,7 @@ def read_manifest_csv(manifest_path: Path) -> list[ManifestRecord]:
                 f"expected: {list(MANIFEST_FIELDS)}"
             )
 
+        # CSV scalar를 typed ManifestRecord로 명시적으로 변환한다.
         for row in reader:
             records.append(
                 ManifestRecord(

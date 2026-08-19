@@ -7,6 +7,7 @@ import pytest
 from ml.datasets.splits import deterministic_train_validation_split
 
 
+# ADD 2026-08-18: split is deterministic for same seed 테스트 시나리오를 검증한다.
 def test_split_is_deterministic_for_same_seed() -> None:
     images = [Path(f"{index:03d}.png") for index in range(20)]
 
@@ -25,6 +26,7 @@ def test_split_is_deterministic_for_same_seed() -> None:
     assert first_validation == second_validation
 
 
+# ADD 2026-08-18: split is disjoint and preserves all samples 테스트 시나리오를 검증한다.
 def test_split_is_disjoint_and_preserves_all_samples() -> None:
     images = [Path(f"{index:03d}.png") for index in range(20)]
 
@@ -40,6 +42,7 @@ def test_split_is_disjoint_and_preserves_all_samples() -> None:
     assert set(train) | set(validation) == set(images)
 
 
+# ADD 2026-08-18: split rejects invalid validation ratio 테스트 시나리오를 검증한다.
 def test_split_rejects_invalid_validation_ratio() -> None:
     images = [Path("000.png"), Path("001.png")]
 
