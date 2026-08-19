@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
@@ -13,29 +13,17 @@ from torch.utils.data import DataLoader
 
 from ml.datasets.constants import MVTEC_SPLITS
 from ml.datasets.dataset import MVTecManifestDataset
+from ml.evaluation.predictions import (
+    ANOMALY_MAPS_FILENAME,
+    PREDICTIONS_FILENAME,
+    RawPredictionRecord,
+)
 from ml.training.batches import require_batch_tensor
 from ml.training.config import PatchCoreBaselineConfig, load_patchcore_config
 from ml.training.device import SUPPORTED_DEVICES, resolve_device
 from ml.training.patchcore import PatchCoreAdapter, read_artifact_metadata
 from ml.training.preprocessing import PatchCorePreprocessor
 from shared.hashing import sha256_file
-
-PREDICTIONS_FILENAME = "predictions.jsonl"
-ANOMALY_MAPS_FILENAME = "anomaly_maps.pt"
-
-
-@dataclass(frozen=True)
-class RawPredictionRecord:
-    """Threshold-free prediction metadata for one manifest sample."""
-
-    sample_id: str
-    category: str
-    defect_type: str
-    label: int
-    split: str
-    raw_anomaly_score: float
-    anomaly_map_key: str
-    anomaly_map_file: str = ANOMALY_MAPS_FILENAME
 
 
 @dataclass(frozen=True)
@@ -50,7 +38,7 @@ class PredictionOutputSummary:
 
 
 # ADD 2026-08-19: Persist raw anomaly scores and lossless anomaly maps for a manifest split.
-# MODIFY 2026-08-19: 모델 선복원 → artifact와 manifest를 검증한 뒤 모델을 복원한다.
+# MODIFY 2026-08-19: Pipeline-local raw schema → evaluation prediction contract로 통합했다.
 def predict_patchcore(
     *,
     config: PatchCoreBaselineConfig,
@@ -138,7 +126,7 @@ def predict_patchcore(
     output_dir.mkdir(parents=True, exist_ok=False)
     predictions_path = output_dir / PREDICTIONS_FILENAME
     predictions_path.write_text(
-        "".join(json.dumps(asdict(record), ensure_ascii=False) + "\n" for record in records),
+        "".join(json.dumps(record.to_json_dict(), ensure_ascii=False) + "\n" for record in records),
         encoding="utf-8",
     )
     anomaly_maps_path = output_dir / ANOMALY_MAPS_FILENAME
