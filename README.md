@@ -233,6 +233,22 @@ Dataset Pipeline 세부 내용은 `docs/data/MVTEC_AD_PIPELINE.md`에서 관리�
 PatchCore 전처리, memory bank artifact 및 raw prediction pipeline은
 `docs/vision/PATCHCORE_BASELINE.md`에서 관리합니다.
 
+STEP 3 PatchCore evaluation과 Tesla T4 inference benchmark까지 완료했습니다.
+
+| Baseline | Result |
+|---|---:|
+| Image AUROC / F1 | 0.997556 / 0.994595 |
+| Pixel AUROC / F1 | 0.982486 / 0.834279 |
+| Image FP / FN | 0 / 1 |
+| T4 inference p50 / p95 / p99 | 21.634 / 25.775 / 27.113 ms |
+| T4 offline model throughput | 45.114 images/second |
+
+Throughput은 batch size 1에서 disk I/O, artifact restore와 warmup을 제외한 값입니다. 56초의 training
+wall time과 CLI 전체 runtime은 inference latency가 아닙니다. FastAPI HTTP end-to-end latency는 STEP 4
+이후 별도로 측정합니다. 세부 계약과 실측값은
+`docs/benchmarks/PATCHCORE_EVALUATION.md`와
+`docs/benchmarks/PATCHCORE_INFERENCE_BENCHMARK.md`에서 관리합니다.
+
 ---
 
 ## 7. 평가 지표
@@ -321,8 +337,8 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 
 - [x] STEP 0. 프로젝트 기준 및 Repository 구축
 - [x] STEP 1. Dataset / Data Pipeline
-- [ ] STEP 2. Vision AI Baseline (Local Pipeline / Artifact 구현 완료, CUDA Baseline 예정)
-- [ ] STEP 3. 모델 평가 및 Benchmark
+- [x] STEP 2. Vision AI Baseline
+- [x] STEP 3. 모델 평가 및 Benchmark
 - [ ] STEP 4. FastAPI Model Serving
 - [ ] STEP 5. PostgreSQL 검사 이력
 - [ ] STEP 6. MLflow Experiment / Model Registry

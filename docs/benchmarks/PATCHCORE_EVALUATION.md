@@ -136,3 +136,4 @@ Pixel level:
 
 Per-defect image detection은 bent 25/25, color 21/22, flip 23/23, scratch 23/23이며 good false
 positive는 0/22다. 이 결과는 model quality baseline이고 inference latency benchmark와는 별도 계약이다.
+Tesla T4 inference 성능 결과는 `PATCHCORE_INFERENCE_BENCHMARK.md`에서 관리한다.

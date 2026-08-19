@@ -71,5 +71,58 @@ overwrite하지 않는다.
 `benchmark.json`은 schema version, category/device, Python/PyTorch/torchvision/anomalib version,
 manifest/artifact metadata/model SHA-256, backbone/layers/preprocessing, batch/warmup/measured sample 및 batch
 count, latency definition, percentile method, p50/p95/p99/mean, throughput, `model.pt` 크기, CUDA peak memory와
-생성 시각을 기록한다. 실제 latency 값은 위 pipeline을 대상 runtime에서 실행했을 때만 생성하며 문서에
-추정값을 기입하지 않는다.
+생성 시각을 기록한다. 문서에는 대상 runtime에서 실제로 생성한 결과만 기록하고 추정값을 기입하지 않는다.
+
+## 6. Tesla T4 baseline 결과
+
+STEP 3 benchmark pipeline을 Kaggle Tesla T4에서 실행한 실제 baseline 결과다.
+
+Environment:
+
+| Field | Value |
+| --- | --- |
+| GPU | Tesla T4 |
+| Python | 3.12.13 |
+| torch | 2.13.0+cu130 |
+| torchvision | 0.28.0+cu130 |
+| anomalib | 2.5.1 |
+| CUDA runtime | 13.0 |
+
+Measurement condition:
+
+| Field | Value |
+| --- | ---: |
+| Batch size | 1 |
+| Warmup batch count | 10 |
+| Measured image count | 115 |
+| Measured batch count | 115 |
+| DataLoader workers | 0 |
+| Disk image loading | Excluded |
+| Artifact restore | Excluded |
+| Warmup | Excluded |
+| Threshold | Not applied |
+
+Latency and throughput:
+
+| Metric | Value |
+| --- | ---: |
+| p50 | 21.6343939998751 ms |
+| p95 | 25.774736599942116 ms |
+| p99 | 27.113390779900328 ms |
+| Mean | 22.16589099130824 ms |
+| Total timed | 2.5490774640004474 seconds |
+| Throughput | 45.11436063599353 images/second |
+
+Resource:
+
+| Metric | Value |
+| --- | ---: |
+| CUDA peak allocated | 294.603515625 MiB |
+| CUDA peak reserved | 382.0 MiB |
+| `model.pt` size | 195,058,659 bytes |
+| `model.pt` size | 186.02243328094482 MiB |
+
+45.11436063599353 images/second는 disk image I/O, artifact restore와 warmup을 제외한 offline model
+benchmark throughput이다. PatchCore artifact를 생성한 56초의 training wall time은 inference latency가
+아니며, benchmark CLI 전체 runtime도 위 latency 분포와 다르다. FastAPI serialization, network와 HTTP
+overhead를 포함한 end-to-end serving latency는 STEP 4 이후 별도로 측정한다.
