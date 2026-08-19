@@ -249,6 +249,9 @@ wall time과 CLI 전체 runtime은 inference latency가 아닙니다. FastAPI HT
 `docs/benchmarks/PATCHCORE_EVALUATION.md`와
 `docs/benchmarks/PATCHCORE_INFERENCE_BENCHMARK.md`에서 관리합니다.
 
+FastAPI serving core의 startup lifecycle, endpoint와 concurrency contract는
+`docs/serving/PATCHCORE_API.md`에서 관리합니다.
+
 ---
 
 ## 7. 평가 지표
@@ -339,7 +342,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - [x] STEP 1. Dataset / Data Pipeline
 - [x] STEP 2. Vision AI Baseline
 - [x] STEP 3. 모델 평가 및 Benchmark
-- [ ] STEP 4. FastAPI Model Serving
+- [ ] STEP 4. FastAPI Model Serving (Core 구현 완료, HTTP E2E Benchmark 예정)
 - [ ] STEP 5. PostgreSQL 검사 이력
 - [ ] STEP 6. MLflow Experiment / Model Registry
 - [ ] STEP 7. Docker
@@ -362,5 +365,6 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - `docs/architecture/overview.md`
 - `docs/DATA_ARTIFACT_POLICY.md`
 - `docs/benchmarks/METRICS_CONTRACT.md`
+- `docs/serving/PATCHCORE_API.md`
 - `docs/data/MVTEC_AD_PIPELINE.md`
 - `docs/adr/`

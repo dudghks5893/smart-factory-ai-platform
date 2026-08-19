@@ -198,6 +198,27 @@ def read_threshold_artifact(path: Path) -> ThresholdArtifact:
     return ThresholdArtifact.from_json_dict(raw)
 
 
+# ADD 2026-08-19: Threshold와 실제 model artifact의 manifest/metadata/model provenance를 검증한다.
+def validate_threshold_provenance(
+    thresholds: ThresholdArtifact,
+    *,
+    artifact_metadata: PatchCoreArtifactMetadata,
+    manifest_sha256: str,
+    artifact_metadata_sha256: str,
+    model_sha256: str,
+) -> None:
+    """Reject a threshold artifact that was calibrated for different model inputs."""
+    thresholds.validate()
+    if thresholds.manifest_sha256 != manifest_sha256:
+        raise ValueError("Threshold and manifest SHA-256 do not match.")
+    if thresholds.artifact_metadata != artifact_metadata:
+        raise ValueError("Threshold metadata does not match the PatchCore artifact metadata.")
+    if thresholds.artifact_metadata_sha256 != artifact_metadata_sha256:
+        raise ValueError("Threshold and artifact metadata SHA-256 do not match.")
+    if thresholds.model_sha256 != model_sha256:
+        raise ValueError("Threshold and model.pt SHA-256 do not match.")
+
+
 # ADD 2026-08-19: Threshold artifact를 overwrite 없이 deterministic JSON으로 저장한다.
 def write_threshold_artifact(artifact: ThresholdArtifact, path: Path) -> None:
     """Persist one threshold artifact without overwriting an existing file."""

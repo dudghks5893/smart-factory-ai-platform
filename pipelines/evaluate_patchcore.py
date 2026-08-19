@@ -23,11 +23,14 @@ from ml.evaluation.metrics import (
 )
 from ml.evaluation.pixel import load_aligned_ground_truth_masks
 from ml.evaluation.predictions import load_prediction_bundle
-from ml.evaluation.thresholds import ThresholdArtifact, read_threshold_artifact
+from ml.evaluation.thresholds import (
+    ThresholdArtifact,
+    read_threshold_artifact,
+    validate_threshold_provenance,
+)
 from ml.training.patchcore import (
     METADATA_FILENAME,
     MODEL_FILENAME,
-    PatchCoreArtifactMetadata,
     read_artifact_metadata,
 )
 from ml.training.preprocessing import PatchCorePreprocessor
@@ -50,6 +53,7 @@ class EvaluationSummary:
 
 
 # ADD 2026-08-19: Stored validation threshold로 PatchCore test prediction을 평가한다.
+# MODIFY 2026-08-19: Pipeline-local provenance 검사 → threshold domain validator를 재사용한다.
 def evaluate_patchcore(
     *,
     test_predictions_path: Path,
@@ -74,7 +78,7 @@ def evaluate_patchcore(
     manifest_sha256 = sha256_file(manifest_path)
     artifact_metadata_sha256 = sha256_file(artifact_dir / METADATA_FILENAME)
     model_sha256 = sha256_file(artifact_dir / MODEL_FILENAME)
-    _validate_evaluation_provenance(
+    validate_threshold_provenance(
         thresholds,
         artifact_metadata=artifact_metadata,
         manifest_sha256=manifest_sha256,
@@ -173,25 +177,6 @@ def evaluate_patchcore(
         image_auroc=image_auroc,
         pixel_auroc=pixel_auroc,
     )
-
-
-# ADD 2026-08-19: Threshold artifact와 current manifest/model provenance가 일치하는지 검증한다.
-def _validate_evaluation_provenance(
-    thresholds: ThresholdArtifact,
-    *,
-    artifact_metadata: PatchCoreArtifactMetadata,
-    manifest_sha256: str,
-    artifact_metadata_sha256: str,
-    model_sha256: str,
-) -> None:
-    if thresholds.manifest_sha256 != manifest_sha256:
-        raise ValueError("Threshold artifact and evaluation manifest SHA-256 do not match.")
-    if thresholds.artifact_metadata != artifact_metadata:
-        raise ValueError("Threshold artifact metadata does not match the evaluation artifact.")
-    if thresholds.artifact_metadata_sha256 != artifact_metadata_sha256:
-        raise ValueError("Threshold and artifact metadata SHA-256 do not match.")
-    if thresholds.model_sha256 != model_sha256:
-        raise ValueError("Threshold and model.pt SHA-256 do not match.")
 
 
 # ADD 2026-08-19: Test manifest가 non-empty artifact category record set인지 검증한다.
