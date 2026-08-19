@@ -105,4 +105,34 @@ uv run python -m pipelines.evaluate_patchcore \
   --output-id <evaluation-id>
 ```
 
-실제 AUROC/F1 수치는 Kaggle에서 pipeline을 실행한 뒤 별도 benchmark 결과로 기록한다.
+## 8. Kaggle baseline evaluation 결과
+
+Kaggle Linux GPU runtime에서 동일 artifact, validation calibration과 official test split으로 실행한 결과다.
+Threshold는 test metric을 보기 전에 normal-only validation에서 고정했다.
+
+- Strategy: `max_normal_validation`
+- Comparison operator: `score > threshold`
+- Image threshold: `41.19657897949219`
+- Pixel threshold: `40.1362419128418`
+
+Image level:
+
+| Metric | Value |
+| --- | ---: |
+| AUROC | 0.9975562072336266 |
+| Precision | 1.0 |
+| Recall | 0.989247311827957 |
+| F1 | 0.9945945945945946 |
+| TP / TN / FP / FN | 92 / 22 / 0 / 1 |
+
+Pixel level:
+
+| Metric | Value |
+| --- | ---: |
+| AUROC | 0.9824857431023005 |
+| Precision | 0.8339393856698755 |
+| Recall | 0.8346198271398415 |
+| F1 | 0.8342794676622264 |
+
+Per-defect image detection은 bent 25/25, color 21/22, flip 23/23, scratch 23/23이며 good false
+positive는 0/22다. 이 결과는 model quality baseline이고 inference latency benchmark와는 별도 계약이다.

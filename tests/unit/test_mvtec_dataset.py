@@ -105,6 +105,23 @@ def test_dataset_loads_anomaly_mask(tmp_path: Path) -> None:
     assert torch.all(mask == 1)
 
 
+# ADD 2026-08-19: Image-only consumer가 anomaly mask disk I/O를 생략하는지 검증한다.
+def test_dataset_can_skip_mask_loading(tmp_path: Path) -> None:
+    dataset_root, manifest_path = _build_manifest(tmp_path)
+    (dataset_root / "metal_nut/ground_truth/bent/000_mask.png").unlink()
+
+    dataset = MVTecManifestDataset(
+        dataset_root=dataset_root,
+        manifest_path=manifest_path,
+        split="test",
+        load_masks=False,
+    )
+    sample = dataset[0]
+
+    assert isinstance(sample["image"], torch.Tensor)
+    assert "mask" not in sample
+
+
 # ADD 2026-08-18: dataloader collates manifest samples 테스트 시나리오를 검증한다.
 def test_dataloader_collates_manifest_samples(tmp_path: Path) -> None:
     dataset_root, manifest_path = _build_manifest(tmp_path)

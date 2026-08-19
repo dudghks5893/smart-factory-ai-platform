@@ -32,19 +32,21 @@ class MVTecManifestDataset(Dataset[MVTecSample]):
     """Load MVTec AD samples from a generated manifest without copying raw images."""
 
     # ADD 2026-08-18: Manifest split을 검증하고 해당 record만 lazy dataset으로 초기화한다.
-    # MODIFY 2026-08-19: split literal 반복 → 공통 MVTec split constant를 사용하도록 정리했다.
+    # MODIFY 2026-08-19: 공통 split 사용 및 image-only consumer용 mask loading 선택을 지원한다.
     def __init__(
         self,
         *,
         dataset_root: Path,
         manifest_path: Path,
         split: str,
+        load_masks: bool = True,
     ) -> None:
         if split not in MVTEC_SPLITS:
             raise ValueError(f"Unsupported split: {split}")
 
         self.dataset_root = dataset_root
         self.split = split
+        self.load_masks = load_masks
         self.records = [
             record for record in read_manifest_csv(manifest_path) if record.split == split
         ]
@@ -57,6 +59,7 @@ class MVTecManifestDataset(Dataset[MVTecSample]):
         return len(self.records)
 
     # ADD 2026-08-18: Manifest record의 image와 mask 및 metadata를 로드한다.
+    # MODIFY 2026-08-19: Benchmark에서 불필요한 ground-truth mask I/O를 생략할 수 있게 했다.
     def __getitem__(self, index: int) -> MVTecSample:
         record = self.records[index]
         image_path = self.dataset_root / record.image_path
@@ -65,18 +68,18 @@ class MVTecManifestDataset(Dataset[MVTecSample]):
         with Image.open(image_path) as image:
             image_tensor = _image_to_float_tensor(image)
 
-        # Normal/anomaly label 규칙에 맞는 mask tensor를 로드한다.
-        mask_tensor = self._load_mask(record)
-
-        return {
+        sample: MVTecSample = {
             "image": image_tensor,
-            "mask": mask_tensor,
             "label": record.label,
             "sample_id": record.sample_id,
             "category": record.category,
             "defect_type": record.defect_type,
             "image_path": record.image_path,
         }
+        if self.load_masks:
+            # Pixel evaluation consumer에만 normal/anomaly 규칙에 맞는 mask tensor를 로드한다.
+            sample["mask"] = self._load_mask(record)
+        return sample
 
     # ADD 2026-08-18: 정상 sample의 zero mask 또는 anomaly mask를 로드한다.
     def _load_mask(self, record: ManifestRecord) -> Tensor:
