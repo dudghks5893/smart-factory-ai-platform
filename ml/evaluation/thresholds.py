@@ -11,6 +11,7 @@ from typing import Any
 from ml.evaluation.metrics import COMPARISON_OPERATOR
 from ml.evaluation.predictions import PredictionBundle
 from ml.training.patchcore import PatchCoreArtifactMetadata
+from shared.hashing import is_sha256_digest
 
 THRESHOLD_SCHEMA_VERSION = 1
 THRESHOLD_STRATEGY = "max_normal_validation"
@@ -263,10 +264,7 @@ def _required_float(value: object, field: str) -> float:
 
 
 # ADD 2026-08-19: Provenance field가 SHA-256 hex digest인지 검증한다.
+# MODIFY 2026-08-20: Local hex parsing → shared SHA-256 validator 재사용으로 변경한다.
 def _validate_sha256(value: str, field: str) -> None:
-    if len(value) != 64:
+    if not is_sha256_digest(value):
         raise ValueError(f"Threshold {field} must be a SHA-256 hex digest.")
-    try:
-        int(value, 16)
-    except ValueError as exc:
-        raise ValueError(f"Threshold {field} must be a SHA-256 hex digest.") from exc

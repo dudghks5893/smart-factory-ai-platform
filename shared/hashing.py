@@ -15,3 +15,15 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+# ADD 2026-08-20: 문자열이 SHA-256 hexadecimal digest 형식인지 반환한다.
+def is_sha256_digest(value: str) -> bool:
+    """Return whether a string is exactly one SHA-256 hexadecimal digest."""
+    if len(value) != 64:
+        return False
+    try:
+        int(value, 16)
+    except ValueError:
+        return False
+    return True

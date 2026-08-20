@@ -13,13 +13,19 @@ from typing import Any
 import torch
 from torch import Tensor
 
+from shared.benchmarking import (
+    LINEAR_PERCENTILE_METHOD,
+    summarize_latency_distribution,
+)
+from shared.hashing import is_sha256_digest
+
 BENCHMARK_SCHEMA_VERSION = 1
 BENCHMARK_NAME = "patchcore_inference"
 LATENCY_DEFINITION = (
     "after image batch loading: preprocessing -> device transfer -> PatchCore inference "
     "-> prediction materialization and accelerator synchronization"
 )
-PERCENTILE_METHOD = "linear interpolation between adjacent ordered observations"
+PERCENTILE_METHOD = LINEAR_PERCENTILE_METHOD
 
 type BatchRunner = Callable[[Tensor], object]
 type Synchronizer = Callable[[], None]
@@ -284,6 +290,7 @@ def measure_batches(
 
 
 # ADD 2026-08-19: Linear percentile, mean과 image throughput을 measured latency에서 계산한다.
+# MODIFY 2026-08-20: Model-local percentile 계산 → shared latency distribution을 재사용한다.
 def summarize_latencies(
     latencies_ms: tuple[float, ...] | list[float],
     *,
@@ -292,25 +299,14 @@ def summarize_latencies(
     """Summarize positive finite batch latencies using linear interpolation."""
     if measured_sample_count <= 0:
         raise ValueError("measured_sample_count must be positive.")
-    if not latencies_ms:
-        raise ValueError("At least one measured latency is required.")
-    if any(not math.isfinite(value) or value <= 0.0 for value in latencies_ms):
-        raise ValueError("Latency values must be finite and positive.")
-
-    values = torch.tensor(latencies_ms, dtype=torch.float64)
-    percentiles = torch.quantile(
-        values,
-        torch.tensor([0.50, 0.95, 0.99], dtype=torch.float64),
-        interpolation="linear",
-    )
-    total_timed_seconds = float(values.sum().item()) / 1000.0
+    distribution = summarize_latency_distribution(latencies_ms)
     summary = LatencySummary(
-        p50_ms=float(percentiles[0].item()),
-        p95_ms=float(percentiles[1].item()),
-        p99_ms=float(percentiles[2].item()),
-        mean_ms=float(values.mean().item()),
-        total_timed_seconds=total_timed_seconds,
-        throughput_images_per_second=measured_sample_count / total_timed_seconds,
+        p50_ms=distribution.p50_ms,
+        p95_ms=distribution.p95_ms,
+        p99_ms=distribution.p99_ms,
+        mean_ms=distribution.mean_ms,
+        total_timed_seconds=distribution.total_timed_seconds,
+        throughput_images_per_second=(measured_sample_count / distribution.total_timed_seconds),
     )
     _validate_latency_summary(summary)
     return summary
@@ -388,13 +384,10 @@ def _validate_cuda_peak_memory(memory: CudaPeakMemory) -> None:
 
 
 # ADD 2026-08-19: SHA-256 provenance field의 hex digest 형식을 검증한다.
+# MODIFY 2026-08-20: Local hex parsing → shared SHA-256 validator 재사용으로 변경한다.
 def _validate_sha256(value: str, field: str) -> None:
-    if len(value) != 64:
+    if not is_sha256_digest(value):
         raise ValueError(f"Benchmark {field} must be a SHA-256 hex digest.")
-    try:
-        int(value, 16)
-    except ValueError as exc:
-        raise ValueError(f"Benchmark {field} must be a SHA-256 hex digest.") from exc
 
 
 # ADD 2026-08-19: Optional byte 값을 binary megabyte 단위로 변환한다.

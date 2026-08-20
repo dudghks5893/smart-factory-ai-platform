@@ -129,9 +129,123 @@ Uvicorn worker를 여러 개 실행하면 worker process마다 lifespan이 독�
 worker마다 한 copy씩 생성된다. 따라서 worker 수는 GPU/host memory 사용량과 함께 결정해야 한다. 단일 GPU
 worker의 처리량 확장은 HTTP concurrency만 보고 늘리지 않고 실제 resource benchmark로 검증한다.
 
-## 7. Latency boundary
+## 7. Real artifact smoke
+
+`pipelines.smoke_patchcore_api`는 실제 `model.pt`, `metadata.json`, validation
+`thresholds.json`을 lifespan에서 한 번 복원한 뒤, direct `runtime.predict()`가 아니라 FastAPI HTTP
+route를 통과해 검증한다. 정상/불량 image는 CLI에서 명시하며 threshold 조정에는 사용하지 않는다.
+
+```bash
+uv run python -m pipelines.smoke_patchcore_api \
+  --artifact-dir artifacts/models/patchcore/<artifact-id> \
+  --thresholds outputs/evaluation/patchcore/thresholds/<threshold-id>/thresholds.json \
+  --normal-image <normal-image.png> \
+  --anomaly-image <anomaly-image.png> \
+  --device cuda
+```
+
+Smoke는 `/health`, `/ready`, normal/anomaly `/v1/predictions`의 HTTP status와 response schema를
+확인한다. 두 score는 finite여야 하며 normal은 `score <= threshold`와 `is_anomaly=false`, anomaly는
+`score > threshold`와 `is_anomaly=true`를 만족해야 한다. Threshold source는 test image가 아니라
+normal-only validation calibration artifact다.
+
+## 8. HTTP E2E benchmark
+
+STEP 4-2 benchmark는 Starlette가 현재 우선 사용하는 `httpx2` 기반 FastAPI `TestClient`를 사용한다.
+실제 uvicorn socket client/server 방식보다 process 관리와 OS network jitter가 적고 application routing,
+multipart parsing, upload read, decode, tensor conversion, threadpool dispatch, preprocessing, device transfer,
+PatchCore inference, strict threshold, response schema/JSON serialization과 completed ASGI response까지 같은
+process에서 재현하기 쉽기 때문이다.
+
+Primary timing boundary는 image bytes가 memory에 준비된 뒤 `client.post()` 직전부터 response가 완전히
+반환된 직후까지다. 다음 항목은 포함하지 않는다.
+
+- 매 request의 disk image read
+- FastAPI lifespan의 artifact/threshold restore
+- warmup request
+- 외부 network/TCP round-trip
+
+따라서 이 결과는 localhost와 유사한 in-process application HTTP E2E 기준이며, uvicorn scheduling,
+socket/TLS, proxy/load balancer와 remote client network latency는 나타내지 않는다. Production-like external
+HTTP latency와 concurrency는 별도 deployment benchmark에서 측정해야 한다.
+
+기본 조건은 request당 image 1장, warmup 10회, manifest의 official test split 전체다. 현재 `metal_nut`
+manifest에서는 서로 다른 115개 image가 measured request 115개가 된다. Warmup 뒤에도 같은 process,
+FastAPI lifespan, runtime, GPU, model과 threshold를 재사용하며 reload하지 않는다. 별도 `--measured-count`를
+주면 manifest 순서의 distinct prefix만 사용하고 근거 없는 request 반복은 만들지 않는다.
+
+```bash
+uv run python -m pipelines.benchmark_patchcore_api \
+  --dataset-root data/raw/mvtec_ad \
+  --manifest data/interim/manifests/mvtec_ad_metal_nut.csv \
+  --artifact-dir artifacts/models/patchcore/<artifact-id> \
+  --thresholds outputs/evaluation/patchcore/thresholds/<threshold-id>/thresholds.json \
+  --output-id <benchmark-id> \
+  --device cuda
+```
+
+결과는 overwrite 없이 `outputs/benchmarks/api/<benchmark-id>/benchmark.json`에 저장한다. p50/p95/p99,
+mean, total timed seconds, requests/second, 성공/실패 request 수와 error rate 외에 runtime version, GPU,
+manifest/model/metadata/threshold SHA-256, image payload size, count와 timing boundary flag를 기록한다.
+Measured HTTP error response와 transport exception도 elapsed attempt와 failure count에 포함한다.
+
+실제 model/dataset/benchmark output은 크기, 원본 dataset 배포 조건과 실행별 artifact provenance 때문에
+Git에 넣지 않으며 `.gitignore` 대상이다.
+
+## 9. Model benchmark와 HTTP benchmark 구분
 
 STEP 3 Tesla T4 p50 21.634ms와 45.114 images/second는 disk image load, artifact restore와 warmup을 제외한
 preprocessing-to-synchronization model benchmark다. 이 값은 multipart parsing, upload read, image decode,
 threadpool scheduling, JSON serialization, network를 포함하지 않으므로 FastAPI HTTP end-to-end latency가
-아니다. HTTP E2E latency와 concurrency benchmark는 후속 serving 단계에서 별도로 측정한다.
+아니다.
+
+STEP 4 FastAPI application HTTP E2E p50은 아직 Kaggle에서 측정하지 않았다. Application overhead가
+추가되므로 model-serving-oriented latency보다 느린 것은 정상이며, 실제 실행 전 placeholder 수치를 두지
+않는다.
+
+## 10. Kaggle real-model 실행 순서
+
+아래 순서는 repository clone 이후 같은 `pyproject.toml`과 `uv.lock`로 STEP 4-2 필수 artifact를 만드는
+구조다. `KAGGLE_MVTEC_SOURCE`, smoke image와 ID 값은 session input에 맞게 지정하며 Kaggle 절대 경로를
+source code에 하드코딩하지 않는다.
+
+```bash
+uv sync --locked
+
+# Kaggle base environment의 wrapt 충돌이 있는 session에서만 project venv에 재설치한다.
+uv pip install --python .venv/bin/python --reinstall wrapt
+
+mkdir -p data/raw
+ln -s "$KAGGLE_MVTEC_SOURCE" data/raw/mvtec_ad
+
+uv run --no-sync python -m pipelines.prepare_mvtec_ad
+uv run --no-sync python -m pipelines.train_patchcore \
+  --artifact-id "$ARTIFACT_ID" --device cuda
+uv run --no-sync python -m pipelines.predict_patchcore \
+  --artifact-dir "artifacts/models/patchcore/$ARTIFACT_ID" \
+  --output-id "$VALIDATION_ID" --split validation --device cuda
+uv run --no-sync python -m pipelines.calibrate_patchcore_thresholds \
+  --validation-predictions \
+    "outputs/predictions/patchcore/$VALIDATION_ID/predictions.jsonl" \
+  --validation-anomaly-maps \
+    "outputs/predictions/patchcore/$VALIDATION_ID/anomaly_maps.pt" \
+  --artifact-dir "artifacts/models/patchcore/$ARTIFACT_ID" \
+  --output-id "$THRESHOLD_ID"
+uv run --no-sync python -m pipelines.smoke_patchcore_api \
+  --artifact-dir "artifacts/models/patchcore/$ARTIFACT_ID" \
+  --thresholds \
+    "outputs/evaluation/patchcore/thresholds/$THRESHOLD_ID/thresholds.json" \
+  --normal-image "$NORMAL_IMAGE" --anomaly-image "$ANOMALY_IMAGE" --device cuda
+uv run --no-sync python -m pipelines.benchmark_patchcore_api \
+  --artifact-dir "artifacts/models/patchcore/$ARTIFACT_ID" \
+  --thresholds \
+    "outputs/evaluation/patchcore/thresholds/$THRESHOLD_ID/thresholds.json" \
+  --output-id "$API_BENCHMARK_ID" --device cuda
+```
+
+`wrapt` 재설치는 Kaggle preinstalled environment 충돌 대응이며 project dependency를 변경하지 않는다.
+이 session-only compatibility package가 자동 exact sync에서 제거되지 않도록 이후 command는 `--no-sync`를
+사용한다. Dependency 동기화 자체는 첫 `uv sync --locked`에서 완료된다.
+STEP 4-2에 필요한 prediction은 threshold calibration용 validation split뿐이다. STEP 3 전체 결과를 함께
+재현할 때는 test prediction, evaluation과 offline inference benchmark를 추가로 실행할 수 있지만 real-model
+smoke와 HTTP benchmark의 필수 선행 단계는 아니다.

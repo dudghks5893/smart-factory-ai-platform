@@ -11,6 +11,7 @@ from ml.training.preprocessing import PatchCorePreprocessingConfig, PatchCorePre
 from services.inference.runtime import (
     PatchCoreRuntimeConfig,
     PatchCoreServingRuntime,
+    ServingProvenance,
     load_patchcore_runtime,
 )
 
@@ -60,6 +61,12 @@ def test_serving_runtime_applies_strict_threshold(score: float, expected: bool) 
         device="cpu",
         image_threshold=40.0,
         comparison_operator=">",
+        provenance=ServingProvenance(
+            manifest_sha256="a" * 64,
+            artifact_metadata_sha256="b" * 64,
+            model_sha256="c" * 64,
+            threshold_artifact_sha256="d" * 64,
+        ),
     )
 
     prediction = runtime.predict(torch.zeros(1, 3, 2, 2))

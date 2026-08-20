@@ -57,6 +57,16 @@ class InferenceResult:
     comparison_operator: str
 
 
+@dataclass(frozen=True)
+class ServingProvenance:
+    """Validated hashes bound to the process-local serving runtime."""
+
+    manifest_sha256: str
+    artifact_metadata_sha256: str
+    model_sha256: str
+    threshold_artifact_sha256: str
+
+
 class ModelRuntime(Protocol):
     """Minimal runtime contract consumed by the HTTP API and test fakes."""
 
@@ -81,6 +91,7 @@ class PatchCoreServingRuntime:
     device: str
     image_threshold: float
     comparison_operator: str
+    provenance: ServingProvenance
     _inference_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     # ADD 2026-08-19: 공유 PatchCore instance에서 strict threshold image inference를 수행한다.
@@ -110,20 +121,25 @@ class PatchCoreServingRuntime:
 
 
 # ADD 2026-08-19: Artifact와 threshold provenance를 검증한 뒤 PatchCore를 한 번 복원한다.
+# MODIFY 2026-08-20: 검증에 사용한 실제 file hash를 runtime provenance로 보존한다.
 def load_patchcore_runtime(config: PatchCoreRuntimeConfig) -> ModelRuntime:
     """Restore one ready PatchCore runtime without downloading pretrained weights."""
     config.validate()
     device = resolve_device(config.device)
 
     # Model load 전에 metadata, threshold와 실제 artifact hash를 모두 검증한다.
+    artifact_metadata_path = config.artifact_dir / METADATA_FILENAME
+    model_path = config.artifact_dir / MODEL_FILENAME
     artifact_metadata = read_artifact_metadata(config.artifact_dir)
     thresholds = read_threshold_artifact(config.thresholds_path)
+    artifact_metadata_sha256 = sha256_file(artifact_metadata_path)
+    model_sha256 = sha256_file(model_path)
     validate_threshold_provenance(
         thresholds,
         artifact_metadata=artifact_metadata,
         manifest_sha256=artifact_metadata.manifest_sha256,
-        artifact_metadata_sha256=sha256_file(config.artifact_dir / METADATA_FILENAME),
-        model_sha256=sha256_file(config.artifact_dir / MODEL_FILENAME),
+        artifact_metadata_sha256=artifact_metadata_sha256,
+        model_sha256=model_sha256,
     )
 
     # 검증된 metadata로 pretrained download 없이 model을 한 번만 복원한다.
@@ -140,4 +156,19 @@ def load_patchcore_runtime(config: PatchCoreRuntimeConfig) -> ModelRuntime:
         device=str(device),
         image_threshold=thresholds.image_threshold,
         comparison_operator=thresholds.comparison_operator,
+        provenance=ServingProvenance(
+            manifest_sha256=artifact_metadata.manifest_sha256,
+            artifact_metadata_sha256=artifact_metadata_sha256,
+            model_sha256=model_sha256,
+            threshold_artifact_sha256=sha256_file(config.thresholds_path),
+        ),
     )
+
+
+# ADD 2026-08-20: Benchmark가 production runtime의 검증된 provenance를 안전하게 요구한다.
+def require_serving_provenance(runtime: object) -> ServingProvenance:
+    """Return serving provenance or reject runtimes that cannot prove artifact identity."""
+    provenance = getattr(runtime, "provenance", None)
+    if not isinstance(provenance, ServingProvenance):
+        raise TypeError("Serving runtime does not expose validated provenance.")
+    return provenance

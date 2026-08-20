@@ -4,7 +4,7 @@
 MLOps, Monitoring, Kubernetes 운영, 제조 매뉴얼 기반 RAG까지 연결하는
 Production AI 시스템 프로젝트입니다.
 
-> 현재 상태: **STEP 2 — Vision AI Baseline 진행 중**
+> 현재 상태: **STEP 4 — FastAPI Model Serving 진행 중**
 
 ---
 
@@ -249,7 +249,7 @@ wall time과 CLI 전체 runtime은 inference latency가 아닙니다. FastAPI HT
 `docs/benchmarks/PATCHCORE_EVALUATION.md`와
 `docs/benchmarks/PATCHCORE_INFERENCE_BENCHMARK.md`에서 관리합니다.
 
-FastAPI serving core의 startup lifecycle, endpoint와 concurrency contract는
+FastAPI serving core와 real-artifact smoke/HTTP benchmark tooling의 lifecycle, endpoint, 측정 계약은
 `docs/serving/PATCHCORE_API.md`에서 관리합니다.
 
 ---
@@ -342,7 +342,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - [x] STEP 1. Dataset / Data Pipeline
 - [x] STEP 2. Vision AI Baseline
 - [x] STEP 3. 모델 평가 및 Benchmark
-- [ ] STEP 4. FastAPI Model Serving (Core 구현 완료, HTTP E2E Benchmark 예정)
+- [ ] STEP 4. FastAPI Model Serving (Core/실측 tooling 완료, Kaggle HTTP E2E 실측 예정)
 - [ ] STEP 5. PostgreSQL 검사 이력
 - [ ] STEP 6. MLflow Experiment / Model Registry
 - [ ] STEP 7. Docker
