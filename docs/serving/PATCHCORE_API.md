@@ -149,6 +149,24 @@ Smoke는 `/health`, `/ready`, normal/anomaly `/v1/predictions`의 HTTP status와
 `score > threshold`와 `is_anomaly=true`를 만족해야 한다. Threshold source는 test image가 아니라
 normal-only validation calibration artifact다.
 
+### Kaggle real-model smoke 결과
+
+Tesla T4 CUDA 환경에서 실제 `model.pt`, `metadata.json`과 validation `thresholds.json`을 사용한
+FastAPI lifecycle smoke가 통과했다.
+
+| 항목 | 결과 |
+| --- | --- |
+| Status | PASS |
+| Model / category / device | `patchcore` / `metal_nut` / `cuda` |
+| Image threshold | `41.19657897949219` |
+| Normal sample | `metal_nut/test/good/000.png` |
+| Normal score / 판정 | `34.763465881347656` / normal |
+| Anomaly sample | `metal_nut/test/bent/000.png` |
+| Anomaly score / 판정 | `54.36906051635742` / anomaly |
+
+두 sample 모두 저장된 strict `score > threshold` 계약과 일치했다. Smoke sample은 판정 확인에만
+사용했으며 threshold를 변경하거나 calibration에 사용하지 않았다.
+
 ## 8. HTTP E2E benchmark
 
 STEP 4-2 benchmark는 Starlette가 현재 우선 사용하는 `httpx2` 기반 FastAPI `TestClient`를 사용한다.
@@ -192,6 +210,41 @@ Measured HTTP error response와 transport exception도 elapsed attempt와 failur
 실제 model/dataset/benchmark output은 크기, 원본 dataset 배포 조건과 실행별 artifact provenance 때문에
 Git에 넣지 않으며 `.gitignore` 대상이다.
 
+### Kaggle FastAPI application benchmark 결과
+
+Tesla T4 CUDA 환경에서 실제 PatchCore runtime으로 측정한 FastAPI in-process application-level HTTP
+E2E 결과다. Production network latency로 해석하지 않는다.
+
+| 조건 | 값 |
+| --- | ---: |
+| Benchmark | `patchcore_fastapi_http_e2e` |
+| Transport | `in_process_asgi_testclient` |
+| Request batch size | 1 |
+| Warmup | 10 |
+| Measured requests | 115 |
+| Successful / failed | 115 / 0 |
+| Error rate | 0.0 |
+
+| Metric | 값 |
+| --- | ---: |
+| p50 | 44.90185999998175 ms |
+| p95 | 48.70313200001419 ms |
+| p99 | 53.7457109400475 ms |
+| Mean | 45.39321613043957 ms |
+| Total timed | 5.2202198550005505 sec |
+| Throughput | 22.029723497151036 requests/sec |
+
+Provenance:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Manifest | `da81db68eadd22421ba2b284ffee85f49d41fcec47d6aadfa6bdb2cae14f285b` |
+| Model | `1a2016a6b75377cc5e6bbeee33b3ed2f3a3b4d1cedb2e80236dbcd1da8c28ca9` |
+| Threshold artifact | `9e885f2a3b0de29eeb3e04304d5dc9051fb1a9c6831bf820b885760ccd12fe89` |
+
+측정에는 multipart request부터 completed ASGI response까지 포함한다. Disk image loading, artifact
+restore, warmup, external network RTT와 uvicorn/socket/TLS/proxy는 포함하지 않는다.
+
 ## 9. Model benchmark와 HTTP benchmark 구분
 
 STEP 3 Tesla T4 p50 21.634ms와 45.114 images/second는 disk image load, artifact restore와 warmup을 제외한
@@ -199,9 +252,13 @@ preprocessing-to-synchronization model benchmark다. 이 값은 multipart parsin
 threadpool scheduling, JSON serialization, network를 포함하지 않으므로 FastAPI HTTP end-to-end latency가
 아니다.
 
-STEP 4 FastAPI application HTTP E2E p50은 아직 Kaggle에서 측정하지 않았다. Application overhead가
-추가되므로 model-serving-oriented latency보다 느린 것은 정상이며, 실제 실행 전 placeholder 수치를 두지
-않는다.
+같은 STEP 4 Kaggle session에서 비교용으로 다시 실행한 STEP 3 model benchmark는 p50
+`23.024974000009024ms`, p95 `27.069118700012496ms`, p99 `29.552606360020945ms`, mean
+`23.637801304351775ms`, throughput `42.30511912357507 images/sec`였다. 이는 FastAPI benchmark와 같은
+session의 comparison/reference run이며 기존 공식 STEP 3 p50 21.634ms 결과를 대체하지 않는다.
+
+같은 session의 FastAPI in-process application-level HTTP E2E p50은 `44.90185999998175ms`였다.
+Application boundary가 추가되므로 model-serving-oriented latency보다 느린 것은 정상이다.
 
 ## 10. Kaggle real-model 실행 순서
 
@@ -249,3 +306,6 @@ uv run --no-sync python -m pipelines.benchmark_patchcore_api \
 STEP 4-2에 필요한 prediction은 threshold calibration용 validation split뿐이다. STEP 3 전체 결과를 함께
 재현할 때는 test prediction, evaluation과 offline inference benchmark를 추가로 실행할 수 있지만 real-model
 smoke와 HTTP benchmark의 필수 선행 단계는 아니다.
+
+Real-model smoke는 fresh Kaggle session에서 독립적으로 실행되는 단일 cell이 아니다. Prepared manifest,
+PatchCore artifact, validation predictions/anomaly maps와 calibrated thresholds가 먼저 생성되어 있어야 한다.

@@ -4,7 +4,7 @@
 MLOps, Monitoring, Kubernetes 운영, 제조 매뉴얼 기반 RAG까지 연결하는
 Production AI 시스템 프로젝트입니다.
 
-> 현재 상태: **STEP 4 — FastAPI Model Serving 진행 중**
+> 현재 상태: **STEP 4 — FastAPI Model Serving 완료**
 
 ---
 
@@ -242,10 +242,13 @@ STEP 3 PatchCore evaluation과 Tesla T4 inference benchmark까지 완료했습�
 | Image FP / FN | 0 / 1 |
 | T4 inference p50 / p95 / p99 | 21.634 / 25.775 / 27.113 ms |
 | T4 offline model throughput | 45.114 images/second |
+| T4 FastAPI in-process HTTP p50 | 44.902 ms |
+| T4 FastAPI throughput / success | 22.030 requests/second / 115 of 115 |
 
-Throughput은 batch size 1에서 disk I/O, artifact restore와 warmup을 제외한 값입니다. 56초의 training
-wall time과 CLI 전체 runtime은 inference latency가 아닙니다. FastAPI HTTP end-to-end latency는 STEP 4
-이후 별도로 측정합니다. 세부 계약과 실측값은
+Offline throughput은 batch size 1에서 disk I/O, artifact restore와 warmup을 제외한 값입니다. 56초의
+training wall time과 CLI 전체 runtime은 inference latency가 아닙니다. FastAPI 결과는 disk image loading,
+artifact restore, warmup, external network RTT와 uvicorn/socket/TLS/proxy를 제외한 in-process
+application-level HTTP E2E 기준입니다. 세부 계약과 실측값은
 `docs/benchmarks/PATCHCORE_EVALUATION.md`와
 `docs/benchmarks/PATCHCORE_INFERENCE_BENCHMARK.md`에서 관리합니다.
 
@@ -342,7 +345,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - [x] STEP 1. Dataset / Data Pipeline
 - [x] STEP 2. Vision AI Baseline
 - [x] STEP 3. 모델 평가 및 Benchmark
-- [ ] STEP 4. FastAPI Model Serving (Core/실측 tooling 완료, Kaggle HTTP E2E 실측 예정)
+- [x] STEP 4. FastAPI Model Serving (Real-model smoke 및 in-process HTTP E2E 실측 완료)
 - [ ] STEP 5. PostgreSQL 검사 이력
 - [ ] STEP 6. MLflow Experiment / Model Registry
 - [ ] STEP 7. Docker
