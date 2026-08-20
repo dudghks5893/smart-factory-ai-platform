@@ -109,17 +109,17 @@ Experiment Configuration 및 작은 Benchmark 결과는
 
 ## 7. MLflow
 
-향후 MLflow에서는 다음 정보를 관리한다.
+MLflow에서는 다음 정보를 관리한다.
 
 - Experiment
 - Run
 - Parameter
 - Metric
-- Model Artifact
-- Model Version
+- Dataset / Model / Threshold / Evaluation / Benchmark lineage artifact copy
 
-정확한 Backend 및 Artifact Store 구조는
-MLflow 구현 단계에서 결정한다.
+Project-native `artifacts/`, `outputs/` 계약이 source of truth이며 MLflow는 검증된 결과를 추적하는
+계층이다. Local 개발은 SQLite metadata backend와 local artifact store를 사용한다. Remote tracking
+server와 Model Registry 운영은 후속 deployment 단계에서 결정한다.
 
 ---
 

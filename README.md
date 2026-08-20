@@ -4,7 +4,7 @@
 MLOps, Monitoring, Kubernetes 운영, 제조 매뉴얼 기반 RAG까지 연결하는
 Production AI 시스템 프로젝트입니다.
 
-> 현재 상태: **STEP 5 — PostgreSQL Inspection History 구현 완료, 실제 PostgreSQL 검증 예정**
+> 현재 상태: **STEP 6 — MLflow Experiment Tracking & Model Lineage 구현 완료, local SQLite 검증 완료**
 
 ---
 
@@ -260,6 +260,11 @@ FastAPI serving core와 real-artifact smoke/HTTP benchmark tooling의 lifecycle,
 tests는 격리된 SQLite로 계약을 검증합니다. 실제 PostgreSQL integration은 아직 검증하지 않았습니다.
 Schema, transaction, readiness와 조회 API는 `docs/serving/INSPECTION_HISTORY.md`에서 관리합니다.
 
+PatchCore config, manifest, project-native model, threshold, evaluation과 benchmark 결과는 별도 backfill
+pipeline에서 하나의 MLflow run lineage로 기록됩니다. Local SQLite metadata backend와 local artifact store의
+실제 round-trip을 작은 fixture로 검증했으며, remote tracking server와 Model Registry 운영은 아직 구현하거나
+검증하지 않았습니다. 구조, CLI와 provenance 계약은 `docs/mlops/MLFLOW_TRACKING.md`에서 관리합니다.
+
 ---
 
 ## 7. 평가 지표
@@ -352,7 +357,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - [x] STEP 3. 모델 평가 및 Benchmark
 - [x] STEP 4. FastAPI Model Serving (Real-model smoke 및 in-process HTTP E2E 실측 완료)
 - [x] STEP 5. PostgreSQL 검사 이력 (구현 완료, 실제 PostgreSQL integration smoke 미검증)
-- [ ] STEP 6. MLflow Experiment / Model Registry
+- [x] STEP 6. MLflow Experiment Tracking / Model Lineage (local SQLite 검증, Registry 미구현)
 - [ ] STEP 7. Docker
 - [ ] STEP 8. CI/CD
 - [ ] STEP 9. Prometheus / Grafana Monitoring
@@ -373,6 +378,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - `docs/architecture/overview.md`
 - `docs/DATA_ARTIFACT_POLICY.md`
 - `docs/benchmarks/METRICS_CONTRACT.md`
+- `docs/mlops/MLFLOW_TRACKING.md`
 - `docs/serving/PATCHCORE_API.md`
 - `docs/data/MVTEC_AD_PIPELINE.md`
 - `docs/adr/`
