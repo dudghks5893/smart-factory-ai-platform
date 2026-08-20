@@ -21,9 +21,9 @@ SQLAlchemy Session: insert → commit
 inspection_id response
 ```
 
-PostgreSQL daemon, Docker/Compose와 production connection pool behavior는 이 단계의 로컬 검증에 포함하지
-않는다. Local tests의 SQLite 결과는 repository/application 계약 검증이며 PostgreSQL integration 성공을
-의미하지 않는다.
+STEP 7에서 Docker PostgreSQL 17.6과 psycopg 3를 사용한 실제 integration을 추가했다. Local SQLite tests는
+빠른 repository/application 회귀를 계속 담당하고, Docker suite는 Alembic과 PostgreSQL 고유 계약을
+별도로 검증한다. Production traffic의 connection pool/concurrency는 아직 검증 범위가 아니다.
 
 ## 2. Schema
 
@@ -114,9 +114,15 @@ uv run alembic current
 초기 revision은 upgrade에서 table/constraint/index를 만들고 downgrade에서 index와 table을 역순 제거한다.
 Credential은 `.env.example`의 placeholder가 아니라 deployment secret으로 제공한다.
 
-Test fixture만 임시 SQLite file에 `Base.metadata.create_all()`을 사용한다. 각 test는 독립 database를 사용하며
-사용자의 local PostgreSQL이나 credential에 접근하지 않는다. 실제 PostgreSQL migration, psycopg connectivity,
-timezone/default behavior와 concurrent connection은 Docker/CI integration smoke에서 추가 검증해야 한다.
+일반 test fixture만 임시 SQLite file에 `Base.metadata.create_all()`을 사용한다. `make docker-test`는 전용
+Compose project와 ephemeral PostgreSQL volume에서 migration downgrade/upgrade, psycopg connectivity,
+PostgreSQL native UUID와 timezone-aware timestamp, constraint/index, commit/rollback, application readiness와
+FastAPI inspection API를 실제 검증한 뒤 해당 test volume을 제거한다. 실제 model 대신 app factory에 test-only
+runtime을 주입하므로 production runtime에는 fake flag가 없다.
+
+STEP 7 local Apple Silicon 검증에서 PostgreSQL integration은 통과했다. 장시간/concurrent production pool,
+실제 production credential과 managed PostgreSQL 연결은 아직 검증하지 않았다. Docker lifecycle과 실행 명령은
+`docs/deployment/DOCKER.md`에서 관리한다.
 
 Inspection history는 향후 Dashboard의 검사 이력과 Monitoring의 error/anomaly 집계 입력이 될 수 있지만,
 Dashboard와 monitoring 구현 자체는 현재 범위에 포함하지 않는다.

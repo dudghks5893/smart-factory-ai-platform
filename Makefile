@@ -1,4 +1,4 @@
-.PHONY: sync format format-check lint typecheck test check
+.PHONY: sync format format-check lint typecheck test check docker-build docker-up docker-down docker-clean-volumes docker-test
 
 sync:
 	uv sync
@@ -19,3 +19,18 @@ test:
 	uv run python -m pytest
 
 check: format-check lint typecheck test
+
+docker-build:
+	docker compose build api
+
+docker-up:
+	docker compose up --detach --build api
+
+docker-down:
+	docker compose down --remove-orphans
+
+docker-clean-volumes:
+	docker compose down --volumes --remove-orphans
+
+docker-test:
+	./scripts/docker_test.sh

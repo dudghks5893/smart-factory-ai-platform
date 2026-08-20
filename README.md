@@ -4,7 +4,7 @@
 MLOps, Monitoring, Kubernetes 운영, 제조 매뉴얼 기반 RAG까지 연결하는
 Production AI 시스템 프로젝트입니다.
 
-> 현재 상태: **STEP 6 — MLflow Experiment Tracking & Model Lineage 구현 완료, local SQLite 검증 완료**
+> 현재 상태: **STEP 7 — Dockerized FastAPI + PostgreSQL + Alembic 구현 및 local arm64 integration 검증 완료**
 
 ---
 
@@ -265,6 +265,11 @@ pipeline에서 하나의 MLflow run lineage로 기록됩니다. Local SQLite met
 실제 round-trip을 작은 fixture로 검증했으며, remote tracking server와 Model Registry 운영은 아직 구현하거나
 검증하지 않았습니다. 구조, CLI와 provenance 계약은 `docs/mlops/MLFLOW_TRACKING.md`에서 관리합니다.
 
+FastAPI runtime/test image와 PostgreSQL 17.6, one-shot Alembic migration service를 Compose로 구성했습니다.
+Apple Silicon `linux/arm64`에서 CPU PyTorch image build와 실제 PostgreSQL migration, FastAPI persistence,
+UUID/timestamptz/constraint/index/rollback을 검증했습니다. 실제 model artifact를 mount한 API container와 GPU
+Docker는 아직 검증하지 않았습니다. 세부 lifecycle은 `docs/deployment/DOCKER.md`에서 관리합니다.
+
 ---
 
 ## 7. 평가 지표
@@ -358,7 +363,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - [x] STEP 4. FastAPI Model Serving (Real-model smoke 및 in-process HTTP E2E 실측 완료)
 - [x] STEP 5. PostgreSQL 검사 이력 (구현 완료, 실제 PostgreSQL integration smoke 미검증)
 - [x] STEP 6. MLflow Experiment Tracking / Model Lineage (local SQLite 검증, Registry 미구현)
-- [ ] STEP 7. Docker
+- [x] STEP 7. Docker (local arm64 build 및 PostgreSQL/Alembic integration 검증)
 - [ ] STEP 8. CI/CD
 - [ ] STEP 9. Prometheus / Grafana Monitoring
 - [ ] STEP 10. Data Drift Detection
@@ -378,6 +383,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - `docs/architecture/overview.md`
 - `docs/DATA_ARTIFACT_POLICY.md`
 - `docs/benchmarks/METRICS_CONTRACT.md`
+- `docs/deployment/DOCKER.md`
 - `docs/mlops/MLFLOW_TRACKING.md`
 - `docs/serving/PATCHCORE_API.md`
 - `docs/data/MVTEC_AD_PIPELINE.md`
