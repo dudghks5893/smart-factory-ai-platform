@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  UV_PYTHON: "3.12.14"
+  UV_VERSION: "0.12.5"
+
+jobs:
+  quality:
+    name: quality
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install pinned Python
+        run: uv python install "${UV_PYTHON}"
+
+      - name: Validate lockfile
+        run: uv lock --check
+
+      - name: Sync locked dependencies
+        run: uv sync --locked
+
+      - name: Run quality gate
+        run: make check
+
+  postgres-integration:
+    name: postgres-integration
+    needs: quality
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_USER: smartfactory_ci
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: smartfactory_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U smartfactory_ci -d smartfactory_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg://smartfactory_ci:ci-only-password@127.0.0.1:5432/smartfactory_ci
+      POSTGRES_INTEGRATION_DATABASE_URL: postgresql+psycopg://smartfactory_ci:ci-only-password@127.0.0.1:5432/smartfactory_ci
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install pinned Python
+        run: uv python install "${UV_PYTHON}"
+
+      - name: Sync locked dependencies
+        run: uv sync --locked
+
+      - name: Apply production migration
+        run: uv run alembic upgrade head
+
+      - name: Run actual PostgreSQL integration contract
+        run: >-
+          uv run python -m pytest -p no:cacheprovider
+          tests/integration/test_postgres_container.py -q
+
+  docker:
+    name: docker
+    needs: quality
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    env:
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build CPU-oriented production runtime target
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          target: runtime
+          platforms: linux/arm64
+          push: false
+          tags: smartfactory-api:ci
+          cache-from: type=gha,scope=runtime-arm64
+          cache-to: type=gha,mode=max,scope=runtime-arm64

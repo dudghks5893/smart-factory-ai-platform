@@ -4,7 +4,7 @@
 MLOps, Monitoring, Kubernetes 운영, 제조 매뉴얼 기반 RAG까지 연결하는
 Production AI 시스템 프로젝트입니다.
 
-> 현재 상태: **STEP 7 — Dockerized FastAPI + PostgreSQL + Alembic 구현 및 local arm64 integration 검증 완료**
+> 현재 상태: **STEP 8 — GitHub Actions CI automation 및 CD-ready build foundation 구현 완료**
 
 ---
 
@@ -270,6 +270,11 @@ Apple Silicon `linux/arm64`에서 CPU PyTorch image build와 실제 PostgreSQL m
 UUID/timestamptz/constraint/index/rollback을 검증했습니다. 실제 model artifact를 mount한 API container와 GPU
 Docker는 아직 검증하지 않았습니다. 세부 lifecycle은 `docs/deployment/DOCKER.md`에서 관리합니다.
 
+Pull Request와 `main` push에서 quality, PostgreSQL 17.6 integration 및 production runtime Docker build를
+분리 검증하는 GitHub Actions CI를 구현했습니다. CI는 universal lock의 Linux arm64 CPU PyTorch resolution을
+재사용하며, registry publication과 실제 production deployment는 아직 구현하지 않았습니다. Workflow 구조,
+required checks와 CPU/GPU 경계는 `docs/deployment/CI_CD.md`에서 관리합니다.
+
 ---
 
 ## 7. 평가 지표
@@ -361,10 +366,10 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - [x] STEP 2. Vision AI Baseline
 - [x] STEP 3. 모델 평가 및 Benchmark
 - [x] STEP 4. FastAPI Model Serving (Real-model smoke 및 in-process HTTP E2E 실측 완료)
-- [x] STEP 5. PostgreSQL 검사 이력 (구현 완료, 실제 PostgreSQL integration smoke 미검증)
+- [x] STEP 5. PostgreSQL 검사 이력 (구현 완료, STEP 7 actual PostgreSQL integration 검증)
 - [x] STEP 6. MLflow Experiment Tracking / Model Lineage (local SQLite 검증, Registry 미구현)
 - [x] STEP 7. Docker (local arm64 build 및 PostgreSQL/Alembic integration 검증)
-- [ ] STEP 8. CI/CD
+- [x] STEP 8. CI automation / CD-ready build foundation (실제 production deployment 미구현)
 - [ ] STEP 9. Prometheus / Grafana Monitoring
 - [ ] STEP 10. Data Drift Detection
 - [ ] STEP 11. Kubernetes
@@ -383,6 +388,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - `docs/architecture/overview.md`
 - `docs/DATA_ARTIFACT_POLICY.md`
 - `docs/benchmarks/METRICS_CONTRACT.md`
+- `docs/deployment/CI_CD.md`
 - `docs/deployment/DOCKER.md`
 - `docs/mlops/MLFLOW_TRACKING.md`
 - `docs/serving/PATCHCORE_API.md`
