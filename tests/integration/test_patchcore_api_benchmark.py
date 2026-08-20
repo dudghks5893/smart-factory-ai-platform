@@ -17,6 +17,7 @@ from services.inference.runtime import (
     ServingProvenance,
 )
 from shared.hashing import sha256_file
+from tests.persistence_helpers import prepare_sqlite_database
 
 
 class _BenchmarkRuntime:
@@ -97,6 +98,7 @@ def test_api_benchmark_pipeline_reuses_fake_runtime_and_writes_result(tmp_path: 
         manifest_path=manifest_path,
         artifact_dir=tmp_path / "artifact",
         thresholds_path=tmp_path / "thresholds.json",
+        database_url=prepare_sqlite_database(tmp_path),
         output_dir=output_dir,
         requested_device="cpu",
         warmup_count=1,

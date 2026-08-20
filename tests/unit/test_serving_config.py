@@ -13,6 +13,7 @@ def test_serving_settings_load_from_environment() -> None:
         {
             "PATCHCORE_ARTIFACT_DIR": "artifacts/model-a",
             "PATCHCORE_THRESHOLDS_PATH": "outputs/thresholds-a.json",
+            "DATABASE_URL": "postgresql+psycopg://user:password@localhost/database",
             "MODEL_DEVICE": "mps",
             "MAX_UPLOAD_BYTES": "2048",
         }
@@ -20,6 +21,7 @@ def test_serving_settings_load_from_environment() -> None:
 
     assert settings.artifact_dir == Path("artifacts/model-a")
     assert settings.thresholds_path == Path("outputs/thresholds-a.json")
+    assert settings.database_url.startswith("postgresql+psycopg://")
     assert settings.model_device == "mps"
     assert settings.max_upload_bytes == 2048
 
@@ -33,6 +35,7 @@ def test_serving_settings_reject_missing_or_invalid_values() -> None:
             {
                 "PATCHCORE_ARTIFACT_DIR": "artifact",
                 "PATCHCORE_THRESHOLDS_PATH": "thresholds.json",
+                "DATABASE_URL": "sqlite+pysqlite:///:memory:",
                 "MODEL_DEVICE": "gpu",
             }
         )
@@ -41,6 +44,15 @@ def test_serving_settings_reject_missing_or_invalid_values() -> None:
             {
                 "PATCHCORE_ARTIFACT_DIR": "artifact",
                 "PATCHCORE_THRESHOLDS_PATH": "thresholds.json",
+                "DATABASE_URL": "sqlite+pysqlite:///:memory:",
                 "MAX_UPLOAD_BYTES": "0",
+            }
+        )
+    with pytest.raises(ValueError, match="DATABASE_URL"):
+        ServingSettings.from_environment(
+            {
+                "PATCHCORE_ARTIFACT_DIR": "artifact",
+                "PATCHCORE_THRESHOLDS_PATH": "thresholds.json",
+                "DATABASE_URL": "postgresql://user:password@localhost/database",
             }
         )

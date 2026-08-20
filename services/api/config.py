@@ -7,10 +7,23 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
+
 from ml.training.device import SUPPORTED_DEVICES
 from services.inference.runtime import PatchCoreRuntimeConfig
 
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+
+# ADD 2026-08-20: CLI와 application이 같은 required DATABASE_URL environment 계약을 사용한다.
+def required_database_url(environ: Mapping[str, str] | None = None) -> str:
+    """Return a non-empty database URL without logging credentials."""
+    values = os.environ if environ is None else environ
+    database_url = values.get("DATABASE_URL", "").strip()
+    if not database_url:
+        raise ValueError("DATABASE_URL is required.")
+    return database_url
 
 
 @dataclass(frozen=True)
@@ -19,17 +32,23 @@ class ServingSettings:
 
     artifact_dir: Path
     thresholds_path: Path
+    database_url: str
     model_device: str = "auto"
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
 
     # ADD 2026-08-19: Environment mapping에서 serving path/device/upload 설정을 로드한다.
+    # MODIFY 2026-08-20: Required DATABASE_URL과 PostgreSQL/SQLite driver validation을 추가한다.
     @classmethod
     def from_environment(cls, environ: Mapping[str, str] | None = None) -> ServingSettings:
         """Load serving settings and reject missing required artifact paths."""
         values = os.environ if environ is None else environ
         missing = [
             name
-            for name in ("PATCHCORE_ARTIFACT_DIR", "PATCHCORE_THRESHOLDS_PATH")
+            for name in (
+                "PATCHCORE_ARTIFACT_DIR",
+                "PATCHCORE_THRESHOLDS_PATH",
+                "DATABASE_URL",
+            )
             if not values.get(name, "").strip()
         ]
         if missing:
@@ -44,6 +63,7 @@ class ServingSettings:
         settings = cls(
             artifact_dir=Path(values["PATCHCORE_ARTIFACT_DIR"]),
             thresholds_path=Path(values["PATCHCORE_THRESHOLDS_PATH"]),
+            database_url=required_database_url(values),
             model_device=values.get("MODEL_DEVICE", "auto"),
             max_upload_bytes=max_upload_bytes,
         )
@@ -51,12 +71,19 @@ class ServingSettings:
         return settings
 
     # ADD 2026-08-19: Serving device와 upload size invariant를 검증한다.
+    # MODIFY 2026-08-20: Required database URL과 psycopg 3 production driver 계약을 검증한다.
     def validate(self) -> None:
         """Validate settings before startup accesses model files."""
         if self.model_device not in SUPPORTED_DEVICES:
             raise ValueError(f"MODEL_DEVICE must be one of {SUPPORTED_DEVICES}.")
         if self.max_upload_bytes <= 0:
             raise ValueError("MAX_UPLOAD_BYTES must be positive.")
+        try:
+            driver_name = make_url(self.database_url).drivername
+        except (ArgumentError, TypeError, ValueError) as exc:
+            raise ValueError("DATABASE_URL must be a valid SQLAlchemy URL.") from exc
+        if driver_name != "postgresql+psycopg" and not driver_name.startswith("sqlite"):
+            raise ValueError("DATABASE_URL must use postgresql+psycopg or SQLite for tests.")
 
     # ADD 2026-08-19: API settings에서 transport-independent runtime config를 생성한다.
     def runtime_config(self) -> PatchCoreRuntimeConfig:

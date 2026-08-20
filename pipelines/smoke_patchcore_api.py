@@ -10,7 +10,11 @@ from fastapi.testclient import TestClient
 
 from ml.training.device import SUPPORTED_DEVICES
 from services.api.app import RuntimeLoader, create_app
-from services.api.config import DEFAULT_MAX_UPLOAD_BYTES, ServingSettings
+from services.api.config import (
+    DEFAULT_MAX_UPLOAD_BYTES,
+    ServingSettings,
+    required_database_url,
+)
 from services.api.schemas import HealthResponse, ReadinessResponse
 from services.api.tooling import prepare_image_upload, validate_prediction_payload
 from services.inference.runtime import load_patchcore_runtime
@@ -29,12 +33,14 @@ class SmokeOutputSummary:
 
 
 # ADD 2026-08-20: Real artifact lifecycle과 normal/anomaly HTTP 계약을 smoke 검증한다.
+# MODIFY 2026-08-20: Required inspection database를 같은 FastAPI lifecycle에 연결한다.
 def smoke_patchcore_api(
     *,
     artifact_dir: Path,
     thresholds_path: Path,
     normal_image_path: Path,
     anomaly_image_path: Path,
+    database_url: str,
     requested_device: str = "auto",
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
     runtime_loader: RuntimeLoader = load_patchcore_runtime,
@@ -43,6 +49,7 @@ def smoke_patchcore_api(
     settings = ServingSettings(
         artifact_dir=artifact_dir,
         thresholds_path=thresholds_path,
+        database_url=database_url,
         model_device=requested_device,
         max_upload_bytes=max_upload_bytes,
     )
@@ -136,6 +143,7 @@ def main() -> int:
         thresholds_path=args.thresholds,
         normal_image_path=args.normal_image,
         anomaly_image_path=args.anomaly_image,
+        database_url=required_database_url(),
         requested_device=args.device,
         max_upload_bytes=args.max_upload_bytes,
     )

@@ -3,8 +3,8 @@
 ## 1. 범위
 
 STEP 4-1은 STEP 2에서 생성한 PatchCore artifact와 STEP 3 validation threshold artifact를 하나의
-FastAPI process에서 제공한다. PostgreSQL, Docker, MLflow, monitoring과 anomaly-map visualization은 이
-단계에 포함하지 않는다.
+FastAPI process에서 제공한다. STEP 5에서는 성공 prediction을 required PostgreSQL inspection history에
+기록한다. Docker, MLflow, monitoring과 anomaly-map visualization은 아직 포함하지 않는다.
 
 ```text
 Multipart JPEG/PNG
@@ -17,7 +17,9 @@ Artifact preprocessing → device transfer → PatchCore inference
         ↓
 score > validation image threshold
         ↓
-Image-level JSON response
+Inspection transaction commit
+        ↓
+Inspection UUID + image-level JSON response
 ```
 
 HTTP route는 model-specific inference를 구현하지 않는다. `services/inference/runtime.py`가 기존
@@ -26,19 +28,21 @@ schema와 error mapping만 담당한다.
 
 ## 2. Startup lifecycle
 
-FastAPI lifespan startup에서 다음 순서로 runtime을 정확히 한 번 구성한다.
+FastAPI lifespan startup에서 다음 순서로 required dependency와 runtime을 구성한다.
 
 1. Environment serving configuration 검증
-2. 요청 device 결정(`auto`: CUDA → MPS → CPU)
-3. `metadata.json`과 `thresholds.json` schema 검증
-4. Embedded manifest SHA와 실제 metadata/model SHA provenance 검증
-5. `model.pt`를 pretrained download 없이 복원
-6. Artifact preprocessing과 validation image threshold를 process-local runtime에 보관
-7. Runtime 저장이 끝난 뒤 readiness 활성화
+2. Database engine/session factory 생성과 connectivity 확인
+3. 요청 device 결정(`auto`: CUDA → MPS → CPU)
+4. `metadata.json`과 `thresholds.json` schema 검증
+5. Embedded manifest SHA와 실제 metadata/model SHA provenance 검증
+6. `model.pt`를 pretrained download 없이 복원
+7. Artifact preprocessing과 validation image threshold를 process-local runtime에 보관
+8. DB와 runtime 준비가 끝난 뒤 readiness 활성화
 
 Artifact directory/file, threshold, JSON/schema, provenance 또는 명시적 device가 잘못되면 startup이
 실패하며 application은 ready 상태가 되지 않는다. Request마다 metadata/model을 다시 읽거나 memory bank를
-재구성하지 않는다. Shutdown에 별도 외부 resource가 없으므로 불필요한 cleanup hook은 두지 않는다.
+재구성하지 않는다. Shutdown에서는 SQLAlchemy engine pool을 dispose한다. Table 생성은 startup이 아니라
+Alembic migration에서 수행한다.
 
 ## 3. Configuration
 
@@ -46,6 +50,7 @@ Artifact directory/file, threshold, JSON/schema, provenance 또는 명시적 dev
 | --- | --- | --- |
 | `PATCHCORE_ARTIFACT_DIR` | Yes | `model.pt`와 `metadata.json`이 있는 artifact directory |
 | `PATCHCORE_THRESHOLDS_PATH` | Yes | validation calibration으로 생성한 `thresholds.json` |
+| `DATABASE_URL` | Yes | `postgresql+psycopg://` inspection database URL |
 | `MODEL_DEVICE` | No | `auto`, `cpu`, `mps`, `cuda`; default `auto` |
 | `MAX_UPLOAD_BYTES` | No | Image file 최대 byte 수; default 10 MiB |
 
@@ -58,6 +63,7 @@ Local 실행 예:
 ```bash
 export PATCHCORE_ARTIFACT_DIR=artifacts/models/patchcore/<artifact-id>
 export PATCHCORE_THRESHOLDS_PATH=outputs/evaluation/patchcore/thresholds/<threshold-id>/thresholds.json
+export DATABASE_URL=postgresql+psycopg://<user>:<password>@localhost:5432/<database>
 export MODEL_DEVICE=auto
 
 uv run uvicorn services.api.app:app --host 127.0.0.1 --port 8000
@@ -72,8 +78,9 @@ Process liveness만 나타낸다. Model이 아직 ready가 아니어도 process�
 
 ### `GET /ready`
 
-Model artifact와 threshold가 startup에서 검증·복원된 경우에만 `200`을 반환한다. Runtime이 없으면
-`503 model_not_ready`다. Ready response에는 model name, category와 선택된 device를 포함한다.
+Model artifact/threshold가 검증·복원되고 required DB connection이 유효한 경우에만 `200`을 반환한다.
+Runtime이 없으면 `503 model_not_ready`, DB가 unavailable이면 `503 database_not_ready`다. Ready response에는
+model name, category와 선택된 device를 포함한다.
 
 ### `POST /v1/predictions`
 
@@ -85,6 +92,7 @@ Response:
 
 ```json
 {
+  "inspection_id": "3c9d9238-5a15-4fe1-9752-b233425663c0",
   "model_name": "patchcore",
   "category": "metal_nut",
   "is_anomaly": true,
@@ -96,6 +104,7 @@ Response:
 
 Image 판정은 오직 저장된 validation threshold로 `anomaly_score > image_threshold`를 적용한다. 같은 score는
 normal이다. Test score, request별 threshold 또는 API magic number는 사용하지 않는다.
+성공 inference는 input/model provenance와 함께 commit된 후에만 response를 반환한다.
 
 PatchCore는 defect class classifier가 아니므로 `bent`, `color`, `flip`, `scratch` 같은 defect type을
 반환하지 않는다. Anomaly map도 대용량 float JSON으로 반환하지 않으며 향후 heatmap/overlay contract에서
@@ -115,8 +124,11 @@ API error는 다음 envelope를 사용한다.
 ```
 
 주요 code는 `invalid_request`, `empty_image`, `invalid_image`, `unsupported_media_type`,
-`unsupported_image_format`, `image_too_large`, `model_not_ready`, `inference_failed`, `internal_error`다.
+`unsupported_image_format`, `image_too_large`, `model_not_ready`, `database_not_ready`, `inference_failed`,
+`persistence_unavailable`, `inspection_not_found`, `internal_error`다.
 Client response에는 traceback, artifact path, model internals와 원래 exception message를 노출하지 않는다.
+
+Inspection schema, transaction과 history API는 `INSPECTION_HISTORY.md`에서 관리한다.
 
 ## 6. Concurrency와 worker policy
 
@@ -245,6 +257,11 @@ Provenance:
 측정에는 multipart request부터 completed ASGI response까지 포함한다. Disk image loading, artifact
 restore, warmup, external network RTT와 uvicorn/socket/TLS/proxy는 포함하지 않는다.
 
+이 실측은 inspection persistence 도입 전 STEP 4 schema v1 결과다. STEP 5 이후 현재 benchmark tooling은
+같은 prediction route의 inspection insert/commit도 timing에 포함하고 schema v2
+`inspection_persistence_included=true`로 기록한다. 따라서 향후 PostgreSQL 포함 결과는 이 STEP 4 수치와
+동일한 latency boundary로 직접 비교하지 않는다.
+
 ## 9. Model benchmark와 HTTP benchmark 구분
 
 STEP 3 Tesla T4 p50 21.634ms와 45.114 images/second는 disk image load, artifact restore와 warmup을 제외한
@@ -268,6 +285,7 @@ source code에 하드코딩하지 않는다.
 
 ```bash
 uv sync --locked
+export DATABASE_URL=postgresql+psycopg://<user>:<password>@<host>:5432/<database>
 
 # Kaggle base environment의 wrapt 충돌이 있는 session에서만 project venv에 재설치한다.
 uv pip install --python .venv/bin/python --reinstall wrapt
@@ -288,6 +306,7 @@ uv run --no-sync python -m pipelines.calibrate_patchcore_thresholds \
     "outputs/predictions/patchcore/$VALIDATION_ID/anomaly_maps.pt" \
   --artifact-dir "artifacts/models/patchcore/$ARTIFACT_ID" \
   --output-id "$THRESHOLD_ID"
+uv run --no-sync alembic upgrade head
 uv run --no-sync python -m pipelines.smoke_patchcore_api \
   --artifact-dir "artifacts/models/patchcore/$ARTIFACT_ID" \
   --thresholds \

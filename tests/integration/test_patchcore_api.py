@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,7 +14,13 @@ from torch import Tensor
 
 from services.api.app import create_app
 from services.api.config import ServingSettings
-from services.inference.runtime import InferenceResult, ModelRuntime, PatchCoreRuntimeConfig
+from services.inference.runtime import (
+    InferenceResult,
+    ModelRuntime,
+    PatchCoreRuntimeConfig,
+    ServingProvenance,
+)
+from tests.persistence_helpers import prepare_sqlite_database
 
 
 class _FakeRuntime:
@@ -22,6 +29,12 @@ class _FakeRuntime:
     model_name = "patchcore"
     category = "metal_nut"
     device = "cpu"
+    provenance = ServingProvenance(
+        manifest_sha256="a" * 64,
+        artifact_metadata_sha256="b" * 64,
+        model_sha256="c" * 64,
+        threshold_artifact_sha256="d" * 64,
+    )
 
     # ADD 2026-08-19: API integration fake의 score, threshold와 failure 상태를 초기화한다.
     def __init__(self, *, score: float = 50.0, threshold: float = 40.0, fail: bool = False):
@@ -51,6 +64,7 @@ def _settings(tmp_path: Path, *, max_upload_bytes: int = 1024 * 1024) -> Serving
     return ServingSettings(
         artifact_dir=tmp_path / "artifact",
         thresholds_path=tmp_path / "thresholds.json",
+        database_url=prepare_sqlite_database(tmp_path),
         model_device="cpu",
         max_upload_bytes=max_upload_bytes,
     )
@@ -141,7 +155,9 @@ def test_valid_image_uses_strict_threshold(
         )
 
     assert response.status_code == 200
-    assert response.json() == {
+    payload = response.json()
+    assert UUID(payload.pop("inspection_id"))
+    assert payload == {
         "model_name": "patchcore",
         "category": "metal_nut",
         "is_anomaly": expected_is_anomaly,

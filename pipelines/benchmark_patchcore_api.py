@@ -23,7 +23,11 @@ from services.api.benchmark import (
     summarize_http_measurements,
     write_api_benchmark_artifact,
 )
-from services.api.config import DEFAULT_MAX_UPLOAD_BYTES, ServingSettings
+from services.api.config import (
+    DEFAULT_MAX_UPLOAD_BYTES,
+    ServingSettings,
+    required_database_url,
+)
 from services.api.schemas import HealthResponse, ReadinessResponse
 from services.api.tooling import PreparedImageUpload, prepare_image_upload
 from services.inference.runtime import load_patchcore_runtime, require_serving_provenance
@@ -51,12 +55,14 @@ class ApiBenchmarkOutputSummary:
 
 
 # ADD 2026-08-20: Manifest test image로 FastAPI application HTTP E2E latency를 측정한다.
+# MODIFY 2026-08-20: Required inspection persistence를 application benchmark lifecycle에 포함한다.
 def benchmark_patchcore_api(
     *,
     dataset_root: Path,
     manifest_path: Path,
     artifact_dir: Path,
     thresholds_path: Path,
+    database_url: str,
     output_dir: Path,
     requested_device: str = "auto",
     warmup_count: int = DEFAULT_WARMUP_COUNT,
@@ -92,6 +98,7 @@ def benchmark_patchcore_api(
     settings = ServingSettings(
         artifact_dir=artifact_dir,
         thresholds_path=thresholds_path,
+        database_url=database_url,
         model_device=requested_device,
         max_upload_bytes=max_upload_bytes,
     )
@@ -238,6 +245,7 @@ def main() -> int:
         manifest_path=args.manifest,
         artifact_dir=args.artifact_dir,
         thresholds_path=args.thresholds,
+        database_url=required_database_url(),
         output_dir=args.output_root / args.output_id,
         requested_device=args.device,
         warmup_count=args.warmup_count,

@@ -54,6 +54,7 @@ def prepare_image_upload(path: Path, *, max_upload_bytes: int) -> PreparedImageU
 
 
 # ADD 2026-08-20: HTTP JSON을 public inference schema와 strict threshold 계약으로 검증한다.
+# MODIFY 2026-08-20: Persisted inspection UUID를 포함한 response schema를 검증한다.
 def validate_prediction_payload(
     payload: object,
     *,

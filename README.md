@@ -4,7 +4,7 @@
 MLOps, Monitoring, Kubernetes 운영, 제조 매뉴얼 기반 RAG까지 연결하는
 Production AI 시스템 프로젝트입니다.
 
-> 현재 상태: **STEP 4 — FastAPI Model Serving 완료**
+> 현재 상태: **STEP 5 — PostgreSQL Inspection History 구현 완료, 실제 PostgreSQL 검증 예정**
 
 ---
 
@@ -255,6 +255,11 @@ application-level HTTP E2E 기준입니다. 세부 계약과 실측값은
 FastAPI serving core와 real-artifact smoke/HTTP benchmark tooling의 lifecycle, endpoint, 측정 계약은
 `docs/serving/PATCHCORE_API.md`에서 관리합니다.
 
+성공 prediction은 UUID, UTC 생성 시각, prediction/input/model provenance와 함께 inspection history로
+저장됩니다. SQLAlchemy repository, psycopg 3 production driver와 Alembic migration을 구현했으며 local
+tests는 격리된 SQLite로 계약을 검증합니다. 실제 PostgreSQL integration은 아직 검증하지 않았습니다.
+Schema, transaction, readiness와 조회 API는 `docs/serving/INSPECTION_HISTORY.md`에서 관리합니다.
+
 ---
 
 ## 7. 평가 지표
@@ -346,7 +351,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - [x] STEP 2. Vision AI Baseline
 - [x] STEP 3. 모델 평가 및 Benchmark
 - [x] STEP 4. FastAPI Model Serving (Real-model smoke 및 in-process HTTP E2E 실측 완료)
-- [ ] STEP 5. PostgreSQL 검사 이력
+- [x] STEP 5. PostgreSQL 검사 이력 (구현 완료, 실제 PostgreSQL integration smoke 미검증)
 - [ ] STEP 6. MLflow Experiment / Model Registry
 - [ ] STEP 7. Docker
 - [ ] STEP 8. CI/CD

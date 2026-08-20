@@ -73,6 +73,7 @@ class ModelRuntime(Protocol):
     model_name: str
     category: str
     device: str
+    provenance: ServingProvenance
 
     # ADD 2026-08-19: 한 image batch의 image-level anomaly 결과를 반환한다.
     def predict(self, image: Tensor) -> InferenceResult:

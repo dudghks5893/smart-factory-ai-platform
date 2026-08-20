@@ -41,6 +41,7 @@ def _upload(name: str) -> PreparedImageUpload:
 # ADD 2026-08-20: Strict threshold를 만족하는 valid API response payload를 생성한다.
 def _valid_payload() -> dict[str, object]:
     return {
+        "inspection_id": "00000000-0000-0000-0000-000000000001",
         "model_name": "patchcore",
         "category": "metal_nut",
         "is_anomaly": True,
@@ -169,6 +170,7 @@ def test_api_benchmark_provenance_schema_and_output(tmp_path: Path) -> None:
     assert payload["disk_image_loading_included"] is False
     assert payload["artifact_restore_included"] is False
     assert payload["threshold_applied"] is True
+    assert payload["inspection_persistence_included"] is True
 
 
 # ADD 2026-08-20: 기존 API benchmark artifact overwrite를 명시적으로 거부한다.

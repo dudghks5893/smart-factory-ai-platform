@@ -9,6 +9,8 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from services.persistence.database import PersistenceError
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -50,6 +52,21 @@ async def handle_request_validation_error(
     )
 
 
+# ADD 2026-08-20: Persistence failure를 internal DB detail 없는 service error로 변환한다.
+async def handle_persistence_error(request: Request, exc: Exception) -> JSONResponse:
+    """Log database failure server-side and return a stable safe response."""
+    LOGGER.exception("Inspection persistence failed", exc_info=exc)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": {
+                "code": "persistence_unavailable",
+                "message": "Inspection persistence is unavailable.",
+            }
+        },
+    )
+
+
 # ADD 2026-08-19: 예상하지 못한 request error를 기록하고 내부 정보를 숨긴다.
 async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
     """Log an unexpected exception and return a non-sensitive response."""
@@ -66,8 +83,10 @@ async def handle_unexpected_error(request: Request, exc: Exception) -> JSONRespo
 
 
 # ADD 2026-08-19: Application 전역 exception handler를 한 곳에서 등록한다.
+# MODIFY 2026-08-20: Persistence failure용 safe 503 mapping을 등록한다.
 def install_exception_handlers(app: FastAPI) -> None:
     """Install reusable API, validation, and fallback exception handlers."""
     app.add_exception_handler(ApiError, handle_api_error)
     app.add_exception_handler(RequestValidationError, handle_request_validation_error)
+    app.add_exception_handler(PersistenceError, handle_persistence_error)
     app.add_exception_handler(Exception, handle_unexpected_error)

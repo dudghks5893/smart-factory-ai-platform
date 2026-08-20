@@ -10,7 +10,13 @@ from torch import Tensor
 
 from pipelines.smoke_patchcore_api import smoke_patchcore_api
 from services.api.tooling import validate_prediction_payload
-from services.inference.runtime import InferenceResult, ModelRuntime, PatchCoreRuntimeConfig
+from services.inference.runtime import (
+    InferenceResult,
+    ModelRuntime,
+    PatchCoreRuntimeConfig,
+    ServingProvenance,
+)
+from tests.persistence_helpers import prepare_sqlite_database
 
 
 class _BrightnessRuntime:
@@ -20,6 +26,12 @@ class _BrightnessRuntime:
     category = "metal_nut"
     device = "cpu"
     threshold = 0.5
+    provenance = ServingProvenance(
+        manifest_sha256="a" * 64,
+        artifact_metadata_sha256="b" * 64,
+        model_sha256="c" * 64,
+        threshold_artifact_sha256="d" * 64,
+    )
 
     # ADD 2026-08-20: Smoke fake runtime의 inference 호출 횟수를 초기화한다.
     def __init__(self) -> None:
@@ -63,6 +75,7 @@ def test_smoke_runner_uses_one_runtime_and_validates_both_labels(tmp_path: Path)
         thresholds_path=tmp_path / "thresholds.json",
         normal_image_path=normal_path,
         anomaly_image_path=anomaly_path,
+        database_url=prepare_sqlite_database(tmp_path),
         requested_device="cpu",
         runtime_loader=load,
     )
@@ -85,6 +98,7 @@ def test_prediction_payload_rejects_malformed_response() -> None:
 def test_prediction_payload_rejects_wrong_expected_label(expected_is_anomaly: bool) -> None:
     actual_is_anomaly = not expected_is_anomaly
     payload = {
+        "inspection_id": "00000000-0000-0000-0000-000000000001",
         "model_name": "patchcore",
         "category": "metal_nut",
         "is_anomaly": actual_is_anomaly,

@@ -18,12 +18,13 @@ from shared.benchmarking import (
 )
 from shared.hashing import is_sha256_digest
 
-API_BENCHMARK_SCHEMA_VERSION = 1
+API_BENCHMARK_SCHEMA_VERSION = 2
 API_BENCHMARK_NAME = "patchcore_fastapi_http_e2e"
 API_LATENCY_DEFINITION = (
     "in-process multipart HTTP request through FastAPI routing, upload read, image decode, "
     "tensor conversion, preprocessing, device transfer, PatchCore inference, strict threshold, "
-    "response validation/serialization, and completed ASGI response delivery"
+    "inspection insert/commit, response validation/serialization, and completed ASGI response "
+    "delivery"
 )
 API_TRANSPORT = "in_process_asgi_testclient"
 
@@ -134,6 +135,7 @@ class PatchCoreApiBenchmarkArtifact:
         _validate_metrics(self.metrics, self.measured_count)
 
     # ADD 2026-08-20: API benchmark result와 명시적 timing boundary를 JSON schema로 변환한다.
+    # MODIFY 2026-08-20: Inspection insert/commit 포함 여부를 schema v2에 명시한다.
     def to_json_dict(self) -> dict[str, Any]:
         self.validate()
         return {
@@ -176,6 +178,7 @@ class PatchCoreApiBenchmarkArtifact:
             "warmup_included": False,
             "external_network_round_trip_included": False,
             "threshold_applied": True,
+            "inspection_persistence_included": True,
             "percentile_method": LINEAR_PERCENTILE_METHOD,
             "metrics": self.metrics.to_json_dict(),
             "created_at": self.created_at,

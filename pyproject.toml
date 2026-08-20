@@ -3,13 +3,16 @@ name = "smart-factory-ai-platform"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.16,<2",
     "anomalib==2.5.1",
     "fastapi>=0.141.1",
     "pillow>=12.3.0",
+    "psycopg[binary]>=3.2,<4",
     "pydantic>=2.13.4",
     "python-multipart>=0.0.32",
     "pyyaml>=6.0.3",
     "scikit-learn==1.9.0",
+    "sqlalchemy>=2.0,<3",
     "torch==2.13.0",
     "torchvision==0.28.0",
     "uvicorn>=0.52.4",
