@@ -4,7 +4,7 @@
 MLOps, Monitoring, Kubernetes 운영, 제조 매뉴얼 기반 RAG까지 연결하는
 Production AI 시스템 프로젝트입니다.
 
-> 현재 상태: **STEP 8 — GitHub Actions CI automation 및 CD-ready build foundation 구현 완료**
+> 현재 상태: **STEP 9 — Prometheus / Grafana application monitoring 구현 완료**
 
 ---
 
@@ -257,7 +257,7 @@ FastAPI serving core와 real-artifact smoke/HTTP benchmark tooling의 lifecycle,
 
 성공 prediction은 UUID, UTC 생성 시각, prediction/input/model provenance와 함께 inspection history로
 저장됩니다. SQLAlchemy repository, psycopg 3 production driver와 Alembic migration을 구현했으며 local
-tests는 격리된 SQLite로 계약을 검증합니다. 실제 PostgreSQL integration은 아직 검증하지 않았습니다.
+tests는 격리된 SQLite로 계약을 검증합니다. STEP 7에서 실제 PostgreSQL container integration도 검증했습니다.
 Schema, transaction, readiness와 조회 API는 `docs/serving/INSPECTION_HISTORY.md`에서 관리합니다.
 
 PatchCore config, manifest, project-native model, threshold, evaluation과 benchmark 결과는 별도 backfill
@@ -274,6 +274,11 @@ Pull Request와 `main` push에서 quality, PostgreSQL 17.6 integration 및 produ
 분리 검증하는 GitHub Actions CI를 구현했습니다. CI는 universal lock의 Linux arm64 CPU PyTorch resolution을
 재사용하며, registry publication과 실제 production deployment는 아직 구현하지 않았습니다. Workflow 구조,
 required checks와 CPU/GPU 경계는 `docs/deployment/CI_CD.md`에서 관리합니다.
+
+FastAPI의 route-template HTTP request/latency, inference, persisted prediction 및 persistence metric을
+app-local Prometheus registry로 수집합니다. Prometheus 3.12.0 scrape와 Grafana 13.1.0 datasource/dashboard를
+Compose로 provisioning했으며, monitoring은 API startup을 막지 않는 optional observer입니다. Metric catalog,
+cardinality/security, dashboard와 monitoring/drift 경계는 `docs/monitoring/MONITORING.md`에서 관리합니다.
 
 ---
 
@@ -370,7 +375,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - [x] STEP 6. MLflow Experiment Tracking / Model Lineage (local SQLite 검증, Registry 미구현)
 - [x] STEP 7. Docker (local arm64 build 및 PostgreSQL/Alembic integration 검증)
 - [x] STEP 8. CI automation / CD-ready build foundation (실제 production deployment 미구현)
-- [ ] STEP 9. Prometheus / Grafana Monitoring
+- [x] STEP 9. Prometheus / Grafana application monitoring
 - [ ] STEP 10. Data Drift Detection
 - [ ] STEP 11. Kubernetes
 - [ ] STEP 12. 제조 Dashboard
@@ -391,6 +396,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - `docs/deployment/CI_CD.md`
 - `docs/deployment/DOCKER.md`
 - `docs/mlops/MLFLOW_TRACKING.md`
+- `docs/monitoring/MONITORING.md`
 - `docs/serving/PATCHCORE_API.md`
 - `docs/data/MVTEC_AD_PIPELINE.md`
 - `docs/adr/`

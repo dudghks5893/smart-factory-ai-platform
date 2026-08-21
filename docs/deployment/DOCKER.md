@@ -84,6 +84,13 @@ schema readiness를 함께 확인한다. Dockerfile 기본 healthcheck는 livene
 사용하지만 inference는 app factory DI로 test-only fake runtime을 전달한다. Production code/image에는
 `FAKE_MODEL` 같은 우회 설정이 없다.
 
+### prometheus / grafana
+
+Prometheus와 Grafana는 API의 optional observer이며 API startup dependency가 아니다. Prometheus는
+`api:8000/metrics`를 15초마다 scrape하고 Grafana는 provisioned Prometheus datasource/dashboard를 사용한다.
+Configuration/dashboard는 read-only bind mount하고 time-series/Grafana DB는 각각 `prometheus_data`,
+`grafana_data` named volume에 둔다. 세부 metric 계약은 `docs/monitoring/MONITORING.md`에서 관리한다.
+
 ## 5. Model artifact policy
 
 다음은 image/build context에 포함하지 않는다.
@@ -114,6 +121,8 @@ Compose가 사용하는 주요 값:
 - `PATCHCORE_ARTIFACT_DIR_HOST`, `PATCHCORE_THRESHOLDS_PATH_HOST`
 - `MODEL_DEVICE` (`cpu`가 local Docker 기본값)
 - `MAX_UPLOAD_BYTES`, `API_PORT`, `IMAGE_TAG`
+- `PROMETHEUS_PORT`, `GRAFANA_PORT`
+- `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD` (local example; production secret 교체 필수)
 
 Container 내부 `DATABASE_URL`은 `postgres` service hostname과 `postgresql+psycopg` driver를 사용한다.
 Credential을 image나 repository에 bake하지 않는다.
@@ -125,14 +134,20 @@ make docker-build
 make docker-up
 make docker-down
 make docker-test
+make monitoring-config-check
+make monitoring-up
+make monitoring-down
 ```
 
 - `docker-build`: runtime API image build
 - `docker-up`: PostgreSQL → migration → API 시작. External model/threshold가 필요하다.
 - `docker-down`: containers/network만 종료하며 persistent `postgres_data` volume은 유지한다.
 - `docker-test`: 별도 `smartfactory-step7-test` project에서 PostgreSQL integration을 실행하고 test volume까지 제거한다.
+- `monitoring-config-check`: pinned Prometheus image의 promtool로 scrape config를 검증한다.
+- `monitoring-up`: API와 독립적으로 Prometheus/Grafana observer를 시작한다.
+- `monitoring-down`: monitoring containers를 stop하고 named volume은 보존한다.
 
-다음 명령은 persistent development DB volume을 삭제하는 destructive cleanup이다.
+다음 명령은 persistent PostgreSQL, Prometheus와 Grafana volume을 모두 삭제하는 destructive cleanup이다.
 
 ```bash
 make docker-clean-volumes

@@ -39,11 +39,12 @@ def test_dockerfile_runtime_and_context_policy() -> None:
 
 
 # ADD 2026-08-20: Compose startup ordering, pin, volume과 external model mount를 검증한다.
+# MODIFY 2026-08-21: Optional Prometheus/Grafana service와 monitoring volume contract를 포함한다.
 def test_compose_postgres_migration_and_api_contract() -> None:
     compose = yaml.safe_load((_project_root() / "compose.yaml").read_text(encoding="utf-8"))
     services = compose["services"]
 
-    assert set(services) == {"postgres", "migrate", "api", "test"}
+    assert set(services) == {"postgres", "migrate", "api", "test", "prometheus", "grafana"}
     assert services["postgres"]["image"] == "postgres:17.6-bookworm"
     assert "postgres_data" in compose["volumes"]
     assert services["migrate"]["command"] == ["alembic", "upgrade", "head"]
@@ -55,6 +56,9 @@ def test_compose_postgres_migration_and_api_contract() -> None:
     assert all(volume["read_only"] for volume in services["api"]["volumes"])
     assert services["test"]["build"]["target"] == "test"
     assert services["test"]["profiles"] == ["test"]
+    assert services["prometheus"]["image"] == "prom/prometheus:v3.12.0"
+    assert services["grafana"]["image"] == "grafana/grafana:13.1.0"
+    assert {"postgres_data", "prometheus_data", "grafana_data"} == set(compose["volumes"])
 
 
 # ADD 2026-08-20: CUDA index가 Linux x86_64에만 적용되는 source marker를 검증한다.

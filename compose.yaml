@@ -109,5 +109,48 @@ services:
     init: true
     restart: "no"
 
+  prometheus:
+    image: prom/prometheus:v3.12.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - type: bind
+        source: ./monitoring/prometheus/prometheus.yml
+        target: /etc/prometheus/prometheus.yml
+        read_only: true
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.1.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me-local-only}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+    volumes:
+      - type: bind
+        source: ./monitoring/grafana/provisioning/datasources/prometheus.yaml
+        target: /etc/grafana/provisioning/datasources/prometheus.yaml
+        read_only: true
+      - type: bind
+        source: ./monitoring/grafana/provisioning/dashboards/dashboard.yaml
+        target: /etc/grafana/provisioning/dashboards/dashboard.yaml
+        read_only: true
+      - type: bind
+        source: ./monitoring/grafana/dashboards
+        target: /etc/grafana/dashboards
+        read_only: true
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  prometheus_data:
+  grafana_data:

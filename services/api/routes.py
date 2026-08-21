@@ -23,6 +23,7 @@ from services.inference.runtime import (
     ModelRuntime,
     require_serving_provenance,
 )
+from services.monitoring.metrics import MonitoringMetrics
 from services.persistence.database import DatabaseManager, PersistenceError
 from services.persistence.inspections import (
     Inspection,
@@ -64,7 +65,7 @@ async def ready(request: Request) -> ReadinessResponse:
 
 
 # ADD 2026-08-19: Multipart image를 검증하고 shared runtime의 image-level prediction을 반환한다.
-# MODIFY 2026-08-20: Successful inference를 provenance와 함께 transaction으로 저장한다.
+# MODIFY 2026-08-21: Inference와 insert 경계를 측정하고 persisted result metric을 기록한다.
 @router.post("/v1/predictions", response_model=InferenceResponse)
 async def create_prediction(
     request: Request,
@@ -74,6 +75,7 @@ async def create_prediction(
     runtime = _runtime_from_request(request)
     settings = _settings_from_request(request)
     repository = _repository_from_request(request)
+    monitoring = _monitoring_from_request(request)
 
     # Upload를 bounded read하고 application-side temporary file 없이 tensor로 decode한다.
     try:
@@ -88,7 +90,12 @@ async def create_prediction(
 
     # Blocking model inference는 threadpool에서 실행하고 내부 failure를 client contract로 변환한다.
     try:
-        prediction = await run_in_threadpool(runtime.predict, image_tensor)
+        with monitoring.track_inference(
+            model_name=runtime.model_name,
+            category=runtime.category,
+            device=runtime.device,
+        ):
+            prediction = await run_in_threadpool(runtime.predict, image_tensor)
     except Exception as exc:
         LOGGER.exception("PatchCore request inference failed", exc_info=exc)
         raise ApiError(500, "inference_failed", "Model inference failed.") from exc
@@ -102,24 +109,33 @@ async def create_prediction(
             "inference_provenance_unavailable",
             "Model provenance is unavailable.",
         ) from exc
-    inspection = await run_in_threadpool(
-        repository.create,
-        InspectionCreate(
-            model_name=prediction.model_name,
-            category=prediction.category,
-            is_anomaly=prediction.is_anomaly,
-            anomaly_score=prediction.anomaly_score,
-            threshold=prediction.threshold,
-            comparison_operator=prediction.comparison_operator,
-            image_sha256=sha256_bytes(content),
-            image_size_bytes=len(content),
-            content_type=(image.content_type or "").lower(),
-            model_sha256=provenance.model_sha256,
-            artifact_metadata_sha256=provenance.artifact_metadata_sha256,
-            threshold_artifact_sha256=provenance.threshold_artifact_sha256,
-            manifest_sha256=provenance.manifest_sha256,
-            device=runtime.device,
-        ),
+    try:
+        with monitoring.track_persistence(operation="insert"):
+            inspection = await run_in_threadpool(
+                repository.create,
+                InspectionCreate(
+                    model_name=prediction.model_name,
+                    category=prediction.category,
+                    is_anomaly=prediction.is_anomaly,
+                    anomaly_score=prediction.anomaly_score,
+                    threshold=prediction.threshold,
+                    comparison_operator=prediction.comparison_operator,
+                    image_sha256=sha256_bytes(content),
+                    image_size_bytes=len(content),
+                    content_type=(image.content_type or "").lower(),
+                    model_sha256=provenance.model_sha256,
+                    artifact_metadata_sha256=provenance.artifact_metadata_sha256,
+                    threshold_artifact_sha256=provenance.threshold_artifact_sha256,
+                    manifest_sha256=provenance.manifest_sha256,
+                    device=runtime.device,
+                ),
+            )
+    except PersistenceError:
+        monitoring.record_persistence_error(operation="insert")
+        raise
+    monitoring.record_prediction(
+        category=prediction.category,
+        is_anomaly=prediction.is_anomaly,
     )
     return InferenceResponse(
         inspection_id=inspection.id,
@@ -222,3 +238,11 @@ def _repository_from_request(request: Request) -> InspectionRepository:
     if repository is None:
         raise ApiError(503, "database_not_ready", "Required database is not ready.")
     return cast(InspectionRepository, repository)
+
+
+# ADD 2026-08-21: Request app에서 instance-isolated monitoring registry를 반환한다.
+def _monitoring_from_request(request: Request) -> MonitoringMetrics:
+    monitoring = getattr(request.app.state, "monitoring_metrics", None)
+    if not isinstance(monitoring, MonitoringMetrics):
+        raise RuntimeError("Application monitoring registry is unavailable.")
+    return monitoring

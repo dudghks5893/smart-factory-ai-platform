@@ -1,0 +1,188 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "expr": "sum by (method, route) (rate(smartfactory_http_requests_total[5m]))",
+          "legendFormat": "{{method}} {{route}}",
+          "refId": "A"
+        }
+      ],
+      "title": "API Request Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"max": 1, "min": 0, "unit": "percentunit"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "options": {"legend": {"displayMode": "hidden", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {
+          "expr": "sum(rate(smartfactory_http_requests_total{status_code=~\"[45]..\"}[5m])) / clamp_min(sum(rate(smartfactory_http_requests_total[5m])), 1e-9)",
+          "legendFormat": "error ratio",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP Error Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8},
+      "id": 3,
+      "options": {"legend": {"displayMode": "hidden", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(smartfactory_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP p50",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8},
+      "id": 4,
+      "options": {"legend": {"displayMode": "hidden", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(smartfactory_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
+      "id": 5,
+      "options": {"legend": {"displayMode": "hidden", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(smartfactory_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP p99",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "id": 6,
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(smartfactory_predictions_total[5m]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Prediction Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"max": 1, "min": 0, "unit": "percentunit"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "id": 7,
+      "options": {"legend": {"displayMode": "hidden", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {
+          "expr": "sum(rate(smartfactory_predictions_total{result=\"anomaly\"}[5m])) / clamp_min(sum(rate(smartfactory_predictions_total[5m])), 1e-9)",
+          "legendFormat": "anomaly ratio",
+          "refId": "A"
+        }
+      ],
+      "title": "Anomaly Ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 24},
+      "id": 8,
+      "options": {"legend": {"displayMode": "hidden", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(smartfactory_inference_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ],
+      "title": "Inference p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 24},
+      "id": 9,
+      "options": {"legend": {"displayMode": "hidden", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(smartfactory_persistence_duration_seconds_bucket{operation=\"insert\"}[5m])))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ],
+      "title": "Persistence p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"decimals": 0, "max": 1, "min": 0}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 24},
+      "id": 10,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "max(up{job=\"smartfactory-api\"})",
+          "legendFormat": "API scrape availability",
+          "refId": "A"
+        }
+      ],
+      "title": "Prometheus Target Up",
+      "type": "stat"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 41,
+  "tags": ["smartfactory", "api", "prometheus"],
+  "templating": {"list": []},
+  "time": {"from": "now-30m", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Smart Factory AI — API Overview",
+  "uid": "smartfactory-api-overview",
+  "version": 1
+}

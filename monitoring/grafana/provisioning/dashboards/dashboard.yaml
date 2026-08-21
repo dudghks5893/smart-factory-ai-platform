@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Smart Factory AI
+    orgId: 1
+    folder: Smart Factory AI
+    type: file
+    disableDeletion: true
+    editable: false
+    options:
+      path: /etc/grafana/dashboards

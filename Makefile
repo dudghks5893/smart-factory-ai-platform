@@ -1,4 +1,4 @@
-.PHONY: sync format format-check lint typecheck test check docker-build docker-up docker-down docker-clean-volumes docker-test
+.PHONY: sync format format-check lint typecheck test check docker-build docker-up docker-down docker-clean-volumes docker-test monitoring-up monitoring-down monitoring-config-check
 
 sync:
 	uv sync
@@ -34,3 +34,12 @@ docker-clean-volumes:
 
 docker-test:
 	./scripts/docker_test.sh
+
+monitoring-up:
+	docker compose up --detach prometheus grafana
+
+monitoring-down:
+	docker compose stop prometheus grafana
+
+monitoring-config-check:
+	docker run --rm --entrypoint /bin/promtool --volume "$(CURDIR)/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro" prom/prometheus:v3.12.0 check config /etc/prometheus/prometheus.yml

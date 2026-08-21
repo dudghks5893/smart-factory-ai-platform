@@ -11,6 +11,8 @@ from services.api.config import ServingSettings
 from services.api.errors import install_exception_handlers
 from services.api.routes import router
 from services.inference.runtime import ModelRuntime, PatchCoreRuntimeConfig, load_patchcore_runtime
+from services.monitoring.metrics import MonitoringMetrics, metrics_endpoint
+from services.monitoring.middleware import HttpMetricsMiddleware
 from services.persistence.database import DatabaseManager, create_database_manager
 from services.persistence.inspections import (
     InspectionRepository,
@@ -29,7 +31,7 @@ def load_inspection_repository(database: DatabaseManager) -> InspectionRepositor
 
 
 # ADD 2026-08-19: Lifespan startup과 injectable runtime loader를 가진 FastAPI app을 생성한다.
-# MODIFY 2026-08-20: Required DB connectivity/repository lifecycle을 model readiness에 통합한다.
+# MODIFY 2026-08-21: App-local metrics registry와 monitoring endpoint/middleware를 통합한다.
 def create_app(
     *,
     settings: ServingSettings | None = None,
@@ -39,8 +41,10 @@ def create_app(
 ) -> FastAPI:
     """Create an app that requires database and model readiness during startup."""
 
+    monitoring_metrics = MonitoringMetrics()
+
     # ADD 2026-08-19: Startup load가 완료된 뒤에만 ready 상태로 전환한다.
-    # MODIFY 2026-08-20: DB connection을 먼저 확인하고 shutdown에서 engine을 dispose한다.
+    # MODIFY 2026-08-21: Loaded model identity를 app-local Info metric에 한 번 게시한다.
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         active_settings = settings or ServingSettings.from_environment()
@@ -55,6 +59,7 @@ def create_app(
 
             # Artifact와 threshold를 검증하고 process-local runtime을 정확히 한 번 생성한다.
             runtime = runtime_loader(active_settings.runtime_config())
+            monitoring_metrics.set_model_info(runtime)
             application.state.serving_settings = active_settings
             application.state.database = database
             application.state.inspection_repository = inspection_repository
@@ -75,7 +80,15 @@ def create_app(
     app.state.serving_runtime = None
     app.state.database = None
     app.state.inspection_repository = None
+    app.state.monitoring_metrics = monitoring_metrics
+    app.add_middleware(HttpMetricsMiddleware, metrics=monitoring_metrics)
     install_exception_handlers(app)
+    app.add_api_route(
+        "/metrics",
+        metrics_endpoint,
+        methods=["GET"],
+        include_in_schema=False,
+    )
     app.include_router(router)
     return app
 
