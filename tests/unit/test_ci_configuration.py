@@ -29,7 +29,7 @@ def test_ci_workflow_trigger_permission_and_execution_policy() -> None:
 
 
 # ADD 2026-08-20: Quality, actual PostgreSQL과 runtime image job의 핵심 책임을 검증한다.
-# MODIFY 2026-08-21: Dashboard와 API image build 및 Kubernetes render contract를 검증한다.
+# MODIFY 2026-08-21: API, Dashboard, RAG image build 및 Kubernetes render contract를 검증한다.
 def test_ci_workflow_job_contracts() -> None:
     workflow, _ = _load_ci_workflow()
     jobs = workflow["jobs"]
@@ -66,6 +66,7 @@ def test_ci_workflow_job_contracts() -> None:
     assert {step["with"]["target"] for step in docker_builds} == {
         "runtime",
         "dashboard-runtime",
+        "rag-runtime",
     }
     assert all(step["with"]["platforms"] == "linux/arm64" for step in docker_builds)
     assert all(step["with"]["push"] == "false" for step in docker_builds)
@@ -89,6 +90,8 @@ def test_ci_workflow_dependency_cache_and_artifact_policy() -> None:
     assert "cache-to: type=gha,mode=max,scope=runtime-arm64" in workflow_text
     assert "cache-from: type=gha,scope=dashboard-arm64" in workflow_text
     assert "cache-to: type=gha,mode=max,scope=dashboard-arm64" in workflow_text
+    assert "cache-from: type=gha,scope=rag-arm64" in workflow_text
+    assert "cache-to: type=gha,mode=max,scope=rag-arm64" in workflow_text
     assert "UV_TORCH_BACKEND" not in workflow_text
     assert "actions/upload-artifact" not in workflow_text
     assert "secrets." not in workflow_text

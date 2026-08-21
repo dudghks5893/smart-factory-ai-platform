@@ -3387,6 +3387,12 @@ dev = [
     { name = "ruff" },
     { name = "types-pyyaml" },
 ]
+rag = [
+    { name = "fastapi" },
+    { name = "numpy" },
+    { name = "pydantic" },
+    { name = "uvicorn" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -3419,6 +3425,12 @@ dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.16.3" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20260815" },
+]
+rag = [
+    { name = "fastapi", specifier = "==0.141.1" },
+    { name = "numpy", specifier = "==2.5.2" },
+    { name = "pydantic", specifier = "==2.13.4" },
+    { name = "uvicorn", specifier = "==0.52.4" },
 ]
 
 [[package]]

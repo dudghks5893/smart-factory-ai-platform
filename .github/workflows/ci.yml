@@ -134,6 +134,18 @@ jobs:
           cache-from: type=gha,scope=dashboard-arm64
           cache-to: type=gha,mode=max,scope=dashboard-arm64
 
+      - name: Build independent RAG runtime target
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          target: rag-runtime
+          platforms: linux/arm64
+          push: false
+          tags: smartfactory-rag:ci
+          cache-from: type=gha,scope=rag-arm64
+          cache-to: type=gha,mode=max,scope=rag-arm64
+
   kubernetes:
     name: kubernetes
     needs: quality

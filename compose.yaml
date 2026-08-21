@@ -189,6 +189,56 @@ services:
     init: true
     restart: unless-stopped
 
+  rag:
+    profiles: ["rag"]
+    image: smartfactory-rag:${IMAGE_TAG:-local}
+    build:
+      context: .
+      target: rag-runtime
+    command:
+      - uvicorn
+      - services.rag.app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+      - --workers
+      - "1"
+    environment:
+      RAG_INDEX_DIR: /runtime/rag/index
+      RAG_TOP_K: ${RAG_TOP_K:-5}
+      RAG_MAX_TOP_K: ${RAG_MAX_TOP_K:-10}
+      RAG_MIN_RETRIEVAL_SCORE: ${RAG_MIN_RETRIEVAL_SCORE:-0.2}
+      RAG_REQUEST_TIMEOUT_SECONDS: ${RAG_REQUEST_TIMEOUT_SECONDS:-30}
+      RAG_EMBEDDING_PROVIDER: ${RAG_EMBEDDING_PROVIDER:-openai-compatible}
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-text-embedding-model}
+      RAG_GENERATION_PROVIDER: ${RAG_GENERATION_PROVIDER:-openai-compatible}
+      RAG_GENERATION_MODEL: ${RAG_GENERATION_MODEL:-generation-model}
+      RAG_PROVIDER_API_BASE_URL: ${RAG_PROVIDER_API_BASE_URL:-https://api.openai.com/v1}
+      RAG_PROVIDER_API_KEY: ${RAG_PROVIDER_API_KEY:-}
+    volumes:
+      - type: bind
+        source: ${RAG_INDEX_DIR_HOST:-./artifacts/rag/manuals/current}
+        target: /runtime/rag/index
+        read_only: true
+    ports:
+      - "${RAG_PORT:-8001}:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=2).read()"]
+      interval: 15s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    init: true
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   prometheus_data:

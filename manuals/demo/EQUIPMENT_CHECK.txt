@@ -1,0 +1,7 @@
+PROJECT DEMO SOP — NOT AN ACTUAL FACTORY PROCEDURE
+
+This fictional checklist is provided only for software demonstration and is not an approved factory procedure.
+
+At the start of the demonstration shift, inspect the camera lens for dust or residue, verify that the bracket does not move, and confirm that the lighting matches the configured reference condition.
+
+If equipment remains unstable after cleaning and securing the bracket, keep automated inspection paused and notify the designated demo maintenance contact. Do not compensate for an unstable camera by changing the model threshold.

@@ -133,11 +133,9 @@ PostgreSQL은 초기에는 다음 데이터를 저장한다.
 - Model Version Reference
 - Application 운영 데이터
 
-향후 pgvector를 이용하여 RAG Vector Retrieval도 지원한다.
-
-초기부터 별도의 Vector Database를 추가하지 않고
-PostgreSQL + pgvector를 우선 사용하는 이유는
-Infrastructure 복잡도를 필요 이상으로 늘리지 않기 위해서이다.
+STEP 13의 작은 demo SOP corpus는 PostgreSQL/pgvector에 넣지 않고 immutable normalized NumPy matrix와 exact cosine
+retrieval을 사용한다. Corpus latency/memory가 실제 한계를 넘을 때 retrieval abstraction 뒤에서 pgvector 또는
+다른 vector backend를 검토한다. Inspection history와 민감할 수 있는 RAG query log를 한 table에 섞지 않는다.
 
 ---
 
@@ -150,8 +148,7 @@ QualityRAGService
         │
         ├── Retriever
         ├── EmbeddingProvider
-        ├── Reranker
-        └── LLMProvider
+        └── AnswerGenerator
 ```
 
 예시는 다음과 같다.
@@ -167,7 +164,8 @@ EmbeddingProvider
    └── Local Embedding Model
 
 Retriever
-   └── PostgreSQL / pgvector
+   ├── Exact cosine / immutable NumPy index (current)
+   └── PostgreSQL / pgvector or other backend (future)
 ```
 
 Provider별 SDK 사용 코드는 Provider Adapter 내부에 격리한다.

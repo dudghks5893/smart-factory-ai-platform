@@ -1,4 +1,4 @@
-.PHONY: sync format format-check lint typecheck test check docker-build docker-up docker-down docker-clean-volumes docker-test monitoring-up monitoring-down monitoring-config-check dashboard dashboard-build dashboard-up dashboard-down k8s-render k8s-check
+.PHONY: sync format format-check lint typecheck test check docker-build docker-up docker-down docker-clean-volumes docker-test monitoring-up monitoring-down monitoring-config-check dashboard dashboard-build dashboard-up dashboard-down rag-build rag-up rag-down k8s-render k8s-check
 
 sync:
 	uv sync
@@ -55,6 +55,15 @@ dashboard-up:
 
 dashboard-down:
 	docker compose stop dashboard
+
+rag-build:
+	docker compose --profile rag build rag
+
+rag-up:
+	docker compose --profile rag up --detach --build rag
+
+rag-down:
+	docker compose --profile rag stop rag
 
 k8s-render:
 	kubectl kustomize infra/k8s/base

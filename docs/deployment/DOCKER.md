@@ -3,7 +3,8 @@
 ## 1. 범위와 architecture
 
 STEP 7은 FastAPI application image, 실제 PostgreSQL과 별도 Alembic migration lifecycle을 제공한다. STEP 12는
-이 lifecycle을 변경하지 않고 별도 internal Dashboard image/service를 observer로 추가한다.
+이 lifecycle을 변경하지 않고 별도 internal Dashboard image/service를 observer로 추가한다. STEP 13은 optional
+RAG service와 별도 dependency/image target을 추가한다.
 
 ```text
 postgres:17.6-bookworm
@@ -27,9 +28,11 @@ Base/runtime tool version은 다음 tag로 고정한다.
 - `ghcr.io/astral-sh/uv:0.12.5`
 
 Dependency layer는 `pyproject.toml`과 `uv.lock`을 source보다 먼저 복사하고
-`uv sync --locked --no-dev --no-group dashboard --no-install-project`로 API production dependency만 설치한다.
+`uv sync --locked --no-dev --no-group dashboard --no-group rag --no-install-project`로 API production dependency만
+설치한다.
 Dashboard target은 `uv sync --locked --only-group dashboard --no-install-project`로 Streamlit group만 설치한다.
-Runtime target에는 pytest/Ruff/mypy/Streamlit이 없고 test target에만 quality dependency와 `tests/`를 추가한다.
+RAG target은 `uv sync --locked --only-group rag --no-install-project`로 FastAPI/NumPy/Pydantic/Uvicorn만 설치한다.
+Vision runtime에는 Dashboard/RAG dependency가 없고 test target에만 quality dependency와 `tests/`를 추가한다.
 
 Runtime은 UID/GID 10001의 `app` non-root user로 실행한다. Source bind mount, reload와 development secret은
 사용하지 않는다. 기본 command는 다음과 같다.
@@ -101,6 +104,14 @@ inspection endpoint를 사용하고 browser link는 `GRAFANA_URL=http://localhos
 사용한다. Host drift artifact root만 `/runtime/drift:ro`로 mount하며 non-root/read-only root filesystem과 `/tmp`
 tmpfs를 유지한다. 상세 계약은 `docs/dashboard/DASHBOARD.md`에서 관리한다.
 
+### rag
+
+`rag-runtime` target을 사용하는 optional `rag` profile service다. Vision API/PostgreSQL/Dashboard와 startup
+dependency가 없다. Verified RAG index만 `/runtime/rag/index:ro`로 mount하고 provider key/model/base URL은
+environment에서 받는다. Non-root/read-only root filesystem과 `/tmp` tmpfs를 유지하며 manual/index를 image에
+bake하지 않는다. Linux capabilities는 모두 drop하고 privilege escalation을 비활성화한다. 상세 계약은
+`docs/rag/RAG_ASSISTANT.md`에서 관리한다.
+
 ## 5. Model artifact policy
 
 다음은 image/build context에 포함하지 않는다.
@@ -135,6 +146,8 @@ Compose가 사용하는 주요 값:
 - `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD` (local example; production secret 교체 필수)
 - `DASHBOARD_API_BASE_URL`, `DRIFT_REPORT_DIR_HOST`, `GRAFANA_URL`
 - `DASHBOARD_REQUEST_TIMEOUT_SECONDS`, `DASHBOARD_PORT`
+- `RAG_INDEX_DIR_HOST`, `RAG_TOP_K`, `RAG_MAX_TOP_K`, `RAG_MIN_RETRIEVAL_SCORE`
+- RAG provider/model/base URL/API key, request timeout과 `RAG_PORT`
 
 Container 내부 `DATABASE_URL`은 `postgres` service hostname과 `postgresql+psycopg` driver를 사용한다.
 Credential을 image나 repository에 bake하지 않는다.
@@ -153,6 +166,9 @@ make dashboard
 make dashboard-build
 make dashboard-up
 make dashboard-down
+make rag-build
+make rag-up
+make rag-down
 ```
 
 - `docker-build`: runtime API image build
@@ -166,6 +182,9 @@ make dashboard-down
 - `dashboard-build`: API와 분리된 minimal Dashboard target을 build한다.
 - `dashboard-up`: Dashboard만 시작한다. API unavailable 상태도 UI error로 처리한다.
 - `dashboard-down`: Dashboard container를 stop한다.
+- `rag-build`: Vision/API image와 분리된 RAG runtime target을 build한다.
+- `rag-up`: Optional RAG profile/service만 시작한다. Verified index와 provider secret이 필요하다.
+- `rag-down`: RAG service를 stop한다.
 
 다음 명령은 persistent PostgreSQL, Prometheus와 Grafana volume을 모두 삭제하는 destructive cleanup이다.
 

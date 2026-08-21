@@ -12,7 +12,7 @@ def _project_root() -> Path:
 
 
 # ADD 2026-08-20: Docker image가 pinned/reproducible/non-root artifact policy를 지키는지 검증한다.
-# MODIFY 2026-08-21: API와 Dashboard dependency group/target isolation을 검증한다.
+# MODIFY 2026-08-21: API, Dashboard와 RAG dependency group/target isolation을 검증한다.
 def test_dockerfile_runtime_and_context_policy() -> None:
     root = _project_root()
     dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
@@ -20,11 +20,16 @@ def test_dockerfile_runtime_and_context_policy() -> None:
 
     assert "python:3.12.14-slim-bookworm" in dockerfile
     assert "ghcr.io/astral-sh/uv:0.12.5" in dockerfile
-    assert "uv sync --locked --no-dev --no-group dashboard --no-install-project" in dockerfile
+    assert (
+        "uv sync --locked --no-dev --no-group dashboard --no-group rag --no-install-project"
+        in dockerfile
+    )
     assert "uv sync --locked --only-group dashboard --no-install-project" in dockerfile
+    assert "uv sync --locked --only-group rag --no-install-project" in dockerfile
     assert "FROM application AS runtime" in dockerfile
     assert "FROM application AS test" in dockerfile
     assert "FROM application-base AS dashboard-runtime" in dockerfile
+    assert "FROM application-base AS rag-runtime" in dockerfile
     assert "USER app" in dockerfile
     assert '"--workers", "1"' in dockerfile
     assert "COPY ." not in dockerfile
@@ -42,7 +47,7 @@ def test_dockerfile_runtime_and_context_policy() -> None:
 
 
 # ADD 2026-08-20: Compose startup ordering, pin, volume과 external model mount를 검증한다.
-# MODIFY 2026-08-21: Dashboard image, read-only artifact와 port contract를 추가한다.
+# MODIFY 2026-08-21: Dashboard/RAG observer image와 read-only artifact contract를 추가한다.
 def test_compose_postgres_migration_and_api_contract() -> None:
     compose = yaml.safe_load((_project_root() / "compose.yaml").read_text(encoding="utf-8"))
     services = compose["services"]
@@ -55,6 +60,7 @@ def test_compose_postgres_migration_and_api_contract() -> None:
         "prometheus",
         "grafana",
         "dashboard",
+        "rag",
     }
     assert services["postgres"]["image"] == "postgres:17.6-bookworm"
     assert "postgres_data" in compose["volumes"]
@@ -76,6 +82,16 @@ def test_compose_postgres_migration_and_api_contract() -> None:
     assert dashboard["volumes"][0]["target"] == "/runtime/drift"
     assert dashboard["ports"] == ["${DASHBOARD_PORT:-8501}:8501"]
     assert "depends_on" not in dashboard
+    rag = services["rag"]
+    assert rag["profiles"] == ["rag"]
+    assert rag["build"]["target"] == "rag-runtime"
+    assert rag["read_only"] is True
+    assert rag["cap_drop"] == ["ALL"]
+    assert rag["security_opt"] == ["no-new-privileges:true"]
+    assert rag["volumes"][0]["read_only"] is True
+    assert rag["volumes"][0]["target"] == "/runtime/rag/index"
+    assert rag["ports"] == ["${RAG_PORT:-8001}:8001"]
+    assert "depends_on" not in rag
     assert {"postgres_data", "prometheus_data", "grafana_data"} == set(compose["volumes"])
 
 
