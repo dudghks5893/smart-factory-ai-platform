@@ -4,7 +4,7 @@
 MLOps, Monitoring, Kubernetes 운영, 제조 매뉴얼 기반 RAG까지 연결하는
 Production AI 시스템 프로젝트입니다.
 
-> 현재 상태: **STEP 9 — Prometheus / Grafana application monitoring 구현 완료**
+> 현재 상태: **STEP 10 — PatchCore production drift detection 구현 완료**
 
 ---
 
@@ -120,7 +120,8 @@ smart-factory-ai-platform/
 ├── ml/
 │   ├── datasets/
 │   ├── training/
-│   └── evaluation/
+│   ├── evaluation/
+│   └── drift/
 ├── pipelines/
 ├── configs/
 │   ├── data/
@@ -280,6 +281,12 @@ app-local Prometheus registry로 수집합니다. Prometheus 3.12.0 scrape와 Gr
 Compose로 provisioning했으며, monitoring은 API startup을 막지 않는 optional observer입니다. Metric catalog,
 cardinality/security, dashboard와 monitoring/drift 경계는 `docs/monitoring/MONITORING.md`에서 관리합니다.
 
+Validation-normal score를 full model/threshold lineage와 함께 immutable reference로 고정하고, PostgreSQL
+inspection history의 category/model/time window를 PSI, score quantile shift와 anomaly-ratio 절대 변화로 비교하는
+STEP 10 batch CLI를 구현했습니다. Current sample 30건 미만은 `insufficient_data`로 분리하며 drift는 성능 저하나
+automatic retraining을 의미하지 않습니다. Reference/window/status/output 계약은
+`docs/monitoring/DRIFT.md`에서 관리합니다.
+
 ---
 
 ## 7. 평가 지표
@@ -316,7 +323,7 @@ cardinality/security, dashboard와 monitoring/drift 경계는 `docs/monitoring/M
 
 ### Drift
 
-- Input / Feature / Embedding / Anomaly Score Distribution 기반 Drift
+- PatchCore anomaly score PSI / quantile shift / anomaly prediction ratio
 
 ### RAG
 
@@ -376,7 +383,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - [x] STEP 7. Docker (local arm64 build 및 PostgreSQL/Alembic integration 검증)
 - [x] STEP 8. CI automation / CD-ready build foundation (실제 production deployment 미구현)
 - [x] STEP 9. Prometheus / Grafana application monitoring
-- [ ] STEP 10. Data Drift Detection
+- [x] STEP 10. PatchCore production drift detection (batch CLI, automatic retraining 미구현)
 - [ ] STEP 11. Kubernetes
 - [ ] STEP 12. 제조 Dashboard
 - [ ] STEP 13. 제조 Manual / SOP RAG
@@ -397,6 +404,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - `docs/deployment/DOCKER.md`
 - `docs/mlops/MLFLOW_TRACKING.md`
 - `docs/monitoring/MONITORING.md`
+- `docs/monitoring/DRIFT.md`
 - `docs/serving/PATCHCORE_API.md`
 - `docs/data/MVTEC_AD_PIPELINE.md`
 - `docs/adr/`

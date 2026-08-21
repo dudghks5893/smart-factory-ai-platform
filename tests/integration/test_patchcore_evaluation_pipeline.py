@@ -17,6 +17,7 @@ from ml.training.patchcore import (
 from ml.training.preprocessing import PatchCorePreprocessingConfig
 from pipelines.calibrate_patchcore_thresholds import calibrate_patchcore_thresholds
 from pipelines.evaluate_patchcore import evaluate_patchcore
+from pipelines.prepare_patchcore_drift_reference import prepare_patchcore_drift_reference
 from shared.hashing import sha256_file
 
 
@@ -171,6 +172,7 @@ def _write_predictions(
 
 
 # ADD 2026-08-19: Calibration에서 fixed-threshold test metric 저장까지 전체 계약을 검증한다.
+# MODIFY 2026-08-21: Calibration provenance에서 validation-normal drift reference 검증을 추가한다.
 def test_calibration_then_evaluation_produces_inspectable_metrics(tmp_path: Path) -> None:
     # Synthetic manifest, artifact와 normal-only validation prediction을 준비한다.
     dataset_root, manifest_path = _build_dataset_and_manifest(tmp_path)
@@ -215,6 +217,23 @@ def test_calibration_then_evaluation_produces_inspectable_metrics(tmp_path: Path
     )
     assert calibration.thresholds.image_threshold == pytest.approx(0.4)
     assert calibration.thresholds.pixel_threshold == pytest.approx(0.3)
+
+    # 동일 calibration provenance의 validation-normal score로 drift reference를 고정한다.
+    drift_reference = prepare_patchcore_drift_reference(
+        validation_predictions_path=validation_paths[0],
+        artifact_dir=artifact_dir,
+        thresholds_path=calibration.thresholds_path,
+        manifest_path=manifest_path,
+        output_dir=tmp_path / "drift-reference",
+        reference_id="fixture-reference",
+        created_at="2026-08-21T00:00:00+00:00",
+    )
+    assert drift_reference.reference.source_split == "validation"
+    assert drift_reference.reference.source_label == "normal"
+    assert drift_reference.reference.score_values == (0.2, 0.4)
+    assert drift_reference.reference.lineage.model_sha256 == sha256_file(
+        artifact_dir / MODEL_FILENAME
+    )
 
     anomaly_map = torch.full((1, 8, 8), 0.2)
     anomaly_map[:, :, :4] = 0.9
@@ -296,6 +315,53 @@ def test_calibration_rejects_test_prediction_leakage(tmp_path: Path) -> None:
             manifest_path=manifest_path,
             artifact_dir=artifact_dir,
             output_dir=tmp_path / "threshold-output",
+        )
+
+
+# ADD 2026-08-21: Drift reference가 threshold와 다른 validation prediction hash를 거부한다.
+def test_drift_reference_rejects_prediction_provenance_mismatch(tmp_path: Path) -> None:
+    dataset_root, manifest_path = _build_dataset_and_manifest(tmp_path)
+    artifact_dir = _write_artifact(tmp_path, manifest_path)
+    validation_paths = _write_predictions(
+        tmp_path / "validation-predictions",
+        [
+            RawPredictionRecord(
+                sample_id=f"validation-{index}",
+                category="metal_nut",
+                defect_type="good",
+                label=0,
+                split="validation",
+                raw_anomaly_score=float(index),
+                anomaly_map_key=f"validation-{index}",
+            )
+            for index in (1, 2)
+        ],
+        {
+            "validation-1": torch.zeros(1, 8, 8),
+            "validation-2": torch.zeros(1, 8, 8),
+        },
+    )
+    calibration = calibrate_patchcore_thresholds(
+        validation_predictions_path=validation_paths[0],
+        validation_anomaly_maps_path=validation_paths[1],
+        dataset_root=dataset_root,
+        manifest_path=manifest_path,
+        artifact_dir=artifact_dir,
+        output_dir=tmp_path / "threshold-output",
+    )
+    validation_paths[0].write_text(
+        validation_paths[0].read_text(encoding="utf-8") + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="calibration provenance"):
+        prepare_patchcore_drift_reference(
+            validation_predictions_path=validation_paths[0],
+            artifact_dir=artifact_dir,
+            thresholds_path=calibration.thresholds_path,
+            manifest_path=manifest_path,
+            output_dir=tmp_path / "drift-reference",
+            reference_id="mismatched-reference",
         )
 
 

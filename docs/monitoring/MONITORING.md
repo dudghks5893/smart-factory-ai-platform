@@ -54,8 +54,8 @@ operation이 명확하고 대응 가치가 있어 별도 persistence error count
 - Model SHA는 deployment당 종류가 제한된 static `smartfactory_model_info`에서만 노출한다. Manifest/artifact/
   threshold SHA를 다른 metric에 반복하지 않는다.
 
-Request별 anomaly score를 label이나 gauge로 게시하지 않는다. Score distribution은 STEP 10에서 persisted
-inspection history를 이용해 batch 단위로 분석한다.
+Request별 anomaly score를 label이나 gauge로 게시하지 않는다. Score distribution은 STEP 10 batch CLI가
+persisted inspection history를 이용해 분석하며 계약은 `docs/monitoring/DRIFT.md`에서 관리한다.
 
 ## 4. 측정 경계
 
@@ -156,8 +156,9 @@ Monitoring은 service health/performance를 다룬다.
 - request/prediction rate
 - operational anomaly ratio
 
-STEP 10 drift는 일정 기간의 persisted score/input/embedding distribution 변화를 분석한다. Request별 score를
-Prometheus label로 보내거나 anomaly ratio 변동만으로 drift라고 판정하지 않는다.
+STEP 10 drift는 일정 기간의 persisted PatchCore score/output distribution 변화를 별도 batch process에서
+분석한다. Request별 score를 Prometheus label로 보내거나 anomaly ratio 변동만으로 drift라고 판정하지 않는다.
+Input/feature/embedding drift는 현재 범위가 아니다.
 
 ## 10. 현재 한계와 향후 확장
 

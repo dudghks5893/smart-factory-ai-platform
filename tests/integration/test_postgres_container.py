@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from uuid import UUID
@@ -14,9 +14,20 @@ from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import delete, func, make_url, select, text
+from sqlalchemy import delete, func, make_url, select, text, update
 from torch import Tensor
 
+from ml.drift.patchcore import (
+    DriftLineage,
+    DriftPolicy,
+    DriftReference,
+    anomaly_ratio,
+    build_reference_bin_edges,
+    histogram_counts,
+    summarize_scores,
+    write_drift_reference,
+)
+from pipelines.analyze_patchcore_drift import analyze_patchcore_drift
 from services.api.app import create_app
 from services.api.config import ServingSettings
 from services.inference.runtime import (
@@ -26,6 +37,7 @@ from services.inference.runtime import (
     ServingProvenance,
 )
 from services.persistence.database import PersistenceError, create_database_manager
+from services.persistence.drift import SqlAlchemyDriftWindowRepository
 from services.persistence.inspections import InspectionCreate, SqlAlchemyInspectionRepository
 from services.persistence.models import InspectionRecord
 
@@ -213,3 +225,97 @@ def test_postgres_migration_and_fastapi_persistence(
             unavailable_database.dispose()
     finally:
         database.dispose()
+
+
+# ADD 2026-08-21: PostgreSQL drift smoke용 validation-normal reference artifact를 생성한다.
+def _drift_reference() -> DriftReference:
+    scores = tuple(float(index) for index in range(30))
+    edges = build_reference_bin_edges(scores, 10)
+    return DriftReference(
+        schema_version=1,
+        reference_id="postgres-reference",
+        model_name="patchcore",
+        category="metal_nut",
+        lineage=DriftLineage(
+            model_sha256="a" * 64,
+            artifact_metadata_sha256="b" * 64,
+            manifest_sha256="c" * 64,
+            threshold_artifact_sha256="d" * 64,
+        ),
+        source_split="validation",
+        source_label="normal",
+        validation_predictions_sha256="e" * 64,
+        sample_count=30,
+        score_values=scores,
+        summary=summarize_scores(scores),
+        image_threshold=29.0,
+        comparison_operator=">",
+        reference_anomaly_ratio=anomaly_ratio(scores, threshold=29.0),
+        psi_bin_count_requested=10,
+        psi_bin_edges=edges,
+        reference_bin_counts=histogram_counts(scores, edges),
+        psi_epsilon=1e-6,
+        created_at="2026-08-21T00:00:00+00:00",
+    )
+
+
+# ADD 2026-08-21: 실제 PostgreSQL synthetic inspection query부터 drift report까지 검증한다.
+def test_postgres_patchcore_drift_batch_smoke(tmp_path: Path) -> None:
+    command.upgrade(Config("alembic.ini"), "head")
+    database = create_database_manager(POSTGRES_INTEGRATION_DATABASE_URL)
+    repository = SqlAlchemyInspectionRepository(database.session_factory)
+    since = datetime(2026, 8, 21, tzinfo=UTC)
+    reference = _drift_reference()
+    reference_path = tmp_path / "reference.json"
+    write_drift_reference(reference, reference_path)
+
+    try:
+        with database.engine.begin() as connection:
+            connection.execute(delete(InspectionRecord))
+        rows = []
+        for score in reference.score_values:
+            rows.append(
+                repository.create(
+                    InspectionCreate(
+                        model_name="patchcore",
+                        category="metal_nut",
+                        is_anomaly=False,
+                        anomaly_score=score,
+                        threshold=29.0,
+                        comparison_operator=">",
+                        image_sha256=f"{int(score):064x}",
+                        image_size_bytes=100,
+                        content_type="image/png",
+                        model_sha256="a" * 64,
+                        artifact_metadata_sha256="b" * 64,
+                        threshold_artifact_sha256="d" * 64,
+                        manifest_sha256="c" * 64,
+                        device="cpu",
+                    )
+                )
+            )
+        with database.engine.begin() as connection:
+            for index, row in enumerate(rows):
+                connection.execute(
+                    update(InspectionRecord)
+                    .where(InspectionRecord.id == row.id)
+                    .values(created_at=since + timedelta(seconds=index))
+                )
+
+        # Real psycopg query와 domain analysis를 통해 immutable report를 생성한다.
+        summary = analyze_patchcore_drift(
+            repository=SqlAlchemyDriftWindowRepository(database.session_factory),
+            reference_path=reference_path,
+            output_dir=tmp_path / "drift-output",
+            drift_id="postgres-run",
+            since=since,
+            until=since + timedelta(hours=1),
+            policy=DriftPolicy(),
+            created_at="2026-08-21T01:00:00+00:00",
+        )
+    finally:
+        database.dispose()
+
+    assert summary.report["status"] == "stable"
+    assert summary.report["current_window"]["sample_count"] == 30
+    assert summary.report["statistics"]["psi"] == 0.0
