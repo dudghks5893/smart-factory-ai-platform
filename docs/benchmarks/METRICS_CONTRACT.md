@@ -235,7 +235,13 @@ Monitoring 대상이 결정되기 전에 특정 Drift Library를
 
 ## 13. Retrieval Recall@K
 
-관련 근거 문서가 상위 K개의 검색 결과에 포함되는지를 평가한다.
+Answerable case별 unique expected evidence 중 threshold 적용 후 top-K 결과에 포함된 비율을 계산한다.
+
+- `document_recall_at_k`: expected document ID 기준
+- `chunk_recall_at_k`: index-lineage에 종속된 exact expected chunk ID 기준
+
+Multi-evidence case는 fractional recall을 허용하고 answerable case의 macro average를 보고한다. Unanswerable case는
+Recall denominator에서 제외한다. `mean_reciprocal_rank`는 첫 expected chunk raw rank의 reciprocal macro average다.
 
 사용한 K 값과 Evaluation Dataset을 함께 기록한다.
 
@@ -243,16 +249,24 @@ Monitoring 대상이 결정되기 전에 특정 Drift Library를
 
 ## 14. Citation Accuracy
 
-생성된 답변의 Citation이 실제로 해당 Claim을
-지원하는 근거인지 평가한다.
+STEP 13 structural allow-list validation과 source correctness를 구분한다.
 
-정확한 평가 방법은 RAG Evaluation 단계 전에 고정한다.
+- `citation_precision`: unique cited chunk 중 exact expected chunk의 비율
+- `citation_recall`: expected chunk 중 실제 citation으로 사용된 비율
+
+Answerable case별로 계산한 뒤 macro average하며 no citation은 두 metric 모두 0이다.
 
 ---
 
 ## 15. Faithfulness
 
-생성된 답변이 Retrieved Evidence를 기반으로 작성되었는지 평가한다.
+생성된 답변 claim이 marker로 연결된 Retrieved Evidence에서 지원되는지 평가한다. STEP 14 deterministic baseline은
+answer의 non-empty line을 claim으로 보고 normalized claim text가 cited chunk에 직접 포함되는지 계산한다.
+
+`faithfulness = supported cited claims / all answer claims`
+
+Faithfulness는 correctness와 다르다. 별도 `reference_fact_recall`은 versioned dataset의 required term coverage를
+correctness diagnostic으로 측정한다.
 
 Evaluation 방법은 다음 중 하나가 될 수 있다.
 
@@ -261,6 +275,9 @@ Evaluation 방법은 다음 중 하나가 될 수 있다.
 - Hybrid Evaluation
 
 사용한 평가 방식과 Evaluator Model을 반드시 기록한다.
+
+Unanswerable case는 insufficient context, generator 미호출과 empty citation을 모두 만족할 때
+`unanswerable_abstention_accuracy`의 correct case로 계산한다.
 
 ---
 

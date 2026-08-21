@@ -4,7 +4,7 @@
 MLOps, Monitoring, Kubernetes 운영, 제조 매뉴얼 기반 RAG까지 연결하는
 Production AI 시스템 프로젝트입니다.
 
-> 현재 상태: **STEP 13 — SOP/Manual RAG Assistant 구현 완료, external provider 검증 대기**
+> 현재 상태: **STEP 14 — Deterministic RAG Evaluation 완료, production provider benchmark 대기**
 
 ---
 
@@ -305,8 +305,13 @@ STEP 13은 Markdown/TXT demo SOP를 deterministic chunk와 immutable NumPy embed
 pipeline, exact cosine retrieval 및 grounded generation/citation validation을 별도 FastAPI RAG service로
 구현했습니다. Answer에는 structured citation과 STEP 14 evaluation용 retrieval evidence가 포함되며, context가
 약하면 generator 호출 없이 abstain합니다. 현재 corpus는 명시적인 project demo이고 Vector DB, private SOP,
-external paid embedding/LLM 실제 호출, final RAG evaluation과 GKE deployment는 아직 수행하지 않았습니다.
-Architecture, artifact/API/provider/security와 평가 경계는 `docs/rag/RAG_ASSISTANT.md`에서 관리합니다.
+external paid embedding/LLM 실제 호출과 GKE deployment는 아직 수행하지 않았습니다. Architecture,
+artifact/API/provider/security는 `docs/rag/RAG_ASSISTANT.md`에서 관리합니다.
+
+STEP 14는 9개 public demo QA case와 existing immutable index를 사용해 deterministic offline RAG evaluation을
+완료했습니다. Document Recall@1/3/5는 0.5625/0.875/1.0, Citation Precision/Recall은 0.25625/1.0,
+extractive-baseline Faithfulness와 unanswerable Abstention Accuracy는 각각 1.0입니다. 이는 production LLM이나 실제
+factory SOP 성능이 아니며 metric 정의, lineage, 실행과 한계는 `docs/rag/RAG_EVALUATION.md`에서 관리합니다.
 
 ---
 
@@ -408,7 +413,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - [x] STEP 11. Kubernetes/GCP deployment foundation (실제 GKE/GPU 배포 미검증)
 - [x] STEP 12. 제조 Dashboard (internal Streamlit/Compose, 실제 GKE/IAP 배포 미구현)
 - [x] STEP 13. 제조 Manual / SOP RAG (demo corpus/deterministic tests, external provider 미검증)
-- [ ] STEP 14. RAG Evaluation
+- [x] STEP 14. RAG Evaluation (9-case public demo, deterministic baseline, external judge 미사용)
 - [ ] STEP 15. 최종 성능 / Latency / 비용 Benchmark
 - [ ] STEP 16. README / Architecture 최종 정리
 
@@ -429,6 +434,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - `docs/monitoring/MONITORING.md`
 - `docs/monitoring/DRIFT.md`
 - `docs/rag/RAG_ASSISTANT.md`
+- `docs/rag/RAG_EVALUATION.md`
 - `docs/serving/PATCHCORE_API.md`
 - `docs/data/MVTEC_AD_PIPELINE.md`
 - `docs/adr/`

@@ -148,6 +148,10 @@ Generated RAG index의 `metadata.json`, `chunks.jsonl`, `embeddings.npy`는
 `artifacts/rag/manuals/<index-id>/` 아래 artifact이며 Git에 저장하지 않는다. Index에는 corpus-relative source
 path, source SHA와 provider/model identity만 기록하고 API key나 local absolute path를 기록하지 않는다.
 
+Versioned public RAG evaluation dataset은 `configs/evaluation/`에 Commit한다. Generated evaluation summary와 case
+evidence는 `outputs/evaluation/rag/<evaluation-id>/` 아래 immutable artifact이며 Git에 저장하지 않는다. Dataset
+SHA, index metadata/corpus/chunking/embedding lineage와 output hash를 함께 기록하고 credential은 저장하지 않는다.
+
 ---
 
 ## 9. 향후 Cloud Artifact 구조

@@ -228,12 +228,12 @@ TLS, rate limit, authorization과 audit policy를 추가해야 한다. RAG quest
 
 ## 13. Evaluation와 deployment boundary
 
-STEP 14 evaluation record는 최소 `question`, expected document IDs, optional expected chunk IDs/reference answer와
-actual retrieval rank/score, answer/citations를 연결할 수 있어야 한다. STEP 13 API/artifact가 이 evidence를
-보존하지만 final Recall@K, Citation Accuracy와 Faithfulness judge는 아직 실행하지 않았다.
+STEP 14에서 versioned public demo QA dataset, document/chunk Recall@K, citation precision/recall, deterministic
+faithfulness, abstention과 immutable evaluation artifact를 구현하고 실제 demo 결과를 산출했다. Metric 정의,
+index/dataset lineage, actual score와 한계는 `docs/rag/RAG_EVALUATION.md`에서 관리한다.
 
-External paid embedding/generation provider smoke도 credential이 없어 실행하지 않았다. Deterministic demo retrieval,
-grounded fake generation, citation validation과 API failure behavior만 CI에서 검증한다.
+External paid embedding/generation provider와 LLM judge는 credential이 없어 실행하지 않았다. STEP 14 점수는
+evaluation-only deterministic embedding/extractive generator 결과이며 production provider 성능이 아니다.
 
 STEP 11 Kubernetes manifest와 STEP 12 Dashboard에는 RAG workload/chat UI를 추가하지 않았다. Future GKE 배포는
 RAG workload, index delivery, provider secret, authentication/IAP, resource/probe와 provider egress policy를 별도로
