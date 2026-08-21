@@ -150,6 +150,45 @@ services:
       - "${GRAFANA_PORT:-3000}:3000"
     restart: unless-stopped
 
+  dashboard:
+    image: smartfactory-dashboard:${IMAGE_TAG:-local}
+    build:
+      context: .
+      target: dashboard-runtime
+    command:
+      - streamlit
+      - run
+      - apps/dashboard/app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.headless=true
+      - --server.fileWatcherType=none
+      - --browser.gatherUsageStats=false
+    environment:
+      DASHBOARD_API_BASE_URL: ${DASHBOARD_API_BASE_URL:-http://api:8000}
+      DRIFT_REPORT_DIR: /runtime/drift
+      GRAFANA_URL: ${GRAFANA_URL:-http://localhost:3000}
+      DASHBOARD_REQUEST_TIMEOUT_SECONDS: ${DASHBOARD_REQUEST_TIMEOUT_SECONDS:-5}
+      HOME: /tmp/dashboard-home
+    volumes:
+      - type: bind
+        source: ${DRIFT_REPORT_DIR_HOST:-./outputs/drift/patchcore}
+        target: /runtime/drift
+        read_only: true
+    ports:
+      - "${DASHBOARD_PORT:-8501}:8501"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=2).read()"]
+      interval: 15s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    read_only: true
+    tmpfs:
+      - /tmp
+    init: true
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   prometheus_data:

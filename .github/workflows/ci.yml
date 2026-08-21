@@ -122,6 +122,18 @@ jobs:
           cache-from: type=gha,scope=runtime-arm64
           cache-to: type=gha,mode=max,scope=runtime-arm64
 
+      - name: Build internal dashboard runtime target
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          target: dashboard-runtime
+          platforms: linux/arm64
+          push: false
+          tags: smartfactory-dashboard:ci
+          cache-from: type=gha,scope=dashboard-arm64
+          cache-to: type=gha,mode=max,scope=dashboard-arm64
+
   kubernetes:
     name: kubernetes
     needs: quality

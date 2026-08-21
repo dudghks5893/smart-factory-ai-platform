@@ -3,8 +3,9 @@
 ## 1. 현재 범위
 
 STEP 8은 Pull Request와 `main` push에 대한 CI automation을 제공한다. Quality gate, 실제 PostgreSQL
-integration과 production runtime Docker target build가 모두 통과해야 한다. Registry publication과 실제
-production deployment는 아직 구현하지 않았다.
+integration과 production runtime Docker target build가 모두 통과해야 한다. STEP 12부터 같은 Docker job이
+internal Dashboard runtime target도 분리 build한다. Registry publication과 실제 production deployment는 아직
+구현하지 않았다.
 
 하나의 `.github/workflows/ci.yml`에서 책임을 다음처럼 분리한다.
 
@@ -81,10 +82,13 @@ self-hosted GPU runner 정책이 정해진 뒤 별도 검증해야 한다.
 ## 6. Docker validation
 
 Docker job은 먼저 `docker compose config --quiet`로 Compose contract를 검증하고, Buildx로 Dockerfile의
-`runtime` target을 native `linux/arm64` CPU image로 build한다. PostgreSQL integration은 service container와
-host test process를 사용하므로 Dockerfile `test` target을 중복 build하지 않는다.
+`runtime` target을 native `linux/arm64` CPU image로 build한다. 별도 `dashboard-runtime` target도 같은 job에서
+build해 Streamlit dependency/image contract를 검증한다. Dashboard target은 dashboard group만 설치하므로 PyTorch
+runtime layer를 중복 설치하지 않는다. PostgreSQL integration은 service container와 host test process를
+사용하므로 Dockerfile `test` target을 중복 build하지 않는다.
 
-BuildKit cache는 lock/source 변경을 실제 layer cache key에 반영하고 GitHub Actions cache backend를 사용한다.
+BuildKit cache는 API runtime과 Dashboard target에 별도 scope를 사용하고, lock/source 변경을 실제 layer cache
+key에 반영한다.
 Image는 push하거나 export하지 않으며 Docker build record artifact upload도 비활성화한다. 따라서 raw dataset,
 model, outputs와 MLflow artifact가 Actions artifact로 올라가지 않는다.
 

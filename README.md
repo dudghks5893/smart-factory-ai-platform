@@ -4,7 +4,7 @@
 MLOps, Monitoring, Kubernetes 운영, 제조 매뉴얼 기반 RAG까지 연결하는
 Production AI 시스템 프로젝트입니다.
 
-> 현재 상태: **STEP 11 — Kubernetes/GCP deployment foundation 구현 완료, 실제 GKE 배포 대기**
+> 현재 상태: **STEP 12 — Internal AI Operations Dashboard 구현 완료, 실제 GKE 배포 대기**
 
 ---
 
@@ -77,6 +77,7 @@ RAG Evaluation
 - Grafana
 - Kubernetes
 - GCP
+- Streamlit
 
 ### RAG
 
@@ -293,6 +294,13 @@ Kubernetes/GCP deployment foundation이며 실제 GKE cluster/GPU/Cloud SQL/Clou
 않았습니다. 배포 순서, security/resource/probe/rollback과 GCP target은
 `docs/deployment/KUBERNETES_GCP.md`에서 관리합니다.
 
+Streamlit internal operations Dashboard에서 기존 FastAPI inspection history/detail API, record별 anomaly
+score/threshold, model lineage와 STEP 10 latest drift report를 한 화면에 표시합니다. KPI와 anomaly ratio는 현재
+조회된 AI prediction sample 기준이며 confirmed defect rate가 아닙니다. Grafana는 service metric 전용 UI로 유지하고
+Dashboard는 browser-accessible link만 제공합니다. Compose에서는 별도 non-root/read-only image로 실행하며 실제
+GKE/IAP deployment는 아직 구현하지 않았습니다. Data source, 오류/empty state, Docker와 security 계약은
+`docs/dashboard/DASHBOARD.md`에서 관리합니다.
+
 ---
 
 ## 7. 평가 지표
@@ -391,7 +399,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - [x] STEP 9. Prometheus / Grafana application monitoring
 - [x] STEP 10. PatchCore production drift detection (batch CLI, automatic retraining 미구현)
 - [x] STEP 11. Kubernetes/GCP deployment foundation (실제 GKE/GPU 배포 미검증)
-- [ ] STEP 12. 제조 Dashboard
+- [x] STEP 12. 제조 Dashboard (internal Streamlit/Compose, 실제 GKE/IAP 배포 미구현)
 - [ ] STEP 13. 제조 Manual / SOP RAG
 - [ ] STEP 14. RAG Evaluation
 - [ ] STEP 15. 최종 성능 / Latency / 비용 Benchmark
@@ -409,6 +417,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - `docs/deployment/CI_CD.md`
 - `docs/deployment/DOCKER.md`
 - `docs/deployment/KUBERNETES_GCP.md`
+- `docs/dashboard/DASHBOARD.md`
 - `docs/mlops/MLFLOW_TRACKING.md`
 - `docs/monitoring/MONITORING.md`
 - `docs/monitoring/DRIFT.md`

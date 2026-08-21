@@ -2,7 +2,8 @@
 
 ## 1. 범위와 architecture
 
-STEP 7은 FastAPI application image, 실제 PostgreSQL과 별도 Alembic migration lifecycle을 제공한다.
+STEP 7은 FastAPI application image, 실제 PostgreSQL과 별도 Alembic migration lifecycle을 제공한다. STEP 12는
+이 lifecycle을 변경하지 않고 별도 internal Dashboard image/service를 observer로 추가한다.
 
 ```text
 postgres:17.6-bookworm
@@ -26,8 +27,9 @@ Base/runtime tool version은 다음 tag로 고정한다.
 - `ghcr.io/astral-sh/uv:0.12.5`
 
 Dependency layer는 `pyproject.toml`과 `uv.lock`을 source보다 먼저 복사하고
-`uv sync --locked --no-dev --no-install-project`로 production dependency만 설치한다. Runtime target에는
-pytest/Ruff/mypy가 없고 test target에만 dev group과 `tests/`를 추가한다.
+`uv sync --locked --no-dev --no-group dashboard --no-install-project`로 API production dependency만 설치한다.
+Dashboard target은 `uv sync --locked --only-group dashboard --no-install-project`로 Streamlit group만 설치한다.
+Runtime target에는 pytest/Ruff/mypy/Streamlit이 없고 test target에만 quality dependency와 `tests/`를 추가한다.
 
 Runtime은 UID/GID 10001의 `app` non-root user로 실행한다. Source bind mount, reload와 development secret은
 사용하지 않는다. 기본 command는 다음과 같다.
@@ -91,6 +93,14 @@ Prometheus와 Grafana는 API의 optional observer이며 API startup dependency�
 Configuration/dashboard는 read-only bind mount하고 time-series/Grafana DB는 각각 `prometheus_data`,
 `grafana_data` named volume에 둔다. 세부 metric 계약은 `docs/monitoring/MONITORING.md`에서 관리한다.
 
+### dashboard
+
+Streamlit `dashboard-runtime` target을 사용하는 API client/observer다. API startup dependency가 아니므로 Dashboard
+실패가 PostgreSQL/migration/API lifecycle을 막지 않는다. `DASHBOARD_API_BASE_URL=http://api:8000`으로 기존
+inspection endpoint를 사용하고 browser link는 `GRAFANA_URL=http://localhost:3000`처럼 사용자 접근 주소를
+사용한다. Host drift artifact root만 `/runtime/drift:ro`로 mount하며 non-root/read-only root filesystem과 `/tmp`
+tmpfs를 유지한다. 상세 계약은 `docs/dashboard/DASHBOARD.md`에서 관리한다.
+
 ## 5. Model artifact policy
 
 다음은 image/build context에 포함하지 않는다.
@@ -123,6 +133,8 @@ Compose가 사용하는 주요 값:
 - `MAX_UPLOAD_BYTES`, `API_PORT`, `IMAGE_TAG`
 - `PROMETHEUS_PORT`, `GRAFANA_PORT`
 - `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD` (local example; production secret 교체 필수)
+- `DASHBOARD_API_BASE_URL`, `DRIFT_REPORT_DIR_HOST`, `GRAFANA_URL`
+- `DASHBOARD_REQUEST_TIMEOUT_SECONDS`, `DASHBOARD_PORT`
 
 Container 내부 `DATABASE_URL`은 `postgres` service hostname과 `postgresql+psycopg` driver를 사용한다.
 Credential을 image나 repository에 bake하지 않는다.
@@ -137,6 +149,10 @@ make docker-test
 make monitoring-config-check
 make monitoring-up
 make monitoring-down
+make dashboard
+make dashboard-build
+make dashboard-up
+make dashboard-down
 ```
 
 - `docker-build`: runtime API image build
@@ -146,6 +162,10 @@ make monitoring-down
 - `monitoring-config-check`: pinned Prometheus image의 promtool로 scrape config를 검증한다.
 - `monitoring-up`: API와 독립적으로 Prometheus/Grafana observer를 시작한다.
 - `monitoring-down`: monitoring containers를 stop하고 named volume은 보존한다.
+- `dashboard`: host에서 Streamlit Dashboard를 manual-refresh mode로 실행한다.
+- `dashboard-build`: API와 분리된 minimal Dashboard target을 build한다.
+- `dashboard-up`: Dashboard만 시작한다. API unavailable 상태도 UI error로 처리한다.
+- `dashboard-down`: Dashboard container를 stop한다.
 
 다음 명령은 persistent PostgreSQL, Prometheus와 Grafana volume을 모두 삭제하는 destructive cleanup이다.
 
