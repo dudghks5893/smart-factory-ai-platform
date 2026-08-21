@@ -4,7 +4,7 @@
 MLOps, Monitoring, Kubernetes 운영, 제조 매뉴얼 기반 RAG까지 연결하는
 Production AI 시스템 프로젝트입니다.
 
-> 현재 상태: **STEP 14 — Deterministic RAG Evaluation 완료, production provider benchmark 대기**
+> 현재 상태: **STEP 15 — Final Benchmark & Performance Evidence 완료, STEP 16 최종 정리 대기**
 
 ---
 
@@ -44,6 +44,8 @@ Autoscaling / Rolling Update / Rollback
 제조 Manual / SOP 기반 RAG
     ↓
 RAG Evaluation
+    ↓
+Final Benchmark Evidence
 ```
 
 단순한 모델 실험이 아니라 모델이 실제 서비스 환경에서
@@ -244,13 +246,14 @@ STEP 3 PatchCore evaluation과 Tesla T4 inference benchmark까지 완료했습�
 | Image FP / FN | 0 / 1 |
 | T4 inference p50 / p95 / p99 | 21.634 / 25.775 / 27.113 ms |
 | T4 offline model throughput | 45.114 images/second |
-| T4 FastAPI in-process HTTP p50 | 44.902 ms |
-| T4 FastAPI throughput / success | 22.030 requests/second / 115 of 115 |
+| T4 FastAPI schema v1 in-process HTTP p50 | 44.902 ms |
+| T4 FastAPI schema v1 throughput / success | 22.030 requests/second / 115 of 115 |
 
 Offline throughput은 batch size 1에서 disk I/O, artifact restore와 warmup을 제외한 값입니다. 56초의
 training wall time과 CLI 전체 runtime은 inference latency가 아닙니다. FastAPI 결과는 disk image loading,
 artifact restore, warmup, external network RTT와 uvicorn/socket/TLS/proxy를 제외한 in-process
-application-level HTTP E2E 기준입니다. 세부 계약과 실측값은
+application-level HTTP E2E 기준이며 inspection persistence도 포함하지 않는 schema v1 결과입니다. 세부 계약과
+실측값은
 `docs/benchmarks/PATCHCORE_EVALUATION.md`와
 `docs/benchmarks/PATCHCORE_INFERENCE_BENCHMARK.md`에서 관리합니다.
 
@@ -312,6 +315,13 @@ STEP 14는 9개 public demo QA case와 existing immutable index를 사용해 det
 완료했습니다. Document Recall@1/3/5는 0.5625/0.875/1.0, Citation Precision/Recall은 0.25625/1.0,
 extractive-baseline Faithfulness와 unanswerable Abstention Accuracy는 각각 1.0입니다. 이는 production LLM이나 실제
 factory SOP 성능이 아니며 metric 정의, lineage, 실행과 한계는 `docs/rag/RAG_EVALUATION.md`에서 관리합니다.
+
+STEP 15는 위 official STEP 3/4 결과와 actual STEP 14 artifact를 재실행·튜닝 없이 집계하는 immutable final
+benchmark contract를 구현했습니다. Vision image/pixel quality, T4 model runtime, FastAPI schema v1, deterministic
+RAG와 platform verification을 서로 다른 환경과 measurement boundary로 보존합니다. Real PostgreSQL을 포함한 T4
+API schema v2는 실제 comparable artifact가 없어 `not_available`로 기록했으며 CPU/SQLite/fake 수치로 대체하지
+않았습니다. 최종 결과, source SHA, 실행과 pending production 검증은
+`docs/benchmarks/FINAL_BENCHMARK.md`에서 관리합니다.
 
 ---
 
@@ -414,7 +424,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - [x] STEP 12. 제조 Dashboard (internal Streamlit/Compose, 실제 GKE/IAP 배포 미구현)
 - [x] STEP 13. 제조 Manual / SOP RAG (demo corpus/deterministic tests, external provider 미검증)
 - [x] STEP 14. RAG Evaluation (9-case public demo, deterministic baseline, external judge 미사용)
-- [ ] STEP 15. 최종 성능 / Latency / 비용 Benchmark
+- [x] STEP 15. Final Benchmark & Performance Evidence (기존 실측 집계, 비용/production API v2 미측정 명시)
 - [ ] STEP 16. README / Architecture 최종 정리
 
 ---
@@ -426,6 +436,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - `docs/architecture/overview.md`
 - `docs/DATA_ARTIFACT_POLICY.md`
 - `docs/benchmarks/METRICS_CONTRACT.md`
+- `docs/benchmarks/FINAL_BENCHMARK.md`
 - `docs/deployment/CI_CD.md`
 - `docs/deployment/DOCKER.md`
 - `docs/deployment/KUBERNETES_GCP.md`

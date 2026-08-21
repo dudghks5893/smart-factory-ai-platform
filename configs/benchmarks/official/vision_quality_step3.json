@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "benchmark_name": "patchcore_quality_evaluation",
+  "official_result": true,
+  "evidence_origin": "docs/benchmarks/PATCHCORE_EVALUATION.md",
+  "category": "metal_nut",
+  "environment": {
+    "environment_id": "kaggle-t4-step3-quality",
+    "label": "Kaggle Linux / Tesla T4",
+    "device": "cuda",
+    "accelerator_name": "Tesla T4",
+    "python_version": "3.12.13",
+    "torch_version": "2.13.0+cu130",
+    "torchvision_version": "0.28.0+cu130",
+    "anomalib_version": "2.5.1",
+    "cuda_runtime": "13.0"
+  },
+  "measurement_boundary": "Stored official test predictions evaluated with thresholds fixed from the normal-only validation split.",
+  "warmup": {
+    "count": 0,
+    "included": false,
+    "note": "Not applicable to stored prediction quality metrics."
+  },
+  "iterations": {
+    "count": 115,
+    "unit": "official_test_images"
+  },
+  "batch_size": null,
+  "provenance": {
+    "category": "metal_nut",
+    "manifest_sha256": "da81db68eadd22421ba2b284ffee85f49d41fcec47d6aadfa6bdb2cae14f285b",
+    "model_sha256": "1a2016a6b75377cc5e6bbeee33b3ed2f3a3b4d1cedb2e80236dbcd1da8c28ca9",
+    "threshold_artifact_sha256": "9e885f2a3b0de29eeb3e04304d5dc9051fb1a9c6831bf820b885760ccd12fe89",
+    "artifact_metadata_sha256": null
+  },
+  "threshold": {
+    "strategy": "max_normal_validation",
+    "comparison_operator": ">",
+    "image_threshold": 41.19657897949219,
+    "pixel_threshold": 40.1362419128418
+  },
+  "results": {
+    "image_level": {
+      "auroc": 0.9975562072336266,
+      "precision": 1.0,
+      "recall": 0.989247311827957,
+      "f1": 0.9945945945945946,
+      "tp": 92,
+      "tn": 22,
+      "fp": 0,
+      "fn": 1
+    },
+    "pixel_level": {
+      "auroc": 0.9824857431023005,
+      "precision": 0.8339393856698755,
+      "recall": 0.8346198271398415,
+      "f1": 0.8342794676622264
+    },
+    "per_defect": {
+      "bent": {"detected": 25, "total": 25, "recall": 1.0},
+      "color": {"detected": 21, "total": 22, "recall": 0.9545454545454546},
+      "flip": {"detected": 23, "total": 23, "recall": 1.0},
+      "scratch": {"detected": 23, "total": 23, "recall": 1.0},
+      "good": {"false_positive": 0, "total": 22, "false_positive_rate": 0.0}
+    }
+  },
+  "limitations": [
+    "Compact evidence snapshot of the approved official result; the ignored raw evaluation artifact is not committed.",
+    "Artifact metadata SHA was not preserved in the approved documentation and remains null."
+  ]
+}

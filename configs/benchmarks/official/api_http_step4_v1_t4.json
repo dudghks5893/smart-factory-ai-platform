@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "benchmark_name": "patchcore_fastapi_http_e2e",
+  "benchmark_label": "API Benchmark — schema v1 / pre-persistence",
+  "official_result": true,
+  "evidence_origin": "docs/serving/PATCHCORE_API.md",
+  "category": "metal_nut",
+  "environment": {
+    "environment_id": "kaggle-t4-step4-api-v1",
+    "label": "Kaggle Linux / Tesla T4 / in-process ASGI",
+    "device": "cuda",
+    "accelerator_name": "Tesla T4",
+    "python_version": "3.12.13",
+    "torch_version": "2.13.0+cu130",
+    "cuda_runtime": "13.0",
+    "transport": "in_process_asgi_testclient"
+  },
+  "measurement_boundary": "multipart request -> FastAPI routing -> upload read -> image decode -> tensor conversion -> preprocessing -> device transfer -> PatchCore inference -> strict threshold -> response validation/serialization -> completed ASGI response",
+  "excluded": [
+    "disk image loading",
+    "artifact restore",
+    "warmup",
+    "inspection persistence",
+    "external network round trip",
+    "uvicorn socket TLS and proxy"
+  ],
+  "warmup": {"count": 10, "unit": "request", "included": false},
+  "iterations": {"count": 115, "unit": "measured_requests"},
+  "batch_size": 1,
+  "inspection_persistence_included": false,
+  "provenance": {
+    "category": "metal_nut",
+    "manifest_sha256": "da81db68eadd22421ba2b284ffee85f49d41fcec47d6aadfa6bdb2cae14f285b",
+    "model_sha256": "1a2016a6b75377cc5e6bbeee33b3ed2f3a3b4d1cedb2e80236dbcd1da8c28ca9",
+    "threshold_artifact_sha256": "9e885f2a3b0de29eeb3e04304d5dc9051fb1a9c6831bf820b885760ccd12fe89",
+    "artifact_metadata_sha256": null
+  },
+  "results": {
+    "latency_ms": {
+      "p50": 44.90185999998175,
+      "p95": 48.70313200001419,
+      "p99": 53.7457109400475,
+      "mean": 45.39321613043957,
+      "total_timed_seconds": 5.2202198550005505
+    },
+    "throughput_requests_per_second": 22.029723497151036,
+    "successful_request_count": 115,
+    "failed_request_count": 0,
+    "error_rate": 0.0
+  },
+  "limitations": [
+    "This is an in-process application-level HTTP benchmark, not production network latency.",
+    "This result predates required PostgreSQL inspection persistence and is not schema v2.",
+    "Compact evidence snapshot of the approved official result; the ignored raw benchmark artifact is not committed.",
+    "Artifact metadata SHA was not preserved in the approved documentation and remains null."
+  ]
+}

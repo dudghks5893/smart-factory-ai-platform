@@ -174,4 +174,5 @@ index/dataset/config로 한 번 재실행해 faithfulness가 1.0이 됐다. Retr
 - Extractive generator는 간결성이나 answer synthesis를 평가하지 않는다.
 - Lexical faithfulness는 paraphrase entailment, contradiction과 claim importance를 판정하지 않는다.
 - External production embedding/generation과 LLM judge는 미검증이다.
-- STEP 15에서 provider별 품질/latency/cost와 더 큰 held-out corpus 평가가 필요하다.
+- STEP 15 final aggregation에는 이 actual demo artifact를 그대로 포함했다. Provider별 품질/latency/cost와 더 큰
+  held-out corpus 평가는 실제 production provider와 private evaluation corpus가 준비된 후 별도 수행해야 한다.

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "verification_id": "step15-platform-verification-v1",
+  "entries": [
+    {"area":"Data split leakage check","status":"verified","environment":"deterministic CI/unit tests","evidence":"Manifest split and normal-only training contracts."},
+    {"area":"Model artifact integrity","status":"verified","environment":"local/Kaggle artifact loaders","evidence":"Metadata/model/manifest/hash validation and round-trip tests."},
+    {"area":"FastAPI real-model smoke","status":"verified","environment":"Kaggle Tesla T4","evidence":"Normal and anomaly samples passed strict threshold classification."},
+    {"area":"PostgreSQL real integration","status":"verified","environment":"local Docker PostgreSQL","evidence":"Migration, insert, history/detail and rollback integration tests."},
+    {"area":"MLflow round-trip","status":"verified","environment":"local SQLite tracking backend","evidence":"Experiment/run/artifact backfill and reload integration."},
+    {"area":"Docker build","status":"verified","environment":"macOS arm64 Docker","evidence":"API, Dashboard and RAG runtime targets built and smoked."},
+    {"area":"GitHub Actions","status":"verified","environment":"GitHub-hosted CI","evidence":"Quality, PostgreSQL, Docker and Kubernetes jobs passed on main."},
+    {"area":"Prometheus","status":"verified","environment":"local application/Compose","evidence":"Metrics exposition, labels and configuration contracts tested."},
+    {"area":"Grafana","status":"verified","environment":"local Compose provisioning","evidence":"Datasource/dashboard provisioning configuration validated."},
+    {"area":"Drift detection","status":"verified","environment":"deterministic offline pipeline","evidence":"Reference/report integrity, PSI and threshold contracts tested."},
+    {"area":"Kubernetes render","status":"verified","environment":"local kubectl kustomize","evidence":"Base, local CPU and GCP GPU overlays render; migration sequencing tested."},
+    {"area":"Dashboard","status":"partially_verified","environment":"local Streamlit/Docker","evidence":"Read-only data views and Docker smoke verified; production IAP pending."},
+    {"area":"RAG API","status":"partially_verified","environment":"local deterministic Docker smoke","evidence":"Index readiness/API contracts verified; external production provider pending."},
+    {"area":"RAG evaluation","status":"verified","environment":"deterministic public demo","evidence":"Nine-case immutable evaluation artifact and metrics validated."},
+    {"area":"Actual GKE GPU deployment","status":"pending","environment":"GCP","evidence":"Manifest foundation only; no cluster deployment performed."},
+    {"area":"Production Cloud SQL","status":"pending","environment":"GCP","evidence":"Local PostgreSQL verified; managed production service not deployed."},
+    {"area":"Production LLM provider","status":"pending","environment":"external provider","evidence":"No credentialed embedding/generation/judge benchmark performed."},
+    {"area":"Private SOP benchmark","status":"pending","environment":"controlled production corpus","evidence":"Only fictional public demo manuals were evaluated."},
+    {"area":"Persistence-inclusive T4 API benchmark","status":"pending","environment":"Kaggle/GPU plus real PostgreSQL","evidence":"Current schema v2 tooling exists; no comparable real measurement was run."},
+    {"area":"Real-model API and Prometheus production scrape","status":"pending","environment":"production Kubernetes","evidence":"Metrics contracts were verified locally; no production real-model scrape was performed."},
+    {"area":"Dashboard production authentication","status":"pending","environment":"GKE/IAP","evidence":"Local internal UI only; authentication deployment not implemented."}
+  ]
+}

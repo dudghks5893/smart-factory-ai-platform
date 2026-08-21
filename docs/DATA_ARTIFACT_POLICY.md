@@ -152,6 +152,22 @@ Versioned public RAG evaluation dataset은 `configs/evaluation/`에 Commit한다
 evidence는 `outputs/evaluation/rag/<evaluation-id>/` 아래 immutable artifact이며 Git에 저장하지 않는다. Dataset
 SHA, index metadata/corpus/chunking/embedding lineage와 output hash를 함께 기록하고 credential은 저장하지 않는다.
 
+## 8.2 Final benchmark evidence
+
+승인된 benchmark raw output이 Git에 보존되지 않은 경우에 한해, 원문 문서를 출처로 명시한 작은 compact evidence
+snapshot을 `configs/benchmarks/official/`에 저장할 수 있다. Snapshot은 새 측정이나 추정값이 아니며 환경,
+measurement boundary, lineage와 limitation을 함께 기록한다.
+
+Final aggregation은 `outputs/benchmarks/final/<benchmark-id>/benchmark.json` 아래 immutable artifact로 생성하며 Git에
+Commit하지 않는다. Builder는 입력 artifact SHA를 기록하고 기존 benchmark ID overwrite를 거부한다. Versioned
+platform verification matrix는 `configs/benchmarks/platform_verification.json`에서 관리하며 subjective score를
+포함하지 않는다.
+
+Final artifact는 build 시작 시 Git HEAD와 non-ignored working tree dirty 상태를 자동 기록한다. Dirty artifact의
+commit은 기준 HEAD일 뿐 전체 생성 상태를 재현하지 않으므로 pre-commit verification 용도로만 취급한다. STEP 15
+코드와 evidence가 commit된 뒤 clean working tree에서 새 benchmark ID로 생성한 결과만 authoritative artifact로
+승격한다.
+
 ---
 
 ## 9. 향후 Cloud Artifact 구조

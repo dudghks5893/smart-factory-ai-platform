@@ -337,3 +337,24 @@ GPU Memory: ...
 ```
 
 이 원칙은 프로젝트 전체 Benchmark에 동일하게 적용한다.
+
+---
+
+## 18. Final benchmark aggregation
+
+Final benchmark는 기존 측정 artifact의 reference/aggregation layer다. Source SHA와 lineage를 기록하고 다음 영역을
+독립 section과 environment로 유지한다.
+
+- Image-level quality와 pixel localization quality
+- Model inference timing
+- API application timing 및 persistence schema version
+- RAG retrieval/evidence quality와 evaluator identity
+- 숫자가 아닌 platform verification status
+
+환경이나 timing boundary가 다른 값을 합산해 overall score를 만들지 않는다. Optional benchmark를 실행하지 못한
+경우 다른 device, SQLite 또는 fake implementation의 수치를 대신 넣지 않고 `not_available`로 기록한다. 새 evidence는
+기존 immutable output을 overwrite하지 않고 새 benchmark ID/schema로 생성한다.
+
+Repository provenance는 build 시 자동 조회한 HEAD SHA와 `working_tree_dirty`를 함께 기록한다. Dirty 상태의 HEAD는
+working tree 변경을 포함하지 않으므로 complete reproducibility claim으로 사용하지 않는다. Authoritative final
+artifact는 benchmark 코드와 evidence가 commit된 clean working tree에서 새 immutable ID로 생성한다.

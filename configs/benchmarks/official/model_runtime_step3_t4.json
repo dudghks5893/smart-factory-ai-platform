@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "benchmark_name": "patchcore_inference",
+  "official_result": true,
+  "evidence_origin": "docs/benchmarks/PATCHCORE_INFERENCE_BENCHMARK.md",
+  "category": "metal_nut",
+  "environment": {
+    "environment_id": "kaggle-t4-step3-model-runtime",
+    "label": "Kaggle Linux / Tesla T4",
+    "operating_system": "Linux x86_64",
+    "device": "cuda",
+    "accelerator_name": "Tesla T4",
+    "python_version": "3.12.13",
+    "torch_version": "2.13.0+cu130",
+    "torchvision_version": "0.28.0+cu130",
+    "anomalib_version": "2.5.1",
+    "cuda_runtime": "13.0"
+  },
+  "measurement_boundary": "after image batch loading: preprocessing -> device transfer -> PatchCore inference -> prediction materialization and accelerator synchronization",
+  "excluded": [
+    "disk image loading",
+    "artifact restore",
+    "warmup",
+    "threshold application",
+    "output persistence"
+  ],
+  "warmup": {"count": 10, "unit": "batch", "included": false},
+  "iterations": {"count": 115, "unit": "measured_images"},
+  "measured_batch_count": 115,
+  "batch_size": 1,
+  "num_workers": 0,
+  "provenance": {
+    "category": "metal_nut",
+    "manifest_sha256": "da81db68eadd22421ba2b284ffee85f49d41fcec47d6aadfa6bdb2cae14f285b",
+    "model_sha256": "1a2016a6b75377cc5e6bbeee33b3ed2f3a3b4d1cedb2e80236dbcd1da8c28ca9",
+    "threshold_artifact_sha256": null,
+    "artifact_metadata_sha256": null
+  },
+  "results": {
+    "latency_ms": {
+      "p50": 21.6343939998751,
+      "p95": 25.774736599942116,
+      "p99": 27.113390779900328,
+      "mean": 22.16589099130824,
+      "total_timed_seconds": 2.5490774640004474
+    },
+    "throughput_images_per_second": 45.11436063599353,
+    "cuda_peak_memory": {
+      "peak_allocated_mebibytes": 294.603515625,
+      "peak_reserved_mebibytes": 382.0
+    },
+    "model_file_size_bytes": 195058659,
+    "model_file_size_mebibytes": 186.02243328094482
+  },
+  "limitations": [
+    "Compact evidence snapshot of the approved official result; the ignored raw benchmark artifact is not committed.",
+    "Artifact metadata SHA was not preserved in the approved documentation and remains null."
+  ]
+}
