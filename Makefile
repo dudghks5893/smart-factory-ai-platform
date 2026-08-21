@@ -1,4 +1,4 @@
-.PHONY: sync format format-check lint typecheck test check docker-build docker-up docker-down docker-clean-volumes docker-test monitoring-up monitoring-down monitoring-config-check
+.PHONY: sync format format-check lint typecheck test check docker-build docker-up docker-down docker-clean-volumes docker-test monitoring-up monitoring-down monitoring-config-check k8s-render k8s-check
 
 sync:
 	uv sync
@@ -43,3 +43,13 @@ monitoring-down:
 
 monitoring-config-check:
 	docker run --rm --entrypoint /bin/promtool --volume "$(CURDIR)/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro" prom/prometheus:v3.12.0 check config /etc/prometheus/prometheus.yml
+
+k8s-render:
+	kubectl kustomize infra/k8s/base
+	kubectl kustomize infra/k8s/overlays/local-cpu
+	kubectl kustomize infra/k8s/overlays/gcp-gpu
+
+k8s-check:
+	kubectl kustomize infra/k8s/base > /dev/null
+	kubectl kustomize infra/k8s/overlays/local-cpu > /dev/null
+	kubectl kustomize infra/k8s/overlays/gcp-gpu > /dev/null

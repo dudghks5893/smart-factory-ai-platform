@@ -29,20 +29,23 @@ def test_ci_workflow_trigger_permission_and_execution_policy() -> None:
 
 
 # ADD 2026-08-20: Quality, actual PostgreSQL과 runtime image job의 핵심 책임을 검증한다.
+# MODIFY 2026-08-21: Kustomize render 전용 Kubernetes job contract를 추가한다.
 def test_ci_workflow_job_contracts() -> None:
     workflow, _ = _load_ci_workflow()
     jobs = workflow["jobs"]
 
-    assert set(jobs) == {"quality", "postgres-integration", "docker"}
+    assert set(jobs) == {"quality", "postgres-integration", "docker", "kubernetes"}
     assert {job["name"] for job in jobs.values()} == {
         "quality",
         "postgres-integration",
         "docker",
+        "kubernetes",
     }
     assert all(job["runs-on"] == "ubuntu-24.04-arm" for job in jobs.values())
     assert all(int(job["timeout-minutes"]) <= 45 for job in jobs.values())
     assert jobs["postgres-integration"]["needs"] == "quality"
     assert jobs["docker"]["needs"] == "quality"
+    assert jobs["kubernetes"]["needs"] == "quality"
 
     quality_commands = {step.get("run") for step in jobs["quality"]["steps"]}
     assert {"uv lock --check", "uv sync --locked", "make check"} <= quality_commands
@@ -63,6 +66,13 @@ def test_ci_workflow_job_contracts() -> None:
     assert docker_build["with"]["target"] == "runtime"
     assert docker_build["with"]["platforms"] == "linux/arm64"
     assert docker_build["with"]["push"] == "false"
+
+    kubernetes_steps = jobs["kubernetes"]["steps"]
+    kubectl_setup = next(
+        step for step in kubernetes_steps if step.get("uses", "").startswith("azure/setup-kubectl")
+    )
+    assert kubectl_setup["with"]["version"] == "v1.34.1"
+    assert any(step.get("run") == "make k8s-check" for step in kubernetes_steps)
 
 
 # ADD 2026-08-20: Pinned uv, CPU lock reuse와 artifact/secret 비생성 정책을 검증한다.

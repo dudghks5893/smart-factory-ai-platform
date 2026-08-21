@@ -121,3 +121,20 @@ jobs:
           tags: smartfactory-api:ci
           cache-from: type=gha,scope=runtime-arm64
           cache-to: type=gha,mode=max,scope=runtime-arm64
+
+  kubernetes:
+    name: kubernetes
+    needs: quality
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install pinned kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.34.1
+
+      - name: Render Kubernetes manifests
+        run: make k8s-check

@@ -11,11 +11,12 @@ production deployment는 아직 구현하지 않았다.
 ```text
 quality
    ├── postgres-integration
-   └── docker
+   ├── docker
+   └── kubernetes
 ```
 
-`postgres-integration`과 `docker`는 `quality` 성공 후 병렬로 실행되어, 기본 regression 실패 시 DB와 image
-build 자원을 사용하지 않는다.
+세 infra job은 `quality` 성공 후 병렬로 실행되어, 기본 regression 실패 시 DB/image/Kubernetes validation
+자원을 사용하지 않는다.
 
 ## 2. Trigger와 execution policy
 
@@ -98,10 +99,18 @@ Branch protection의 required checks에는 다음 job name을 지정한다.
 - `quality`
 - `postgres-integration`
 - `docker`
+- `kubernetes`
 
 Branch protection 자체는 repository 설정이므로 이 workflow가 변경하지 않는다.
 
-## 8. 향후 CD 확장
+## 8. Kubernetes validation
+
+`kubernetes` job은 kubectl v1.34.1을 명시적으로 설치하고 base, local-cpu, gcp-gpu Kustomize profile을 모두
+render한다. 선행 quality job의 Kubernetes configuration tests가 YAML schema shape, probe/resource/security,
+Secret/artifact/migration/GPU scope를 검증한다. CI는 cluster context, GCP credential과 server-side apply를
+사용하지 않으며 workflow 권한은 계속 `contents: read`뿐이다.
+
+## 9. 향후 CD 확장
 
 현재 상태는 **CI automation complete, CD-ready image/build pipeline foundation**이다. 향후 deployment target과
 credential policy가 확정되면 다음 단계를 별도 workflow/job으로 추가할 수 있다.
@@ -113,7 +122,7 @@ verified main commit → immutable image tag → registry publication → deploy
 GHCR/GCP publication, environment approval, OIDC, Kubernetes rollout/rollback과 production secret은 아직 없다.
 Standard GitHub-hosted runner에서 CUDA inference도 실행하지 않는다.
 
-## 9. 검증 한계
+## 10. 검증 한계
 
 Workflow YAML parsing과 repository contract test, lock consistency, local quality gate 및 STEP 7의 actual arm64
 Docker/PostgreSQL integration으로 구성을 사전 검증한다. GitHub service scheduling, hosted arm64 image의 실제

@@ -4,7 +4,7 @@
 MLOps, Monitoring, Kubernetes 운영, 제조 매뉴얼 기반 RAG까지 연결하는
 Production AI 시스템 프로젝트입니다.
 
-> 현재 상태: **STEP 10 — PatchCore production drift detection 구현 완료**
+> 현재 상태: **STEP 11 — Kubernetes/GCP deployment foundation 구현 완료, 실제 GKE 배포 대기**
 
 ---
 
@@ -133,9 +133,9 @@ smart-factory-ai-platform/
 │   ├── prometheus/
 │   └── grafana/
 ├── infra/
-│   ├── docker/
-│   ├── kubernetes/
-│   └── cloud/
+│   └── k8s/
+│       ├── base/
+│       └── overlays/
 ├── tests/
 │   ├── unit/
 │   ├── integration/
@@ -287,6 +287,12 @@ STEP 10 batch CLI를 구현했습니다. Current sample 30건 미만은 `insuffi
 automatic retraining을 의미하지 않습니다. Reference/window/status/output 계약은
 `docs/monitoring/DRIFT.md`에서 관리합니다.
 
+FastAPI Deployment, ClusterIP Service, non-secret ConfigMap, external Secret/PVC contract와 분리된 Alembic Job을
+Kustomize base 및 CPU/GPU overlay로 정의했습니다. GitHub Actions는 세 profile의 render를 검증합니다. 이는
+Kubernetes/GCP deployment foundation이며 실제 GKE cluster/GPU/Cloud SQL/Cloud Storage 배포는 아직 수행하지
+않았습니다. 배포 순서, security/resource/probe/rollback과 GCP target은
+`docs/deployment/KUBERNETES_GCP.md`에서 관리합니다.
+
 ---
 
 ## 7. 평가 지표
@@ -384,7 +390,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - [x] STEP 8. CI automation / CD-ready build foundation (실제 production deployment 미구현)
 - [x] STEP 9. Prometheus / Grafana application monitoring
 - [x] STEP 10. PatchCore production drift detection (batch CLI, automatic retraining 미구현)
-- [ ] STEP 11. Kubernetes
+- [x] STEP 11. Kubernetes/GCP deployment foundation (실제 GKE/GPU 배포 미검증)
 - [ ] STEP 12. 제조 Dashboard
 - [ ] STEP 13. 제조 Manual / SOP RAG
 - [ ] STEP 14. RAG Evaluation
@@ -402,6 +408,7 @@ Dataset 관련 Source Code는 `ml/datasets/`에서 관리합니다.
 - `docs/benchmarks/METRICS_CONTRACT.md`
 - `docs/deployment/CI_CD.md`
 - `docs/deployment/DOCKER.md`
+- `docs/deployment/KUBERNETES_GCP.md`
 - `docs/mlops/MLFLOW_TRACKING.md`
 - `docs/monitoring/MONITORING.md`
 - `docs/monitoring/DRIFT.md`

@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: smartfactory
+  labels:
+    app.kubernetes.io/name: smartfactory
+    app.kubernetes.io/part-of: smartfactory-ai-platform
+    app.kubernetes.io/component: configuration
+    app.kubernetes.io/version: "0.1.0"
