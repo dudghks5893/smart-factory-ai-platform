@@ -451,3 +451,61 @@ uv run python -m pipelines.smoke_inspection_websocket \
   --api-base-url http://127.0.0.1:8000 \
   --image data/raw/mvtec_ad/metal_nut/test/good/000.png
 ```
+
+## 14. Browser-native Live Inspection Monitor
+
+FastAPI application image에 HTML/CSS/vanilla JavaScript asset을 함께 package하고 same-origin `/live/`에
+mount한다. UI source는 `apps/live_monitor/`에 두어 transport code와 분리하며 React/Vue/Next.js,
+npm build, Streamlit custom component, polling을 추가하지 않는다. Existing Streamlit Dashboard의 history,
+drift와 analytical view는 그대로 유지된다.
+
+```text
+Browser /live/
+  ├─ WebSocket /v1/ws/inspections: best-effort inspection.created notification
+  ├─ REST /v1/inspections: initial snapshot and reconnect recovery
+  └─ REST /v1/inspections/{id}: selected inspection provenance detail
+                         ↓
+                PostgreSQL durable source of truth
+```
+
+Initial synchronization은 WebSocket을 먼저 연결한다. Connection open 후 incoming event를 buffer하며
+REST latest 100 history를 로드하고, history와 buffer를 `inspection_id`로 dedupe해 `created_at`
+newest-first로 병합한 다음에만 `LIVE`로 전환한다. REST-first 간격에서 event를 놓치지 않는
+contract이다. Same ID overlap/duplicate/reconnect replay는 row를 늘리지 않으며 UUID로 ordering하지
+않는다.
+
+Disconnect하면 `RECONNECTING`으로 전환하고 0.5, 1, 2, 4, maximum 5초 bounded exponential
+backoff로 다시 연결한다. 매 reconnect는 동일한 WebSocket-first buffering → REST reload →
+merge/dedupe → `LIVE` 순서를 반복하므로 disconnect 기간의 gap은 PostgreSQL history에서
+복구한다. Browser offline은 `OFFLINE`으로 표시하고 online event에서 recovery를 재시작하며,
+page unload에서 socket, fetch와 timer를 정리한다.
+
+WebSocket URL은 current page protocol/host에서 `ws://` 또는 `wss://`로 생성하고 REST는 `/v1/...`
+relative URL을 사용한다. UI는 current latest-100 window의 visible/normal/anomaly/anomaly-ratio
+KPI와 latest decision, newest-first feed를 보여준다. Timestamp는 backend UTC value를 browser local timezone으로
+표시한다. Result는 event의 `is_anomaly`가 source of truth이며 client에서 inference를 재실행하지
+않는다. Detail dialog만 existing REST endpoint를 호출해 image/model/metadata/threshold/manifest SHA를
+보여준다.
+
+`schema_version == "1"`, `type == "inspection.created"`와 compact inspection field를 client에서 검증하고
+unknown/malformed message는 무시한다. Static directory가 없으면 `/live/`만 mount하지 않아 API
+boot/readiness를 막지 않으며 production Docker application stage는 asset directory를 명시적으로 copy한다.
+
+현재 WebSocket broadcaster는 single-process best-effort delivery이므로 PostgreSQL을 내구성 계층으로 유지한다.
+Production browser exposure에서는 WebSocket/REST authentication, Origin validation, authorization,
+TLS/`wss://`와 multi-replica pub/sub을 별도로 설계해야 한다.
+
+2026-08-25 local actual smoke는 PostgreSQL 17.6, Alembic head, actual PatchCore artifact, MPS FastAPI,
+browser tab 2개와 B2 queued simulator를 동시에 사용했다. Initial REST sync에서 두 tab이 같은
+latest 100 window(90 normal, 10 anomaly)를 복원했고, `count=100`, capture interval `0.05`, queue size
+`8`의 actual image run이 100/100 success와 90/10 observed prediction으로 완료되는 동안 두 tab의
+latest ID, KPI와 feed가 manual refresh 없이 같이 갱신됐다. 두 window 모두 100 unique ID만
+유지했다. 별도 migrated empty PostgreSQL database로 반복한 smoke에서는 두 tab의 visible
+count/KPI가 `0/0/0/0.0%` → `100/90/10/10.0%`로 증가하는 것을 확인했다.
+
+API process를 종료하자 두 tab이 `RECONNECTING`으로 전환했고, 같은 DB/artifact로 재시작한
+뒤 WebSocket-first reconnect와 REST reload를 거쳐 `LIVE`와 latest 100 unique row를 복원했다.
+Full API outage 중에는 POST endpoint도 unavailable이므로 별도 inspection gap을 생성하지 않았다.
+Restart 후 persisted normal inspection은 두 tab에 같은 latest ID로 반영됐다. Malformed PNG request는
+`400 invalid_image`를 반환했고 DB count `336 → 336`, 두 tab latest ID/count/KPI 불변을 확인했다.
+이 smoke는 기능 검증이지 latency/throughput benchmark가 아니다.

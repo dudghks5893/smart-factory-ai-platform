@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Live Inspection Monitor</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">SMARTFACTORY / LINE OBSERVABILITY</p>
+        <h1>Live Inspection Monitor</h1>
+        <p class="subtitle">Persisted PatchCore decisions, streamed as they complete.</p>
+      </div>
+      <div class="connection-panel" aria-live="polite">
+        <span id="connection-state" class="connection-state" data-state="connecting">CONNECTING</span>
+        <span id="last-sync" class="sync-time">Awaiting initial sync</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="kpi-grid" aria-label="Latest 100 inspection summary">
+        <article class="kpi-card"><span>VISIBLE WINDOW</span><strong id="kpi-visible">0</strong></article>
+        <article class="kpi-card normal"><span>NORMAL</span><strong id="kpi-normal">0</strong></article>
+        <article class="kpi-card anomaly"><span>ANOMALY</span><strong id="kpi-anomaly">0</strong></article>
+        <article class="kpi-card"><span>ANOMALY RATIO</span><strong id="kpi-ratio">0.0%</strong></article>
+      </section>
+
+      <div class="monitor-grid">
+        <section class="panel latest-panel" aria-labelledby="latest-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">CURRENT DECISION</p>
+              <h2 id="latest-title">Latest inspection</h2>
+            </div>
+            <span class="live-pulse" aria-hidden="true"></span>
+          </div>
+          <div id="latest-inspection" class="latest-inspection"></div>
+        </section>
+
+        <section class="panel feed-panel" aria-labelledby="feed-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">POSTGRESQL HISTORY + LIVE EVENTS</p>
+              <h2 id="feed-title">Inspection feed</h2>
+            </div>
+            <span class="window-note">Newest first · max 100</span>
+          </div>
+          <p id="empty-state" class="empty-state">No persisted inspections are available yet.</p>
+          <ol id="inspection-feed" class="inspection-feed" aria-live="polite"></ol>
+        </section>
+      </div>
+    </main>
+
+    <dialog id="inspection-detail" class="detail-dialog">
+      <div class="dialog-heading">
+        <h2 id="detail-title">Inspection lineage</h2>
+        <button id="detail-close" type="button" aria-label="Close detail">×</button>
+      </div>
+      <div id="detail-body" class="detail-body"></div>
+    </dialog>
+
+    <footer>
+      <span>Best-effort WebSocket notification</span>
+      <span>PostgreSQL-backed REST recovery</span>
+      <span>Strict score &gt; threshold decision</span>
+    </footer>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

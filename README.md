@@ -21,6 +21,7 @@ artifact, API와 검사 이력, 운영 metric, drift evidence, 배포 순서, �
 - MLflow experiment/model lineage backfill
 - Docker, GitHub Actions CI, Prometheus/Grafana와 batch drift analysis
 - FastAPI를 통해 inspection을 읽는 Streamlit operations dashboard
+- Same-origin REST/WebSocket recovery를 갖춘 browser-native live inspection monitor
 - 별도 FastAPI service로 동작하는 grounded SOP RAG와 deterministic evaluation
 - Migration-gated Kubernetes/GCP deployment foundation
 
@@ -39,7 +40,7 @@ PatchCore는 알려진 defect class를 분류하지 않습니다. 현재 serving
 | MLOps | MLflow run/parameter/metric/artifact lineage backfill with local SQLite verification |
 | Delivery | Multi-stage Docker images, Compose lifecycle, four-job GitHub Actions CI |
 | Operations | Prometheus metrics, provisioned Grafana dashboard, immutable batch drift reports |
-| Dashboard | Inspection KPI/score/lineage and drift status through FastAPI plus read-only artifacts |
+| Dashboard | Streamlit analytics plus browser-native latest-100 real-time inspection monitoring |
 | RAG | Immutable SOP index, exact cosine retrieval, grounded generation, citations and abstention |
 | Deployment | Kustomize base, CPU/GPU overlays, separate migration Job and gated rollout runbook |
 | Evidence | Cross-domain final benchmark with source hashes, lineage and repository provenance |
@@ -53,6 +54,7 @@ flowchart LR
     Runtime --> Decision["Normal / anomaly"]
     Decision --> DB["PostgreSQL inspection history"]
     Dashboard["Streamlit operations dashboard"] -->|"HTTP"| API
+    Live["Browser live monitor"] -->|"REST + WebSocket"| API
     Drift["Batch drift analysis"] -->|"read-only report"| Dashboard
     DB --> Drift
     API --> Metrics["Prometheus metrics"]
@@ -121,6 +123,10 @@ migrations implicitly.
 
 The database does not persist raw inspection images. It stores bounded image metadata and SHA provenance only.
 Model artifacts and thresholds are mounted read-only and delivered outside Git.
+
+The browser-native Live Inspection Monitor is served from the Vision API at `/live/`. It opens the WebSocket before
+loading REST history, merges buffered events by inspection UUID, and reloads PostgreSQL-backed history after bounded
+reconnects. It complements rather than replaces the manual-refresh Streamlit analytical dashboard.
 
 See [PatchCore API](docs/serving/PATCHCORE_API.md) and
 [Inspection History](docs/serving/INSPECTION_HISTORY.md).
@@ -202,6 +208,7 @@ See [Final Benchmark](docs/benchmarks/FINAL_BENCHMARK.md) and
 
 ```text
 apps/dashboard/       Streamlit internal operations UI
+apps/live_monitor/    Same-origin HTML/CSS/JavaScript real-time inspection UI
 configs/              Data, model, evaluation and benchmark evidence configuration
 docs/                 Architecture, contracts, operations guides and benchmark history
 examples/dashboard_demo/  Local-only synthetic inspection/drift portfolio demo
@@ -391,6 +398,7 @@ See [Kubernetes/GCP Foundation](docs/deployment/KUBERNETES_GCP.md).
 - Run API schema v2 benchmark with real PostgreSQL and production-class GPU.
 - Deploy the migration-gated stack to GKE with Cloud SQL, artifact delivery and Secret Manager.
 - Add production authentication/IAP, ingress/TLS and HPA only after load testing.
+- Add authenticated `wss://`, Origin validation and cross-replica event delivery before public live-monitor exposure.
 - Evaluate a production embedding/generation provider and private held-out SOP corpus.
 - Improve selective citations with reranking/context selection and measure the change.
 - Add feature/embedding drift and a raw-image/object-storage retention policy.
@@ -401,7 +409,8 @@ See [Kubernetes/GCP Foundation](docs/deployment/KUBERNETES_GCP.md).
 
 Python 3.12, uv, PyTorch, Torchvision, Anomalib/PatchCore, OpenCV, NumPy, scikit-learn, FastAPI,
 Pydantic, SQLAlchemy, psycopg, PostgreSQL, Alembic, MLflow, Docker/Compose, GitHub Actions,
-Prometheus, Grafana, Streamlit, Kubernetes/Kustomize, and an OpenAI-compatible RAG adapter.
+Prometheus, Grafana, Streamlit, browser-native HTML/CSS/JavaScript, Kubernetes/Kustomize, and an OpenAI-compatible
+RAG adapter.
 
 LangChain, Vector DB, Kafka, Redis, Celery and Airflow are not part of the implemented stack.
 

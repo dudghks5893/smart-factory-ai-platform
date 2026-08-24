@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from services.api.config import ServingSettings
 from services.api.errors import install_exception_handlers
@@ -24,6 +26,8 @@ type RuntimeLoader = Callable[[PatchCoreRuntimeConfig], ModelRuntime]
 type DatabaseLoader = Callable[[str], DatabaseManager]
 type RepositoryLoader = Callable[[DatabaseManager], InspectionRepository]
 
+DEFAULT_LIVE_MONITOR_DIR = Path(__file__).resolve().parents[2] / "apps" / "live_monitor"
+
 
 # ADD 2026-08-20: Database manager의 request Session factory로 inspection repository를 생성한다.
 def load_inspection_repository(database: DatabaseManager) -> InspectionRepository:
@@ -32,7 +36,7 @@ def load_inspection_repository(database: DatabaseManager) -> InspectionRepositor
 
 
 # ADD 2026-08-19: Lifespan startup과 injectable runtime loader를 가진 FastAPI app을 생성한다.
-# MODIFY 2026-08-25: App-local monitoring에 WebSocket broadcaster lifecycle을 추가한다.
+# MODIFY 2026-08-25: WebSocket lifecycle과 optional browser monitor static mount를 추가한다.
 def create_app(
     *,
     settings: ServingSettings | None = None,
@@ -40,6 +44,7 @@ def create_app(
     database_loader: DatabaseLoader = create_database_manager,
     repository_loader: RepositoryLoader = load_inspection_repository,
     inspection_event_broadcaster: InspectionEventBroadcaster | None = None,
+    live_monitor_dir: Path = DEFAULT_LIVE_MONITOR_DIR,
 ) -> FastAPI:
     """Create an app that requires database and model readiness during startup."""
 
@@ -95,6 +100,14 @@ def create_app(
         include_in_schema=False,
     )
     app.include_router(router)
+
+    # API와 같은 origin에서 REST/WebSocket을 사용하도록 available asset만 mount한다.
+    if live_monitor_dir.is_dir():
+        app.mount(
+            "/live",
+            StaticFiles(directory=live_monitor_dir, html=True),
+            name="live-monitor",
+        )
     return app
 
 

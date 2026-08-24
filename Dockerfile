@@ -47,6 +47,7 @@ RUN groupadd --gid 10001 app && \
 
 FROM application-base AS application
 COPY alembic.ini ./
+COPY apps/live_monitor ./apps/live_monitor
 COPY configs ./configs
 COPY migrations ./migrations
 COPY ml ./ml

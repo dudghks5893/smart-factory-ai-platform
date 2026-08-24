@@ -143,6 +143,13 @@ production API runtime은 이 local entrypoint 설정의 영향을 받지 않는
 Manual `Refresh Data` button 또는 Streamlit rerun이 refresh boundary다. Background auto-refresh나 초 단위 polling은
 없다.
 
+### Browser-native live view
+
+`http://127.0.0.1:8000/live/`는 production Vision API가 same-origin으로 제공하는 별도 Live Inspection
+Monitor다. WebSocket notification, latest-100 KPI, latest decision과 reconnect REST recovery에 집중하며
+Streamlit의 history analysis, drift, score trend를 대체하지 않는다. Streamlit은 계속 manual refresh
+boundary를 유지한다. Live Monitor contract은 `PATCHCORE_API.md`에서 관리한다.
+
 ## 10. Portfolio Demo Dashboard
 
 Model artifact, PostgreSQL 또는 Grafana 없이 populated UI를 확인하려면 두 terminal에서 다음을 실행한다.
