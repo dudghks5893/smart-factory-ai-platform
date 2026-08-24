@@ -122,3 +122,18 @@ F1 최적화는 수행하지 않는다.
 Local STEP 2-2에서는 unit test, integration test, 작은 CPU/MPS smoke test만 수행한다.
 공식 `metal_nut` train 198장의 full memory bank 생성은 실행하지 않는다. 기준 설정의
 full baseline은 STEP 2-3 Kaggle CUDA 환경에서 수행한다.
+
+완성된 artifact와 validation threshold를 DB/FastAPI 없이 local device에서 한 image로 확인할 때는 production
+serving과 동일한 runtime loader를 사용하는 다음 smoke를 실행한다.
+
+```bash
+uv run python -m pipelines.smoke_patchcore_runtime \
+  --artifact-dir artifacts/runtime/patchcore/<runtime-id>/model \
+  --thresholds artifacts/runtime/patchcore/<runtime-id>/thresholds/thresholds.json \
+  --image data/raw/mvtec_ad/metal_nut/test/good/000.png \
+  --device mps
+```
+
+CLI는 artifact/threshold provenance와 실제 model SHA를 검증하고 artifact metadata의 preprocessing을 사용한 뒤
+`score > image_threshold` 결과만 출력한다. 명시적 `mps` 또는 `cuda`가 unavailable이면 조용히 CPU로 변경하지
+않는다. 이 smoke는 artifact를 재학습하거나 threshold를 변경하지 않는다.
