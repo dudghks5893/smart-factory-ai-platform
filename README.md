@@ -204,6 +204,7 @@ See [Final Benchmark](docs/benchmarks/FINAL_BENCHMARK.md) and
 apps/dashboard/       Streamlit internal operations UI
 configs/              Data, model, evaluation and benchmark evidence configuration
 docs/                 Architecture, contracts, operations guides and benchmark history
+examples/dashboard_demo/  Local-only synthetic inspection/drift portfolio demo
 infra/k8s/            Kustomize base plus local CPU and GCP GPU overlays
 manuals/demo/         Fictional public SOP corpus only
 migrations/           Alembic environment and inspection schema revision
@@ -295,6 +296,24 @@ make monitoring-up
 make dashboard-up
 make rag-up
 ```
+
+When a real local Vision API is already available, start the host Dashboard with the single official command:
+
+```bash
+make dashboard
+```
+
+For a populated local Dashboard without a model or PostgreSQL, run the explicitly synthetic demo
+in two terminals:
+
+```bash
+make dashboard-demo-api
+make dashboard-demo
+```
+
+The screen is labeled `DEMO — SYNTHETIC DATA`; its 100 inspection records and drift report are
+deterministic visualization fixtures, not factory or benchmark evidence. See
+[Operations Dashboard](docs/dashboard/DASHBOARD.md) for the local actual-service and demo boundaries.
 
 The RAG profile also requires a compatible verified index and provider configuration. Stop services with
 `make rag-down`, `make dashboard-down`, `make monitoring-down`, and `make docker-down`. `make docker-clean-volumes`

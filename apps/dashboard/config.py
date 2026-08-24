@@ -13,6 +13,7 @@ DEFAULT_API_BASE_URL = "http://localhost:8000"
 DEFAULT_DRIFT_REPORT_DIR = Path("outputs/drift/patchcore")
 DEFAULT_GRAFANA_URL = "http://localhost:3000"
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 5.0
+MAX_ENVIRONMENT_LABEL_LENGTH = 100
 
 
 # ADD 2026-08-21: Dashboard HTTP endpoint가 browser/service 용도로 안전한 형태인지 검증한다.
@@ -29,6 +30,20 @@ def _validated_http_url(value: str, name: str) -> str:
     return normalized
 
 
+# ADD 2026-08-24: Optional environment label을 bounded single-line banner text로 검증한다.
+def _validated_environment_label(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    normalized = value.strip()
+    if len(normalized) > MAX_ENVIRONMENT_LABEL_LENGTH:
+        raise ValueError(
+            f"DASHBOARD_ENV_LABEL must be at most {MAX_ENVIRONMENT_LABEL_LENGTH} characters."
+        )
+    if any(character in normalized for character in "\r\n\t"):
+        raise ValueError("DASHBOARD_ENV_LABEL must be a single-line value.")
+    return normalized
+
+
 @dataclass(frozen=True)
 class DashboardSettings:
     """Validated dashboard endpoints, artifact root, and network timeout."""
@@ -37,8 +52,10 @@ class DashboardSettings:
     drift_report_dir: Path = DEFAULT_DRIFT_REPORT_DIR
     grafana_url: str = DEFAULT_GRAFANA_URL
     request_timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT_SECONDS
+    environment_label: str | None = None
 
     # ADD 2026-08-21: Process environment에서 dashboard runtime 설정을 로드한다.
+    # MODIFY 2026-08-24: Optional generic environment banner label을 함께 로드한다.
     @classmethod
     def from_environment(cls, environ: Mapping[str, str] | None = None) -> DashboardSettings:
         """Load dashboard settings without requiring model or database credentials."""
@@ -60,10 +77,12 @@ class DashboardSettings:
             drift_report_dir=Path(drift_report_dir),
             grafana_url=values.get("GRAFANA_URL", DEFAULT_GRAFANA_URL),
             request_timeout_seconds=timeout,
+            environment_label=values.get("DASHBOARD_ENV_LABEL"),
         )
         return settings.validated()
 
     # ADD 2026-08-21: Dashboard path, endpoint와 finite timeout invariant를 검증한다.
+    # MODIFY 2026-08-24: Environment label을 bounded single-line text로 제한한다.
     def validated(self) -> DashboardSettings:
         """Return normalized settings or reject invalid runtime configuration."""
         if (
@@ -82,4 +101,5 @@ class DashboardSettings:
             drift_report_dir=self.drift_report_dir,
             grafana_url=_validated_http_url(self.grafana_url, "GRAFANA_URL"),
             request_timeout_seconds=self.request_timeout_seconds,
+            environment_label=_validated_environment_label(self.environment_label),
         )

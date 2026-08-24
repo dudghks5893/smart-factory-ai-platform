@@ -1,4 +1,4 @@
-.PHONY: sync format format-check lint typecheck test check docker-build docker-up docker-down docker-clean-volumes docker-test monitoring-up monitoring-down monitoring-config-check dashboard dashboard-build dashboard-up dashboard-down rag-build rag-up rag-down k8s-render k8s-check
+.PHONY: sync format format-check lint typecheck test check docker-build docker-up docker-down docker-clean-volumes docker-test monitoring-up monitoring-down monitoring-config-check dashboard dashboard-demo-api dashboard-demo dashboard-build dashboard-up dashboard-down rag-build rag-up rag-down k8s-render k8s-check
 
 sync:
 	uv sync
@@ -13,7 +13,7 @@ lint:
 	uv run ruff check .
 
 typecheck:
-	uv run mypy apps ml pipelines services shared tests migrations
+	uv run mypy apps examples ml pipelines services shared tests migrations
 
 test:
 	uv run python -m pytest
@@ -45,7 +45,13 @@ monitoring-config-check:
 	docker run --rm --entrypoint /bin/promtool --volume "$(CURDIR)/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro" prom/prometheus:v3.12.0 check config /etc/prometheus/prometheus.yml
 
 dashboard:
-	uv run --group dashboard streamlit run apps/dashboard/app.py --server.headless=true --server.fileWatcherType=none --browser.gatherUsageStats=false
+	PYTHONPATH="$(CURDIR)" uv run --group dashboard streamlit run apps/dashboard/app.py --server.address=127.0.0.1 --server.port="$${DASHBOARD_PORT:-8501}" --server.headless=true --server.fileWatcherType=none --browser.gatherUsageStats=false
+
+dashboard-demo-api:
+	PYTHONPATH="$(CURDIR)" uv run uvicorn examples.dashboard_demo.api:app --host 127.0.0.1 --port="$${DASHBOARD_DEMO_API_PORT:-8001}" --workers=1
+
+dashboard-demo:
+	PYTHONPATH="$(CURDIR)" DASHBOARD_API_BASE_URL="http://127.0.0.1:$${DASHBOARD_DEMO_API_PORT:-8001}" DRIFT_REPORT_DIR="$(CURDIR)/examples/dashboard_demo/fixtures/drift" DASHBOARD_ENV_LABEL="DEMO — SYNTHETIC DATA" uv run --group dashboard streamlit run apps/dashboard/app.py --server.address=127.0.0.1 --server.port="$${DASHBOARD_PORT:-8501}" --server.headless=true --server.fileWatcherType=none --browser.gatherUsageStats=false
 
 dashboard-build:
 	docker compose build dashboard

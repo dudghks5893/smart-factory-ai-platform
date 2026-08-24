@@ -64,6 +64,7 @@ def test_relative_documentation_links_resolve() -> None:
 
 
 # ADD 2026-08-22: Generated/artifact paths의 root ignore policy와 stale placeholder 부재를 검증한다.
+# MODIFY 2026-08-24: Tracked example source도 repository hygiene 검사 범위에 포함한다.
 def test_repository_hygiene_contract_has_no_stale_gitkeep() -> None:
     root = _project_root()
     ignore_rules = set((root / ".gitignore").read_text(encoding="utf-8").splitlines())
@@ -88,6 +89,7 @@ def test_repository_hygiene_contract_has_no_stale_gitkeep() -> None:
         root / "apps",
         root / "configs",
         root / "docs",
+        root / "examples",
         root / "infra",
         root / "manuals",
         root / "ml",

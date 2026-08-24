@@ -122,11 +122,12 @@ Server가 배포되지 않았으므로 가짜 MLflow UI link는 제공하지 않
 | `GRAFANA_URL` | `http://localhost:3000` | browser-accessible URL 그대로 |
 | `DASHBOARD_REQUEST_TIMEOUT_SECONDS` | `5` | `(0, 60]` seconds |
 | `DASHBOARD_PORT` | `8501` | host published port |
+| `DASHBOARD_ENV_LABEL` | unset | unset; optional single-line environment banner |
 
 API URL과 Grafana URL은 absolute HTTP(S) URL이어야 하며 query/fragment를 받지 않는다. Source code에 local absolute
 artifact path나 credential을 넣지 않는다.
 
-## 9. Local과 Docker 실행
+## 9. Local Dashboard
 
 Host에서 API와 optional Grafana가 이미 실행 중이면 다음 명령으로 Dashboard를 시작한다.
 
@@ -134,8 +135,55 @@ Host에서 API와 optional Grafana가 이미 실행 중이면 다음 명령으�
 make dashboard
 ```
 
+`make dashboard`가 repository root를 Python import path로 설정하므로 사용자가 `PYTHONPATH`를 직접 입력할 필요가
+없다. Dashboard는 `http://127.0.0.1:${DASHBOARD_PORT:-8501}`에서 실행된다. 실제 API/model/PostgreSQL이 없으면
+`Inspection API is unavailable`, zero KPI와 no-report 상태를 표시하는 것이 정상이다. Docker Dashboard command와
+production API runtime은 이 local entrypoint 설정의 영향을 받지 않는다.
+
 Manual `Refresh Data` button 또는 Streamlit rerun이 refresh boundary다. Background auto-refresh나 초 단위 polling은
 없다.
+
+## 10. Portfolio Demo Dashboard
+
+Model artifact, PostgreSQL 또는 Grafana 없이 populated UI를 확인하려면 두 terminal에서 다음을 실행한다.
+
+Terminal 1 — localhost 전용 synthetic API:
+
+```bash
+make dashboard-demo-api
+```
+
+Terminal 2 — existing Dashboard와 tracked synthetic drift fixture:
+
+```bash
+make dashboard-demo
+```
+
+Dashboard URL은 `http://127.0.0.1:8501`, demo API URL은 `http://127.0.0.1:8001`이다. Port를 바꿀 때는 두
+terminal에 같은 `DASHBOARD_DEMO_API_PORT`를 설정하고 Dashboard에는 `DASHBOARD_PORT`를 설정한다.
+
+```text
+Deterministic synthetic inspection fixture
+  → dedicated examples.dashboard_demo FastAPI
+  → existing InspectionApiClient
+  → existing Streamlit Dashboard
+
+Tracked synthetic STEP 10 drift JSON
+  → existing validated drift loader
+  → existing Streamlit Dashboard
+```
+
+Demo는 100건의 timezone-aware UTC inspection을 3분 간격으로 제공한다. Normal 88건은 threshold `41.2` 아래
+`25.3–39.2`, anomaly 12건은 threshold 위 `43.4–56.2`에 분포한다. UUID, timestamps, scores와 lineage SHA는
+항상 동일하게 생성된다. Drift fixture는 `warning`, PSI `0.17`, reference/current mean `30/35`, p95 `36/44`,
+anomaly ratio `0.02/0.12`를 표시한다.
+
+화면 상단의 `DEMO — SYNTHETIC DATA` warning banner는 `DASHBOARD_ENV_LABEL`이라는 generic opt-in 표시다. 설정하지
+않으면 기존 UI에는 banner가 나타나지 않는다. 이 demo는 local portfolio visualization 전용이며 factory data,
+production result, STEP 3/4 benchmark evidence 또는 실제 drift evidence가 아니다. Raw image, defect class, fake
+Grafana metric, credential과 production database write는 포함하지 않는다. Public deployment 대상으로 사용하지 않는다.
+
+## 11. Docker 실행
 
 Compose Dashboard만 build/start할 수 있다. API artifact가 없는 환경에서도 Dashboard 자체 startup과 unavailable
 state를 검증할 수 있으며 Dashboard failure는 API startup dependency가 아니다.
@@ -152,7 +200,7 @@ Compose는 host drift root만 `/runtime/drift:ro`로 mount한다. `outputs/` 전
 `HOME=/tmp/dashboard-home`, disabled file watcher와 disabled usage telemetry 설정으로 production container에서 source
 watch와 home-directory write를 피한다.
 
-## 10. Security와 deployment boundary
+## 12. Security와 deployment boundary
 
 이 Dashboard는 local/internal access용이며 anonymous public internet exposure에 적합하지 않다. Production에서는
 private network와 SSO/IAP 또는 authenticated reverse proxy, TLS, authorization과 audit policy를 별도로 적용해야
@@ -162,12 +210,16 @@ STEP 11 Kubernetes/GCP manifest에는 Dashboard workload를 추가하지 않았�
 별도 workload로 두고 browser access, IAP, resource/probe와 read-only drift artifact delivery를 함께 설계해야 한다.
 Local Docker health는 Streamlit 1.62.0의 `/_stcore/health` endpoint를 사용한다.
 
-## 11. Verification scope
+## 13. Verification scope
 
 Deterministic tests는 response parsing, filter/KPI/empty/mixed sample, record별 threshold trend, safe projection,
 API timeout/error/malformed response, four drift statuses, latest selection, missing/malformed report를 검증한다.
 Streamlit AppTest는 title, unavailable API와 missing drift의 graceful UI를 확인한다. CI의 existing Docker job은 API
 runtime과 별도로 lightweight `dashboard-runtime` target도 Linux arm64에서 build한다.
+
+Synthetic demo tests는 100건/88 normal/12 anomaly, unique UUID, UTC ordering, score-threshold consistency, list/detail/
+filter/pagination endpoint, STEP 10 drift schema, warning values, lineage 일치와 opt-in banner를 검증한다. CI에서는
+Streamlit/demo server를 상시 실행하지 않고 deterministic TestClient/AppTest contract만 실행한다.
 
 2026-08-21 local verification에서는 Streamlit 1.62.0 server를 직접 시작해 `/_stcore/health`의 `ok`와 application
 HTML response를 확인했다. Apple Silicon Docker에서 최종 `dashboard-runtime` image를 실제 build/start했으며

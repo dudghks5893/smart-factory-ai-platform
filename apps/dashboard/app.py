@@ -144,6 +144,7 @@ def _render_detail(client: InspectionApiClient, items: tuple[InspectionItem, ...
 
 
 # ADD 2026-08-21: Dashboard config, API client, artifact reader와 overview UI를 조율한다.
+# MODIFY 2026-08-24: Optional environment label을 data source보다 먼저 명확히 표시한다.
 def main() -> None:
     """Render one manually refreshed operations overview without direct database access."""
     st.set_page_config(page_title="Smart Factory AI Operations", layout="wide")
@@ -155,6 +156,9 @@ def main() -> None:
     except ValueError as exc:
         st.error(f"Dashboard configuration is invalid: {exc}")
         return
+
+    if settings.environment_label is not None:
+        st.warning(settings.environment_label, icon="⚠️")
 
     # Manual rerun is the refresh boundary; no background or second-level polling is used.
     st.sidebar.header("Inspection Filters")
