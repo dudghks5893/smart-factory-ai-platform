@@ -359,3 +359,41 @@ partial summary를 출력한다. Simulator는 DB에 직접 접근하거나 drift
 이 workload는 실제 MVTec image와 실제 model inference를 사용하지만 trigger/order/source distribution은 local
 simulation이다. 실제 공장 production traffic이나 model evaluation이 아니며 accuracy, precision, recall 또는 F1을
 계산하지 않는다. 생성된 inspection은 기존 Dashboard에서 manual `Refresh Data`로 조회한다.
+
+## 12. Bounded queue production-line simulator
+
+`pipelines.simulate_queued_inspection_line`은 B1의 validated deterministic schedule과 single-event HTTP
+client를 재사용하되 capture producer와 inference request worker를 분리한다. Main-thread producer가 configured
+cadence로 event를 `queue.Queue(maxsize=N)`에 넣고, non-daemon worker 하나가 schedule 순서대로 실제
+`POST /v1/predictions`를 호출한다. Production API와 database schema는 변경하지 않는다.
+
+```bash
+uv run python -m pipelines.simulate_queued_inspection_line \
+  --api-base-url http://127.0.0.1:8000 \
+  --dataset-root data/raw/mvtec_ad \
+  --manifest data/interim/manifests/mvtec_ad_metal_nut.csv \
+  --category metal_nut \
+  --count 100 \
+  --anomaly-source-ratio 0.1 \
+  --capture-interval-seconds 0.02 \
+  --queue-size 8
+```
+
+두 실행 모드의 interval 경계는 다음과 같다.
+
+- B1 sequential: `HTTP response 완료 → interval → 다음 capture`
+- B2 queued: `capture → enqueue → 다음 capture deadline`; inference latency는 producer cadence에 직접
+  더해지지 않지만 queue가 full이면 producer가 block된다.
+
+Queue 기본 크기는 8이며 policy는 blocking backpressure와 no-drop이다. Drop-oldest/newest, retry, multiple
+worker, parallel HTTP, Redis/Kafka/Celery는 사용하지 않는다. 정상 종료는 producer 완료, queued event 처리,
+sentinel, worker join 순서다. HTTP/timeout/schema/duplicate-ID failure는 stop signal을 전달하고 thread를 join한 뒤
+non-zero로 종료하므로 queue-full 상태에서도 daemon thread나 deadlock에 의존하지 않는다.
+
+Summary는 requested/enqueued/success/failed와 input source/observed prediction을 분리하고 queue capacity와 최대
+depth, producer block count/time, queue wait average/p95, HTTP average, wall-clock과 processing throughput을
+출력한다. Configured capture rate와 processing throughput은 서로 다른 값이며 Mac MPS, localhost HTTP와
+PostgreSQL을 포함한 결과를 STEP 3 Tesla T4 model benchmark와 직접 비교하지 않는다.
+
+이 simulator는 실제 MVTec image와 실제 production API 경로를 사용하지만 실제 PLC/camera 또는 공장 traffic은
+아니다. Queue worker는 DB에 직접 접근하지 않으며 Dashboard 갱신은 기존 manual `Refresh Data`로 확인한다.

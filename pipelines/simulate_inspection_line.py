@@ -177,6 +177,7 @@ def build_production_demo_schedule(
 
 
 # ADD 2026-08-24: 실제 image를 production API에 순차 전송하고 fail-fast summary를 집계한다.
+# MODIFY 2026-08-24: 공통 HTTP helper로 queued simulator와 request 계약을 공유한다.
 def simulate_inspection_line(
     *,
     events: Sequence[LineScheduleEvent],
@@ -195,20 +196,22 @@ def simulate_inspection_line(
         interval_seconds=interval_seconds,
         request_timeout_seconds=request_timeout_seconds,
     )
-    prediction_url = _prediction_url(api_base_url)
-    active_transport = _post_prediction if transport is None else transport
+    prediction_url = build_prediction_url(api_base_url)
     started_at = clock()
     results: list[LineEventResult] = []
     inspection_ids: set[UUID] = set()
 
     for index, event in enumerate(events):
-        # Disk image를 검증·로드한 뒤 HTTP request timing boundary를 시작한다.
-        upload = prepare_image_upload(event.image_path, max_upload_bytes=DEFAULT_MAX_UPLOAD_BYTES)
         request_started_at = clock()
         try:
-            payload = active_transport(prediction_url, upload, request_timeout_seconds)
-            prediction = validate_prediction_payload(payload)
-            if prediction.inspection_id in inspection_ids:
+            result = request_line_prediction(
+                event=event,
+                prediction_url=prediction_url,
+                request_timeout_seconds=request_timeout_seconds,
+                transport=transport,
+                clock=clock,
+            )
+            if result.inspection_id in inspection_ids:
                 raise ValueError("Prediction API returned a duplicate inspection_id.")
         except Exception as exc:
             request_elapsed_ms = max(0.0, (clock() - request_started_at) * 1000)
@@ -224,9 +227,7 @@ def simulate_inspection_line(
                 summary,
             ) from exc
 
-        request_elapsed_ms = max(0.0, (clock() - request_started_at) * 1000)
-        inspection_ids.add(prediction.inspection_id)
-        result = _event_result(event, prediction, request_elapsed_ms)
+        inspection_ids.add(result.inspection_id)
         results.append(result)
         event_writer(format_line_event(result))
 
@@ -241,6 +242,27 @@ def simulate_inspection_line(
         elapsed_seconds=max(0.0, clock() - started_at),
     )
     return tuple(results), summary
+
+
+# ADD 2026-08-24: B1/B2가 공유하는 image load, HTTP, response validation과 timing 계약을 제공한다.
+def request_line_prediction(
+    *,
+    event: LineScheduleEvent,
+    prediction_url: str,
+    request_timeout_seconds: float,
+    transport: PredictionTransport | None = None,
+    clock: Clock = time.perf_counter,
+) -> LineEventResult:
+    """Send one real image and return one validated production prediction."""
+    active_transport = _post_prediction if transport is None else transport
+
+    # 실제 image를 검증·로드한 뒤 external HTTP request timing boundary를 시작한다.
+    upload = prepare_image_upload(event.image_path, max_upload_bytes=DEFAULT_MAX_UPLOAD_BYTES)
+    request_started_at = clock()
+    payload = active_transport(prediction_url, upload, request_timeout_seconds)
+    prediction = validate_prediction_payload(payload)
+    request_elapsed_ms = max(0.0, (clock() - request_started_at) * 1000)
+    return _event_result(event, prediction, request_elapsed_ms)
 
 
 # ADD 2026-08-24: Event response를 concise one-line runtime output으로 변환한다.
@@ -341,7 +363,7 @@ def main() -> int:
 
 
 # ADD 2026-08-24: Validated API base URL을 existing prediction endpoint로 고정한다.
-def _prediction_url(api_base_url: str) -> str:
+def build_prediction_url(api_base_url: str) -> str:
     normalized = api_base_url.strip().rstrip("/")
     parsed = urlsplit(normalized)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
