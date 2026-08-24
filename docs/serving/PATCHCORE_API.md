@@ -328,3 +328,34 @@ smoke와 HTTP benchmark의 필수 선행 단계는 아니다.
 
 Real-model smoke는 fresh Kaggle session에서 독립적으로 실행되는 단일 cell이 아니다. Prepared manifest,
 PatchCore artifact, validation predictions/anomaly maps와 calibrated thresholds가 먼저 생성되어 있어야 한다.
+
+## 11. Local production-line simulator
+
+`pipelines.simulate_inspection_line`은 실제 MVTec `metal_nut` test image를 일정 간격으로 production
+`POST /v1/predictions`에 순차 전송하는 local operations smoke CLI다. Image 외 ground-truth label, defect type,
+expected result, score 또는 threshold를 request에 넣지 않으며 실제 PatchCore runtime과 PostgreSQL persistence
+결과만 사용한다.
+
+```bash
+uv run python -m pipelines.simulate_inspection_line \
+  --api-base-url http://127.0.0.1:8000 \
+  --dataset-root data/raw/mvtec_ad \
+  --manifest data/interim/manifests/mvtec_ad_metal_nut.csv \
+  --category metal_nut \
+  --count 100 \
+  --anomaly-source-ratio 0.1 \
+  --interval-seconds 1.0
+```
+
+Default `production-demo` profile은 100 event의 input source를 normal 90, anomaly 10으로 구성하고 열 번째
+event마다 anomaly source를 배치한다. Official test good image가 22장이므로 normal input은 manifest 순서로
+deterministically 순환·재사용한다. 이는 prediction 비율을 강제하지 않으며 출력 summary는 input source count와
+observed model prediction count를 분리한다.
+
+각 request는 이전 response가 완료된 후 configured interval을 기다리고 다음 image를 전송한다. Queue, retry,
+parallel worker와 backpressure는 포함하지 않는다. HTTP/timeout/schema failure는 retry 없이 즉시 run을 중단하고
+partial summary를 출력한다. Simulator는 DB에 직접 접근하거나 drift analysis를 실행하지 않는다.
+
+이 workload는 실제 MVTec image와 실제 model inference를 사용하지만 trigger/order/source distribution은 local
+simulation이다. 실제 공장 production traffic이나 model evaluation이 아니며 accuracy, precision, recall 또는 F1을
+계산하지 않는다. 생성된 inspection은 기존 Dashboard에서 manual `Refresh Data`로 조회한다.
