@@ -20,6 +20,9 @@ mlruns
 .env.*
 *.log
 logs
+*.db
+*.sqlite
+*.sqlite3
 .DS_Store
 .idea
 .vscode

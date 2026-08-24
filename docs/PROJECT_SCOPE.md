@@ -1,5 +1,9 @@
 # SmartFactory AI Quality Platform — 프로젝트 범위
 
+> 이 문서는 초기 target scope와 설계 원칙을 기록한다. STEP 16 완료 상태와 실제 검증 경계는
+> [README](../README.md) 및 [Architecture Overview](architecture/overview.md)를 source of truth로 사용한다.
+> Kubernetes/GCP, remote MLflow Registry와 production LLM 관련 항목은 target이며 실제 운영 완료를 뜻하지 않는다.
+
 ## 1. 프로젝트 목적
 
 SmartFactory AI Quality Platform은 실제 제조 품질검사 환경을 가정하여
@@ -17,10 +21,10 @@ Production AI 시스템 프로젝트이다.
 - Model Serving
 - 검사 이력 저장
 - Container 기반 실행환경 구축
-- CI/CD
+- CI와 CD-ready build foundation
 - 운영 Monitoring
 - Data Drift Detection
-- Kubernetes 기반 배포 및 운영
+- Kubernetes/GCP 배포 foundation
 - 제조 품질 Dashboard
 - 제조 매뉴얼/SOP 기반 RAG
 - RAG 성능 평가
@@ -42,7 +46,7 @@ Vision AI 이상 탐지
     ↓
 Model Evaluation
     ↓
-MLflow Experiment / Model Registry
+MLflow Experiment Tracking / Lineage
     ↓
 FastAPI Model Serving
     ↓
@@ -56,9 +60,9 @@ Prometheus / Grafana Monitoring
     ↓
 Data Drift Detection
     ↓
-Kubernetes Deployment
+Kubernetes Deployment Foundation
     ↓
-Autoscaling / Rolling Update / Rollback
+GKE / Autoscaling / Production Rollback (target, pending)
     ↓
 제조 Dashboard
     ↓
@@ -80,7 +84,7 @@ RAG Evaluation
 - PatchCore 계열 Anomaly Detection
 - FastAPI
 - PostgreSQL
-- pgvector
+- pgvector (future retrieval backend candidate; current RAG에서는 미사용)
 - MLflow
 - Docker
 - Docker Compose
@@ -133,12 +137,12 @@ Application Layer가 특정 LLM SDK에 직접 종속되지 않도록 한다.
 
 Kaggle은 실험 환경이며 Production 환경으로 사용하지 않는다.
 
-### GCP
+### GCP target
 
-다음 작업에 사용한다.
+다음 작업의 목표 환경이다. 현재 실제 GCP resource는 생성하지 않았다.
 
-- 최종 재현성 Benchmark
-- GPU Inference Benchmark
+- Persistence-inclusive production benchmark
+- GPU deployment/inference validation
 - Production 유사 환경 배포
 - Kubernetes
 - Autoscaling

@@ -66,8 +66,8 @@ Default chunking configuration:
 Heading/section boundary를 넘어서 chunk를 합치지 않는다. 먼저 paragraph를 packing하고 oversized paragraph만
 sentence boundary, 이후 word boundary 순서로 나눈다. 일반 문장을 arbitrary character 위치에서 자르지 않는다.
 Overlap은 이전 chunk 마지막 paragraph unit을 다음 chunk에 재사용해 좁은 경계의 문맥 손실을 줄인다. Default는
-작은 SOP corpus에서 한 절의 여러 단계가 함께 남으면서 provider context가 무제한 커지지 않는 초기값이며 STEP 14
-retrieval evaluation으로 조정해야 한다.
+작은 SOP corpus에서 한 절의 여러 단계가 함께 남으면서 provider context가 무제한 커지지 않는 초기값이다. STEP 14
+deterministic evaluation은 이 값을 유지했으며 production provider/private corpus tuning을 수행하지 않았다.
 
 ## 5. Embedding abstraction과 production adapter
 
@@ -143,8 +143,9 @@ deterministic top-k를 반환한다.
 - default minimum cosine score: 0.2
 
 Top-k는 request별로 낮출 수 있지만 configured maximum을 넘지 못한다. Document/query NaN, Inf, zero vector와 dimension
-mismatch는 거부한다. Minimum score는 ground-truth로 검증된 과학적 기준이 아니라 약한 context를 generator에 넘기지
-않기 위한 초기 operational default이며 STEP 14에서 calibration해야 한다.
+mismatch는 거부한다. Minimum score는 ground-truth로 검증된 production 기준이 아니라 약한 context를 generator에
+넘기지 않기 위한 operational default다. STEP 14 demo evaluation은 score distribution을 분석했지만 작은 dataset만으로
+자동 변경하지 않고 0.2를 유지했다.
 
 Vector DB를 도입하지 않은 이유는 corpus가 작고 exact search가 설명 가능하며, 별도 pgvector/Pinecone/Weaviate,
 ANN index lifecycle과 운영 dependency가 현재 필요하지 않기 때문이다. Corpus latency/memory가 실제 한계를 넘으면

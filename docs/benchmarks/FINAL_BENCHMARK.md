@@ -195,7 +195,7 @@ production embedding/generation provider에서 개선·재평가해야 한다.
 실제 생성 경로:
 
 ```text
-outputs/benchmarks/final/step15-final-v2/benchmark.json
+outputs/benchmarks/final/step15-final-authoritative-v1/benchmark.json
 ```
 
 실행 명령:
@@ -203,7 +203,7 @@ outputs/benchmarks/final/step15-final-v2/benchmark.json
 ```bash
 uv run python -m pipelines.build_final_benchmark \
   --rag-evaluation-dir outputs/evaluation/rag/step14-demo-eval-v2 \
-  --benchmark-id step15-final-v2
+  --benchmark-id step15-final-authoritative-v1
 ```
 
 Artifact schema version은 2다. `benchmark_id`, timezone-aware `created_at`, repository provenance, source
@@ -215,15 +215,16 @@ Repository provenance는 CLI 입력으로 SHA를 받지 않고 build 시작 시 
 ```json
 {
   "repository": {
-    "git_commit": "cc7ac8e0903dd951ba112f4ba177de6b18f7ba56",
-    "working_tree_dirty": true
+    "git_commit": "5c59e9ebb992231b39d4f7c0e20879d97a4d89dd",
+    "working_tree_dirty": false
   }
 }
 ```
 
 `git_commit`은 build 시 checkout된 HEAD다. `working_tree_dirty=true`이면 이 SHA는 working tree의 기준 commit일
-뿐이며 builder/evidence/docs/test 변경 전체를 재현하는 commit이 아니다. 현재 `step15-final-v2`는 이 상태를 정확히
-기록한 **pre-commit verification artifact**이며 final committed authoritative artifact로 표현하지 않는다.
+뿐이며 builder/evidence/docs/test 변경 전체를 재현하는 commit이 아니다. 현재
+`step15-final-authoritative-v1`은 STEP 15 commit 직후 clean working tree에서 생성되어 `working_tree_dirty=false`를
+기록한 authoritative STEP 15 artifact다. 이 artifact는 STEP 16 문서 변경 전 STEP 15 repository state를 가리킨다.
 
 ### Clean committed authoritative artifact 생성
 
@@ -255,7 +256,7 @@ metadata SHA가 보존되지 않아 snapshot에는 `null`로 남기며 추정하
 ## 12. Limitations와 다음 검증
 
 - Historical approved STEP 3/4 snapshot은 승인 문서 기반 compact evidence이며 당시 raw artifact 자체가 아니다.
-- 현재 `step15-final-v2`는 dirty working tree에서 만든 pre-commit verification artifact다.
+- Authoritative artifact는 STEP 15 clean commit을 재현하며 이후 STEP 16 문서 변경은 포함하지 않는다.
 - API schema v1은 persistence와 external network를 포함하지 않는다.
 - 실제 GKE GPU, Cloud SQL, production auth와 production Prometheus scrape는 실행하지 않았다.
 - RAG는 fictional public demo와 deterministic evaluation provider 결과다.

@@ -27,10 +27,9 @@ RAG Architecture는 특정 Provider에 종속되지 않도록 설계한다.
 ```text
 QualityRAGService
         │
-        ├── LLMProvider
         ├── EmbeddingProvider
         ├── Retriever
-        └── Reranker
+        └── AnswerGenerator
 ```
 
 Provider-specific SDK 코드는 Adapter 내부에 격리한다.
@@ -38,18 +37,20 @@ Provider-specific SDK 코드는 Adapter 내부에 격리한다.
 예시는 다음과 같다.
 
 ```text
-LLMProvider
-├── OpenAIProvider
-├── LocalLLMProvider
-└── OtherProvider
+AnswerGenerator
+├── OpenAICompatibleAnswerGenerator
+└── DeterministicEvaluationGenerator
 
 EmbeddingProvider
-├── OpenAIEmbeddingProvider
-└── LocalEmbeddingProvider
+├── OpenAICompatibleEmbeddingProvider
+└── DeterministicEvaluationEmbeddingProvider
 
 Retriever
-└── PgVectorRetriever
+└── ExactCosineRetriever (current immutable NumPy index)
 ```
+
+현재 corpus에는 Vector DB나 reranker를 도입하지 않는다. `pgvector`, ANN backend와 reranker는 measured corpus
+scale 또는 품질 요구가 생길 때 existing retrieval boundary 뒤에서 검토한다.
 
 ## 3. Reason
 
