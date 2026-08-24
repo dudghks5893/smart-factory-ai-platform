@@ -59,6 +59,30 @@ class InspectionResponse(BaseModel):
     device: str
 
 
+class InspectionCreatedPayload(BaseModel):
+    """Compact persisted inspection fields sent in one live notification."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    inspection_id: UUID
+    model_name: str
+    category: str
+    is_anomaly: bool
+    anomaly_score: float
+    threshold: float
+    comparison_operator: Literal[">"]
+    device: str
+    created_at: datetime
+
+
+class InspectionCreatedEvent(BaseModel):
+    """Versioned best-effort WebSocket notification after durable persistence."""
+
+    schema_version: Literal["1"] = "1"
+    type: Literal["inspection.created"] = "inspection.created"
+    inspection: InspectionCreatedPayload
+
+
 class InspectionHistoryResponse(BaseModel):
     """Newest-first inspection page without an aggregate count query."""
 

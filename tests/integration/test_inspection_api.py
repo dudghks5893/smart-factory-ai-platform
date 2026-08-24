@@ -15,6 +15,8 @@ from torch import Tensor
 
 from services.api.app import create_app
 from services.api.config import ServingSettings
+from services.api.schemas import InspectionCreatedEvent
+from services.api.websockets import InspectionEventBroadcaster
 from services.inference.runtime import (
     InferenceResult,
     ModelRuntime,
@@ -93,6 +95,20 @@ class _FailingRepository:
         offset: int,
     ) -> InspectionPage:
         raise PersistenceError("private database detail")
+
+
+class _RecordingBroadcaster(InspectionEventBroadcaster):
+    """Real broadcaster with an observable event schedule for route-order tests."""
+
+    # ADD 2026-08-25: Route가 broadcast에 넘긴 committed events를 기록한다.
+    def __init__(self) -> None:
+        super().__init__()
+        self.events: list[InspectionCreatedEvent] = []
+
+    # ADD 2026-08-25: Event를 기록한 뒤 실제 multi-client broadcast를 수행한다.
+    async def broadcast(self, event: InspectionCreatedEvent) -> None:
+        self.events.append(event)
+        await super().broadcast(event)
 
 
 # ADD 2026-08-20: Test app에 isolated SQLite DATABASE_URL과 serving paths를 구성한다.
@@ -273,6 +289,84 @@ def test_database_failure_returns_safe_error(tmp_path: Path) -> None:
     }
     assert "private database" not in response.text
     assert "credential" not in response.text
+
+
+# ADD 2026-08-25: Multi-client event와 disconnect 후 remaining delivery를 검증한다.
+def test_websocket_multi_client_delivery_and_disconnect_isolation(tmp_path: Path) -> None:
+    broadcaster = _RecordingBroadcaster()
+    app = create_app(
+        settings=_settings(tmp_path),
+        runtime_loader=_runtime_loader(_Runtime()),
+        inspection_event_broadcaster=broadcaster,
+    )
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/v1/ws/inspections") as second:
+            with client.websocket_connect("/v1/ws/inspections") as first:
+                first_response = client.post(
+                    "/v1/predictions",
+                    files={"image": ("first.png", _png_bytes(100), "image/png")},
+                )
+                first_event = InspectionCreatedEvent.model_validate(first.receive_json())
+                second_event = InspectionCreatedEvent.model_validate(second.receive_json())
+
+            second_response = client.post(
+                "/v1/predictions",
+                files={"image": ("second.png", _png_bytes(140), "image/png")},
+            )
+            after_disconnect = InspectionCreatedEvent.model_validate(second.receive_json())
+        detail = client.get(f"/v1/inspections/{first_response.json()['inspection_id']}").json()
+
+    assert first_response.status_code == second_response.status_code == 200
+    assert first_event == second_event
+    assert str(first_event.inspection.inspection_id) == first_response.json()["inspection_id"]
+    assert first_event.inspection.anomaly_score == first_response.json()["anomaly_score"]
+    assert str(after_disconnect.inspection.inspection_id) == second_response.json()["inspection_id"]
+    assert detail["inspection_id"] == str(first_event.inspection.inspection_id)
+    assert detail["anomaly_score"] == first_event.inspection.anomaly_score
+    assert detail["device"] == first_event.inspection.device
+    assert len(broadcaster.events) == 2
+
+
+# ADD 2026-08-25: Persistence failure가 inspection.created scheduling보다 먼저 중단되는지 검증한다.
+def test_persistence_failure_schedules_no_websocket_event(tmp_path: Path) -> None:
+    broadcaster = _RecordingBroadcaster()
+    app = create_app(
+        settings=_settings(tmp_path),
+        runtime_loader=_runtime_loader(_Runtime()),
+        repository_loader=lambda _: _FailingRepository(),
+        inspection_event_broadcaster=broadcaster,
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/v1/predictions",
+            files={"image": ("sample.png", _png_bytes(), "image/png")},
+        )
+
+    assert response.status_code == 503
+    assert broadcaster.events == []
+
+
+# ADD 2026-08-25: Invalid image가 persistence와 WebSocket event를 모두 우회하는지 검증한다.
+def test_invalid_image_schedules_no_websocket_event(tmp_path: Path) -> None:
+    broadcaster = _RecordingBroadcaster()
+    app = create_app(
+        settings=_settings(tmp_path),
+        runtime_loader=_runtime_loader(_Runtime()),
+        inspection_event_broadcaster=broadcaster,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/predictions",
+            files={"image": ("bad.png", b"not-an-image", "image/png")},
+        )
+        history = client.get("/v1/inspections")
+
+    assert response.status_code == 400
+    assert history.json()["returned_count"] == 0
+    assert broadcaster.events == []
 
 
 # ADD 2026-08-20: Health는 유지하되 lost DB connectivity가 readiness를 503으로 전환하는지 검증한다.

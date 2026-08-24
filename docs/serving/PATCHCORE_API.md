@@ -397,3 +397,57 @@ PostgreSQL을 포함한 결과를 STEP 3 Tesla T4 model benchmark와 직접 비�
 
 이 simulator는 실제 MVTec image와 실제 production API 경로를 사용하지만 실제 PLC/camera 또는 공장 traffic은
 아니다. Queue worker는 DB에 직접 접근하지 않으며 Dashboard 갱신은 기존 manual `Refresh Data`로 확인한다.
+
+## 13. Inspection WebSocket event stream
+
+REST와 WebSocket은 서로 다른 책임을 가진다.
+
+- REST `POST /v1/predictions`: inference와 durable inspection 생성
+- REST `GET /v1/inspections`, `GET /v1/inspections/{inspection_id}`: initial state, history, detail와
+  reconnect recovery
+- WebSocket `/v1/ws/inspections`: 새 inspection의 best-effort live notification
+
+한 prediction은 repository의 SQLAlchemy `session.commit()`이 성공해 committed `Inspection`이 반환된 뒤에만
+`inspection.created` event가 만들어진다. Route는 그 event를 FastAPI background task에 등록하므로 WebSocket
+send는 HTTP response body 이후 실행되고 prediction request critical path에 포함되지 않는다. Commit이 실패하거나
+image/inference validation이 실패하면 background broadcast 자체를 예약하지 않는다.
+
+```json
+{
+  "schema_version": "1",
+  "type": "inspection.created",
+  "inspection": {
+    "inspection_id": "3c9d9238-5a15-4fe1-9752-b233425663c0",
+    "model_name": "patchcore",
+    "category": "metal_nut",
+    "is_anomaly": true,
+    "anomaly_score": 54.369,
+    "threshold": 41.19657897949219,
+    "comparison_operator": ">",
+    "device": "mps",
+    "created_at": "2026-08-25T00:00:00Z"
+  }
+}
+```
+
+Event에는 raw image, anomaly map, artifact body, provenance hash와 DB internal field를 넣지 않는다. 상세
+provenance는 REST detail에서 조회한다. Client가 보내는 domain command protocol은 없으며 server route는 peer
+disconnect를 감지하기 위한 receive loop만 유지한다.
+
+Connection manager는 API process 안에서 client snapshot을 관리하고 per-client timeout으로 send를 동시에
+실행한다. 한 slow/broken client는 제거되며 다른 client delivery를 중단하지 않는다. 이 live notification은
+durable queue나 exactly-once delivery가 아니다. PostgreSQL만 source of truth이며 disconnect 중 놓친 event는
+reconnect 후 REST history reload로 복구한다.
+
+현재 구조는 `uvicorn --workers 1` local validation을 전제로 한다. Multi-process 또는 multi-replica에서 Pod A가
+만든 event는 Pod B의 process-local client set에 전달되지 않는다. Production scale에서 cross-process delivery가
+필요해지면 external pub/sub 또는 broker를 별도로 설계해야 하며 현재 단계에는 포함하지 않는다.
+
+실제 API에 두 client를 연결해 multi-client delivery, 한 client disconnect 이후 remaining delivery, POST/REST
+detail consistency를 검증할 수 있다.
+
+```bash
+uv run python -m pipelines.smoke_inspection_websocket \
+  --api-base-url http://127.0.0.1:8000 \
+  --image data/raw/mvtec_ad/metal_nut/test/good/000.png
+```

@@ -1,4 +1,4 @@
-"""HTTP routes for PatchCore liveness, readiness, and image inference."""
+"""HTTP and WebSocket routes for PatchCore inspection serving."""
 
 from __future__ import annotations
 
@@ -6,7 +6,16 @@ import logging
 from typing import Annotated, Literal, cast
 from uuid import UUID
 
-from fastapi import APIRouter, File, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    File,
+    Query,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.concurrency import run_in_threadpool
 
 from services.api.config import ServingSettings
@@ -15,10 +24,13 @@ from services.api.images import decode_uploaded_image
 from services.api.schemas import (
     HealthResponse,
     InferenceResponse,
+    InspectionCreatedEvent,
+    InspectionCreatedPayload,
     InspectionHistoryResponse,
     InspectionResponse,
     ReadinessResponse,
 )
+from services.api.websockets import InspectionEventBroadcaster
 from services.inference.runtime import (
     ModelRuntime,
     require_serving_provenance,
@@ -65,10 +77,11 @@ async def ready(request: Request) -> ReadinessResponse:
 
 
 # ADD 2026-08-19: Multipart image를 검증하고 shared runtime의 image-level prediction을 반환한다.
-# MODIFY 2026-08-21: Inference와 insert 경계를 측정하고 persisted result metric을 기록한다.
+# MODIFY 2026-08-25: Commit된 inspection event를 response 이후 best-effort broadcast한다.
 @router.post("/v1/predictions", response_model=InferenceResponse)
 async def create_prediction(
     request: Request,
+    background_tasks: BackgroundTasks,
     image: Annotated[UploadFile, File(description="JPEG or PNG inspection image")],
 ) -> InferenceResponse:
     """Run one PatchCore image prediction without returning the anomaly map."""
@@ -133,6 +146,11 @@ async def create_prediction(
     except PersistenceError:
         monitoring.record_persistence_error(operation="insert")
         raise
+
+    # Commit된 domain value로만 event를 만들고 HTTP response 이후 background broadcast를 예약한다.
+    event = _inspection_created_event(inspection)
+    broadcaster = _broadcaster_from_request(request)
+    background_tasks.add_task(broadcaster.broadcast, event)
     monitoring.record_prediction(
         category=prediction.category,
         is_anomaly=prediction.is_anomaly,
@@ -146,6 +164,23 @@ async def create_prediction(
         threshold=prediction.threshold,
         comparison_operator=cast(Literal[">"], prediction.comparison_operator),
     )
+
+
+# ADD 2026-08-25: Server-push connection을 등록하고 peer disconnect까지 command 없이 유지한다.
+@router.websocket("/v1/ws/inspections")
+async def stream_inspections(websocket: WebSocket) -> None:
+    """Push best-effort inspection.created events from this API process."""
+    broadcaster = _broadcaster_from_websocket(websocket)
+    await broadcaster.connect(websocket)
+    try:
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await broadcaster.disconnect(websocket)
 
 
 # ADD 2026-08-20: UUID로 persisted inspection detail을 조회하고 missing row를 404로 변환한다.
@@ -208,6 +243,23 @@ def _inspection_response(inspection: Inspection) -> InspectionResponse:
     )
 
 
+# ADD 2026-08-25: Committed inspection을 compact device-independent live event로 변환한다.
+def _inspection_created_event(inspection: Inspection) -> InspectionCreatedEvent:
+    return InspectionCreatedEvent(
+        inspection=InspectionCreatedPayload(
+            inspection_id=inspection.id,
+            model_name=inspection.model_name,
+            category=inspection.category,
+            is_anomaly=inspection.is_anomaly,
+            anomaly_score=inspection.anomaly_score,
+            threshold=inspection.threshold,
+            comparison_operator=cast(Literal[">"], inspection.comparison_operator),
+            device=inspection.device,
+            created_at=inspection.created_at,
+        )
+    )
+
+
 # ADD 2026-08-19: Request state에서 ready runtime을 가져오고 unavailable 상태를 503으로 변환한다.
 def _runtime_from_request(request: Request) -> ModelRuntime:
     runtime = getattr(request.app.state, "serving_runtime", None)
@@ -246,3 +298,19 @@ def _monitoring_from_request(request: Request) -> MonitoringMetrics:
     if not isinstance(monitoring, MonitoringMetrics):
         raise RuntimeError("Application monitoring registry is unavailable.")
     return monitoring
+
+
+# ADD 2026-08-25: Request app의 process-local inspection event broadcaster를 반환한다.
+def _broadcaster_from_request(request: Request) -> InspectionEventBroadcaster:
+    broadcaster = getattr(request.app.state, "inspection_event_broadcaster", None)
+    if not isinstance(broadcaster, InspectionEventBroadcaster):
+        raise RuntimeError("Inspection event broadcaster is unavailable.")
+    return broadcaster
+
+
+# ADD 2026-08-25: WebSocket app의 process-local inspection event broadcaster를 반환한다.
+def _broadcaster_from_websocket(websocket: WebSocket) -> InspectionEventBroadcaster:
+    broadcaster = getattr(websocket.app.state, "inspection_event_broadcaster", None)
+    if not isinstance(broadcaster, InspectionEventBroadcaster):
+        raise RuntimeError("Inspection event broadcaster is unavailable.")
+    return broadcaster
