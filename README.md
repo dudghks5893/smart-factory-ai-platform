@@ -127,9 +127,12 @@ migrations implicitly.
 The database does not persist raw inspection images. It stores bounded image metadata and SHA provenance only.
 Model artifacts and thresholds are mounted read-only and delivered outside Git.
 
-The browser-native Live Inspection Monitor is served from the Vision API at `/live/`. It opens the WebSocket before
-loading REST history, merges buffered events by inspection UUID, and reloads PostgreSQL-backed history after bounded
-reconnects. It complements rather than replaces the manual-refresh Streamlit analytical dashboard.
+The browser-native Live Inspection Monitor is served from the Vision API at `/live/`. Separate PatchCore and YOLO
+sections each open their own WebSocket before loading REST history, merge buffered events by inspection UUID, and
+reload PostgreSQL-backed history after bounded reconnects. YOLO shows visible-window empty/known-defect/instance KPI,
+compact class summaries and interaction-only instance lineage. The two model results are not correlated and do not
+form a final manufacturing disposition. This live view complements rather than replaces the manual-refresh Streamlit
+analytical dashboard.
 
 See [PatchCore API](docs/serving/PATCHCORE_API.md),
 [YOLO Segmentation API](docs/serving/YOLO_SEGMENTATION_API.md), and

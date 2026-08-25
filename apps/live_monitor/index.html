@@ -12,46 +12,106 @@
       <div>
         <p class="eyebrow">SMARTFACTORY / LINE OBSERVABILITY</p>
         <h1>Live Inspection Monitor</h1>
-        <p class="subtitle">Persisted PatchCore decisions, streamed as they complete.</p>
+        <p class="subtitle">Separate PatchCore and YOLO model observations, streamed after persistence.</p>
       </div>
-      <div class="connection-panel" aria-live="polite">
-        <span id="connection-state" class="connection-state" data-state="connecting">CONNECTING</span>
-        <span id="last-sync" class="sync-time">Awaiting initial sync</span>
+      <div class="connection-panel">
+        <div class="connection-row" aria-live="polite">
+          <span class="connection-label">PATCHCORE</span>
+          <span id="connection-state" class="connection-state" data-state="connecting">CONNECTING</span>
+          <span id="last-sync" class="sync-time">Awaiting initial sync</span>
+        </div>
+        <div class="connection-row" aria-live="polite">
+          <span class="connection-label">KNOWN DEFECTS</span>
+          <span id="known-connection-state" class="connection-state" data-state="connecting">CONNECTING</span>
+          <span id="known-last-sync" class="sync-time">Awaiting initial sync</span>
+        </div>
       </div>
     </header>
 
     <main>
-      <section class="kpi-grid" aria-label="Latest 100 inspection summary">
-        <article class="kpi-card"><span>VISIBLE WINDOW</span><strong id="kpi-visible">0</strong></article>
-        <article class="kpi-card normal"><span>NORMAL</span><strong id="kpi-normal">0</strong></article>
-        <article class="kpi-card anomaly"><span>ANOMALY</span><strong id="kpi-anomaly">0</strong></article>
-        <article class="kpi-card"><span>ANOMALY RATIO</span><strong id="kpi-ratio">0.0%</strong></article>
+      <section class="model-domain patchcore-domain" aria-labelledby="patchcore-domain-title">
+        <div class="domain-heading">
+          <div>
+            <p class="eyebrow">ANOMALY DETECTION</p>
+            <h2 id="patchcore-domain-title">PatchCore</h2>
+          </div>
+          <p>Image-level anomaly observation · latest browser-visible 100</p>
+        </div>
+
+        <section class="kpi-grid" aria-label="Latest 100 PatchCore inspection summary">
+          <article class="kpi-card"><span>VISIBLE WINDOW</span><strong id="kpi-visible">0</strong></article>
+          <article class="kpi-card normal"><span>NORMAL</span><strong id="kpi-normal">0</strong></article>
+          <article class="kpi-card anomaly"><span>ANOMALY</span><strong id="kpi-anomaly">0</strong></article>
+          <article class="kpi-card"><span>ANOMALY RATIO</span><strong id="kpi-ratio">0.0%</strong></article>
+        </section>
+
+        <div class="monitor-grid">
+          <section class="panel latest-panel" aria-labelledby="latest-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">MODEL OBSERVATION</p>
+                <h2 id="latest-title">Latest PatchCore inspection</h2>
+              </div>
+              <span class="live-pulse" aria-hidden="true"></span>
+            </div>
+            <div id="latest-inspection" class="latest-inspection"></div>
+          </section>
+
+          <section class="panel feed-panel" aria-labelledby="feed-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">POSTGRESQL HISTORY + LIVE EVENTS</p>
+                <h2 id="feed-title">PatchCore feed</h2>
+              </div>
+              <span class="window-note">Newest first · max 100</span>
+            </div>
+            <p id="empty-state" class="empty-state">No persisted PatchCore inspections are available yet.</p>
+            <ol id="inspection-feed" class="inspection-feed" aria-live="polite"></ol>
+          </section>
+        </div>
       </section>
 
-      <div class="monitor-grid">
-        <section class="panel latest-panel" aria-labelledby="latest-title">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">CURRENT DECISION</p>
-              <h2 id="latest-title">Latest inspection</h2>
-            </div>
-            <span class="live-pulse" aria-hidden="true"></span>
+      <section class="model-domain known-defect-domain" aria-labelledby="known-domain-title">
+        <div class="domain-heading">
+          <div>
+            <p class="eyebrow">KNOWN DEFECT SEGMENTATION</p>
+            <h2 id="known-domain-title">YOLO</h2>
           </div>
-          <div id="latest-inspection" class="latest-inspection"></div>
+          <p>Diagnostic operating point; not production-calibrated.</p>
+        </div>
+
+        <section class="kpi-grid" aria-label="Latest 100 YOLO known-defect inspection summary">
+          <article class="kpi-card"><span>VISIBLE WINDOW</span><strong id="known-kpi-visible">0</strong></article>
+          <article class="kpi-card normal"><span>NO KNOWN DEFECT</span><strong id="known-kpi-empty">0</strong></article>
+          <article class="kpi-card known"><span>KNOWN DEFECT</span><strong id="known-kpi-defect">0</strong></article>
+          <article class="kpi-card"><span>TOTAL INSTANCES</span><strong id="known-kpi-instances">0</strong></article>
         </section>
 
-        <section class="panel feed-panel" aria-labelledby="feed-title">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">POSTGRESQL HISTORY + LIVE EVENTS</p>
-              <h2 id="feed-title">Inspection feed</h2>
+        <div class="monitor-grid">
+          <section class="panel latest-panel" aria-labelledby="known-latest-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">MODEL OBSERVATION</p>
+                <h2 id="known-latest-title">Latest known-defect inspection</h2>
+              </div>
+              <span class="live-pulse known" aria-hidden="true"></span>
             </div>
-            <span class="window-note">Newest first · max 100</span>
-          </div>
-          <p id="empty-state" class="empty-state">No persisted inspections are available yet.</p>
-          <ol id="inspection-feed" class="inspection-feed" aria-live="polite"></ol>
-        </section>
-      </div>
+            <div id="known-latest-inspection" class="latest-inspection"></div>
+          </section>
+
+          <section class="panel feed-panel" aria-labelledby="known-feed-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">POSTGRESQL HISTORY + LIVE EVENTS</p>
+                <h2 id="known-feed-title">Known-defect feed</h2>
+              </div>
+              <span class="window-note">Newest first · max 100</span>
+            </div>
+            <p id="known-empty-state" class="empty-state">No persisted YOLO inspections are available yet.</p>
+            <ol id="known-defect-feed" class="inspection-feed known-defect-feed" aria-live="polite"></ol>
+          </section>
+        </div>
+      </section>
     </main>
 
     <dialog id="inspection-detail" class="detail-dialog">
@@ -62,10 +122,18 @@
       <div id="detail-body" class="detail-body"></div>
     </dialog>
 
+    <dialog id="known-defect-detail" class="detail-dialog known-detail-dialog">
+      <div class="dialog-heading">
+        <h2 id="known-detail-title">Known-defect lineage</h2>
+        <button id="known-detail-close" type="button" aria-label="Close known-defect detail">×</button>
+      </div>
+      <div id="known-detail-body" class="detail-body"></div>
+    </dialog>
+
     <footer>
-      <span>Best-effort WebSocket notification</span>
+      <span>Two independent best-effort WebSocket channels</span>
       <span>PostgreSQL-backed REST recovery</span>
-      <span>Strict score &gt; threshold decision</span>
+      <span>Separate model observations · no cross-correlation</span>
     </footer>
 
     <script type="module" src="./app.js"></script>

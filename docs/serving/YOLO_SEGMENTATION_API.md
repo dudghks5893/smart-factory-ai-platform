@@ -5,11 +5,13 @@
 C2-4A는 C2-3의 `YoloSegmentationAdapter`를 기존 Vision API lifespan에 선택적으로 연결하고
 `POST /v1/known-defects`로 known-defect instance를 제공했다. C2-4B는 이 독립 YOLO inference를
 PostgreSQL parent/child row로 저장하고 REST recovery와 전용 WebSocket notification을 추가한다. Route는
-project-owned runtime result만 API schema로 변환하며 Ultralytics `Results`를 직접 해석하지 않는다.
+project-owned runtime result만 API schema로 변환하며 Ultralytics `Results`를 직접 해석하지 않는다. C2-4C는
+browser-native Live Monitor가 이 REST/WebSocket 계약을 소비해 PatchCore와 분리된 YOLO observability section을
+제공한다.
 
-이 endpoint는 PatchCore의 anomaly score와 자동 결합하지 않으며 Live Monitor를 변경하거나
-`PASS`/`REJECT`/`REVIEW` 판정을 만들지 않는다. PatchCore row와 YOLO row는 별도 durable inference
-result이고 최종 결합은 C3 Decision Engine 범위다.
+이 endpoint는 PatchCore의 anomaly score와 자동 결합하지 않으며 `PASS`/`REJECT`/`REVIEW` 판정을 만들지
+않는다. PatchCore row와 YOLO row는 별도 durable inference result이고 Live Monitor도 두 domain을 결합하지
+않는다. 최종 결합은 C3 Decision Engine 범위다.
 
 ```text
                          ┌─ POST /v1/predictions ── PatchCore ── anomaly score
@@ -157,8 +159,21 @@ Repository commit이 성공해 durable domain object를 반환한 뒤에만 even
 background broadcast를 예약한다. Event는 compact summary이며 image, raw mask, bbox list와 provenance
 hash를 포함하지 않는다. WebSocket은 single-process best-effort notification이지 durable queue나
 exactly-once delivery가 아니다. PostgreSQL이 source of truth이고 reconnect 중 누락한 event는 REST
-history/detail로 복구한다. C2-4C는 이 별도 channel을 소비하되 이번 단계에서는 Live Monitor UI를 변경하지
-않는다.
+history/detail로 복구한다.
+
+C2-4C Live Monitor는 `/v1/ws/known-defects`를 먼저 연결하고 incoming summary를 buffer한 뒤
+`GET /v1/known-defects?limit=100&offset=0`을 조회한다. History, 이전 visible window와 buffer를 inspection UUID로
+dedupe하고 `(created_at DESC, inspection_id DESC)` 순서의 100개 window로 병합한 후에만 YOLO indicator를
+`LIVE`로 전환한다. Reconnect도 bounded backoff 뒤 같은 synchronization을 반복한다. PatchCore socket,
+generation, abort controller와 indicator는 별도이므로 YOLO history/socket failure가 PatchCore section을
+중단하지 않는다.
+
+Compact event의 `classes`는 feed와 latest summary에 바로 사용하며 event마다 detail REST를 호출하지 않는다.
+History parent에는 class children이 없으므로 recovery된 row는 class를 추정하지 않고 interaction 전까지
+`Available in details`로 표시한다. 사용자가 row를 열 때만 `GET /v1/known-defects/{inspection_id}`로 모든 ordered
+instance, bbox, mask-area summary와 provenance를 복원한다. `instance_count=0`은 오류나 missing data가 아니라
+`NO KNOWN DEFECT` observation이다. Diagnostic confidence `0.25`는 UI에서도
+`Diagnostic operating point; not production-calibrated.`로 명시한다.
 
 ## 8. Error contract
 
@@ -258,7 +273,37 @@ color와 scratch는 각각 child 1개다. Class/confidence/bbox/mask summary는 
 PostgreSQL commit과 in-process ASGI response가 포함되지만 WebSocket receive, detail/history recovery는
 포함하지 않는다.
 
-## 12. Docker packaging
+## 12. C2-4C actual browser Live Monitor smoke
+
+기존 `smartfactory_postgres_data` volume과 migration `20260826_01`을 유지한 채 actual PatchCore CPU,
+actual YOLO MPS, PostgreSQL, FastAPI와 browser-native Live Monitor를 함께 실행했다. Initial REST synchronization
+전 row는 PatchCore `336`, known-defect parent/child `4/5`였고 두 section 모두 `LIVE`가 된 뒤 YOLO KPI는
+visible `4`, no-known-defect `1`, known-defect `3`, total instances `5`를 표시했다.
+
+Live Monitor tab 두 개를 연 상태에서 actual image 네 장을 `POST /v1/known-defects`로 전송했다. 두 탭은 manual
+refresh 없이 같은 `known_defect.created`를 받고 동일 latest ID와 newest-first 8개 ID sequence를 표시했다.
+
+| Image | Inspection ID | UI observation |
+| --- | --- | --- |
+| `good/000.png` | `37348183-f9ee-4def-81a4-962cef1c1219` | `NO KNOWN DEFECT`, 0 instances |
+| `bent/000.png` | `ef6ae076-41e6-42a6-acf9-f134a0ece9a9` | 3 instances, unique summary `bent, scratch` |
+| `color/000.png` | `fecdd41f-52d1-40bd-bf71-067a5ac9564b` | 1 instance, `color` |
+| `scratch/000.png` | `b6f3b365-9fe7-49aa-9b38-fa0da7e060b4` | 1 instance, `scratch` |
+
+Bent row interaction은 detail REST를 한 번 호출해 ordered child `bent`, `bent`, `scratch` 3개와 각 confidence,
+bbox, mask pixel/area summary, image/model/metadata/dataset provenance를 표시했다. Interaction 전에는 event마다
+detail GET이 발생하지 않았다. 네 POST 뒤 durable count는 parent/child `8/10`, visible-window KPI는
+`8 / 2 / 6 / 10`이었다.
+
+FastAPI를 종료하자 두 channel indicator가 `RECONNECTING`으로 전환됐고 동일 설정으로 재시작한 뒤 각각
+`LIVE`로 복귀했다. Known-defect REST recovery는 기존 8개 ID를 중복 0개로 복원했고 두 탭 순서도 같았다.
+이후 actual good image를 `POST /v1/predictions`로 전송하자 PatchCore UUID
+`996671ca-aa3f-4bd3-aa00-40a6e4a2dce7`, score `34.763465881347656`, threshold
+`41.19657897949219`, `NORMAL`이 두 탭에 반영됐다. YOLO latest ID와 8-row window는 변하지 않았고 최종
+PatchCore row는 `337`이었다. 이는 두 result가 같은 화면에 있어도 correlation 또는 manufacturing disposition을
+만들지 않는다는 현재 boundary를 확인한 functional smoke다.
+
+## 13. Docker packaging
 
 `ultralytics==8.4.128`은 core project dependency여서 Docker application runtime stage에도 설치된다.
 Compose는 YOLO를 default disabled로 두고 enabled runtime bundle을 read-only
@@ -267,7 +312,12 @@ Compose는 YOLO를 default disabled로 두고 enabled runtime bundle을 read-onl
 `POSTGRES_PORT`로 Compose PostgreSQL에 연결한다. Migration container와 application startup ordering은
 기존 commit-before-serving contract를 유지하며 실제 Docker accelerator benchmark를 주장하지 않는다.
 
-## 13. C3 Decision Engine boundary
+C2-4C 변경 후 `docker build --target runtime`이 성공했고 해당 image를 PostgreSQL과 read-only PatchCore
+artifact로 시작했다. `GET /ready`는 CPU `patchcore` ready를 반환했으며 `/live/`, `/live/app.js`,
+`/live/state.js`, `/live/styles.css`는 모두 HTTP 200이었다. 이는 default final `rag-runtime`이 아니라 Vision API
+`runtime` stage의 static packaging smoke다.
+
+## 14. C3 Decision Engine boundary
 
 C2-4B까지 PatchCore anomaly inference와 YOLO known-defect inference는 endpoint, table, history와 event가
 독립적이다. 공통 image SHA가 같아도 자동 join하거나 최종 manufacturing decision을 만들지 않는다. C3에서

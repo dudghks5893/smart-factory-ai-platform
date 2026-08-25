@@ -12,6 +12,7 @@
   --normal: #54d69a;
   --anomaly: #ff6868;
   --amber: #f8c15c;
+  --known: #bd84ff;
 }
 
 * {
@@ -90,8 +91,22 @@ h2 {
 
 .connection-panel {
   display: grid;
-  justify-items: end;
-  gap: 8px;
+  gap: 10px;
+}
+
+.connection-row {
+  display: grid;
+  grid-template-columns: 112px 126px minmax(126px, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.connection-label {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.67rem;
+  text-align: right;
+  letter-spacing: 0.1em;
 }
 
 .connection-state {
@@ -116,6 +131,35 @@ h2 {
 
 main {
   padding: 28px 0 48px;
+}
+
+.model-domain + .model-domain {
+  margin-top: 42px;
+  padding-top: 42px;
+  border-top: 1px solid var(--line);
+}
+
+.domain-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 18px;
+}
+
+.domain-heading h2 {
+  font-size: clamp(1.5rem, 3vw, 2.2rem);
+}
+
+.domain-heading > p {
+  max-width: 520px;
+  margin-bottom: 0;
+  color: var(--muted);
+  text-align: right;
+}
+
+.known-defect-domain .eyebrow {
+  color: var(--known);
 }
 
 .kpi-grid {
@@ -143,6 +187,10 @@ main {
 
 .kpi-card.anomaly {
   border-top-color: var(--anomaly);
+}
+
+.kpi-card.known {
+  border-top-color: var(--known);
 }
 
 .kpi-card span {
@@ -218,6 +266,11 @@ main {
   color: var(--anomaly);
 }
 
+.result-badge.known {
+  border-color: var(--known);
+  color: var(--known);
+}
+
 .value-pair {
   display: grid;
   align-content: start;
@@ -267,6 +320,16 @@ main {
   padding: 12px;
 }
 
+.diagnostic-note {
+  grid-column: 1 / -1;
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--known);
+  background: rgba(189, 132, 255, 0.08);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 .inspection-feed {
   display: grid;
   gap: 1px;
@@ -292,6 +355,11 @@ main {
   background: linear-gradient(90deg, rgba(255, 104, 104, 0.11), var(--panel-raised) 45%);
 }
 
+.feed-item.known {
+  border-left-color: var(--known);
+  background: linear-gradient(90deg, rgba(189, 132, 255, 0.12), var(--panel-raised) 45%);
+}
+
 .feed-summary {
   display: grid;
   gap: 5px;
@@ -310,10 +378,41 @@ main {
   color: var(--anomaly);
 }
 
+.feed-item.known .feed-result {
+  color: var(--known);
+}
+
 .feed-summary time,
-.feed-identity {
+.feed-identity,
+.feed-short-id {
   color: var(--muted);
   font-size: 0.78rem;
+}
+
+.known-feed-item {
+  display: block;
+  padding: 0;
+}
+
+.known-feed-button {
+  display: grid;
+  grid-template-columns: minmax(210px, 1.35fr) minmax(240px, 1.35fr) minmax(180px, 0.8fr) auto;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  padding: 16px 20px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.known-feed-button:hover,
+.known-feed-button:focus-visible {
+  outline: 1px solid var(--known);
+  outline-offset: -2px;
+  background: rgba(189, 132, 255, 0.06);
 }
 
 .empty-state {
@@ -359,6 +458,33 @@ main {
   overflow-y: auto;
 }
 
+.known-detail-dialog {
+  width: min(880px, calc(100% - 32px));
+}
+
+.instance-list {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.instance-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-raised);
+}
+
+.instance-card h3 {
+  grid-column: 1 / -1;
+  margin: 0 0 10px;
+  color: var(--known);
+  font-size: 1rem;
+}
+
 footer {
   display: flex;
   justify-content: space-between;
@@ -383,6 +509,22 @@ footer {
   }
 }
 
+@media (max-width: 760px) {
+  .known-feed-button {
+    grid-template-columns: 1fr auto;
+  }
+
+  .known-feed-button .feed-measurement,
+  .known-feed-button .feed-identity {
+    grid-column: 1;
+  }
+
+  .known-feed-button .feed-short-id {
+    grid-column: 2;
+    grid-row: 1 / 4;
+  }
+}
+
 @media (max-width: 640px) {
   .masthead,
   main,
@@ -397,7 +539,28 @@ footer {
   }
 
   .connection-panel {
-    justify-items: start;
+    width: 100%;
+  }
+
+  .connection-row {
+    grid-template-columns: 1fr 126px;
+  }
+
+  .connection-label {
+    text-align: left;
+  }
+
+  .connection-row .sync-time {
+    grid-column: 1 / -1;
+  }
+
+  .domain-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .domain-heading > p {
+    text-align: left;
   }
 
   .kpi-grid,
@@ -422,5 +585,13 @@ footer {
   .feed-item .detail-button {
     grid-column: 2;
     grid-row: 1 / 4;
+  }
+
+  .instance-card {
+    grid-template-columns: 1fr;
+  }
+
+  .instance-card h3 {
+    grid-column: auto;
   }
 }

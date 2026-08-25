@@ -41,6 +41,50 @@ def _run_state_contract() -> dict[str, object]:
       const tied = state.mergeInspections([item(1, tieTime), item(2, tieTime)]);
       const validEvent = {{schema_version: "1", type: "inspection.created", inspection: item(1)}};
       const malformed = {{...validEvent, schema_version: "2"}};
+      const knownHistoryItem = (index, instanceCount = 0, createdAt = null) => ({{
+        inspection_id: `10000000-0000-4000-8000-${{String(index).padStart(12, "0")}}`,
+        created_at: createdAt ?? new Date(Date.UTC(2026, 7, 26, 0, 0, index)).toISOString(),
+        model: {{name: "yolo11n-seg.pt", task: "segment", category: "metal_nut", device: "mps"}},
+        image: {{width: 700, height: 700}},
+        diagnostic_confidence: 0.25,
+        inference_ms: 30 + index,
+        instance_count: instanceCount,
+      }});
+      const knownEventItem = (index, instanceCount, classes, createdAt = null) => ({{
+        inspection_id: `10000000-0000-4000-8000-${{String(index).padStart(12, "0")}}`,
+        model_name: "yolo11n-seg.pt",
+        category: "metal_nut",
+        device: "mps",
+        diagnostic_confidence: 0.25,
+        instance_count: instanceCount,
+        classes,
+        created_at: createdAt ?? new Date(Date.UTC(2026, 7, 26, 0, 0, index)).toISOString(),
+      }});
+      const knownHistory = Array.from({{length: 100}}, (_, index) =>
+        knownHistoryItem(index, index % 5 === 0 ? 2 : 0),
+      );
+      const duplicateKnownEvent = knownEventItem(50, 3, ["scratch", "bent", "bent"]);
+      const knownBuffered = [
+        duplicateKnownEvent,
+        knownEventItem(100, 1, ["color"]),
+        knownEventItem(101, 0, []),
+      ];
+      const knownMerged = state.mergeKnownDefectInspections(knownHistory, knownBuffered);
+      const knownReconnected = state.mergeKnownDefectInspections(
+        knownHistory,
+        knownMerged,
+        [duplicateKnownEvent],
+      );
+      const knownKpiSample = state.mergeKnownDefectInspections([
+        knownEventItem(200, 0, []),
+        knownEventItem(201, 3, ["bent", "scratch"]),
+        knownEventItem(202, 1, ["color"]),
+      ]);
+      const knownValidEvent = {{
+        schema_version: "1",
+        type: "known_defect.created",
+        inspection: duplicateKnownEvent,
+      }};
       console.log(JSON.stringify({{
         length: merged.length,
         ids: merged.map((value) => value.inspection_id),
@@ -53,6 +97,21 @@ def _run_state_contract() -> dict[str, object]:
         httpUrl: state.inspectionWebSocketUrl({{protocol: "http:", host: "factory.test:8000"}}),
         httpsUrl: state.inspectionWebSocketUrl({{protocol: "https:", host: "factory.test"}}),
         delays: [0, 1, 2, 3, 4, 10].map(state.reconnectDelayMs),
+        knownLength: knownMerged.length,
+        knownIds: knownMerged.map((value) => value.inspection_id),
+        knownDuplicate: knownMerged.find((value) => value.inspection_id.endsWith("000000000050")),
+        knownReconnectIds: knownReconnected.map((value) => value.inspection_id),
+        knownKpis: state.calculateKnownDefectKpis(knownKpiSample),
+        knownValidEvent: state.parseKnownDefectEvent(knownValidEvent),
+        knownWrongEvent: state.parseKnownDefectEvent(validEvent),
+        knownHistoryLength: state.parseKnownDefectHistory({{items: knownHistory}}).length,
+        knownHttpUrl: state.knownDefectWebSocketUrl({{
+          protocol: "http:",
+          host: "factory.test:8000",
+        }}),
+        knownHttpsUrl: state.knownDefectWebSocketUrl({{protocol: "https:", host: "factory.test"}}),
+        knownDetailUrl: state.knownDefectDetailUrl(duplicateKnownEvent.inspection_id),
+        patchContainsKnown: merged.some((value) => value.inspection_id.startsWith("10000000")),
       }}));
     """
     result = subprocess.run(  # noqa: S603
@@ -81,8 +140,8 @@ def test_live_monitor_merge_window_order_and_kpis() -> None:
         "anomalyRatio": 0.1,
     }
     assert result["tiedIds"] == [
-        "00000000-0000-4000-8000-000000000001",
         "00000000-0000-4000-8000-000000000002",
+        "00000000-0000-4000-8000-000000000001",
     ]
 
 
@@ -97,3 +156,45 @@ def test_live_monitor_event_and_reconnect_contract() -> None:
     assert result["httpUrl"] == "ws://factory.test:8000/v1/ws/inspections"
     assert result["httpsUrl"] == "wss://factory.test/v1/ws/inspections"
     assert result["delays"] == [500, 1000, 2000, 4000, 5000, 5000]
+
+
+# ADD 2026-08-26: YOLO REST/WS merge, dedupe, class enrichment와 reconnect recovery를 검증한다.
+def test_known_defect_live_monitor_merge_reconnect_and_isolation() -> None:
+    result = _run_state_contract()
+
+    assert result["knownLength"] == 100
+    known_ids = result["knownIds"]
+    assert isinstance(known_ids, list)
+    assert known_ids[0].endswith("000000000101")
+    assert known_ids[1].endswith("000000000100")
+    assert len(known_ids) == len(set(known_ids))
+    assert result["knownReconnectIds"] == known_ids
+    duplicate = result["knownDuplicate"]
+    assert isinstance(duplicate, dict)
+    assert duplicate["instance_count"] == 3
+    assert duplicate["classes"] == ["bent", "scratch"]
+    assert duplicate["inference_ms"] == 80
+    assert duplicate["image_width"] == duplicate["image_height"] == 700
+    assert result["patchContainsKnown"] is False
+
+
+# ADD 2026-08-26: Empty/defect YOLO KPI, summary event와 same-origin route builders를 검증한다.
+def test_known_defect_live_monitor_kpi_and_endpoint_contract() -> None:
+    result = _run_state_contract()
+
+    assert result["knownKpis"] == {
+        "visible": 3,
+        "noKnownDefect": 1,
+        "knownDefect": 2,
+        "totalInstances": 4,
+    }
+    valid_event = result["knownValidEvent"]
+    assert isinstance(valid_event, dict)
+    assert valid_event["classes"] == ["bent", "scratch"]
+    assert result["knownWrongEvent"] is None
+    assert result["knownHistoryLength"] == 100
+    assert result["knownHttpUrl"] == "ws://factory.test:8000/v1/ws/known-defects"
+    assert result["knownHttpsUrl"] == "wss://factory.test/v1/ws/known-defects"
+    detail_url = result["knownDetailUrl"]
+    assert isinstance(detail_url, str)
+    assert detail_url.endswith("10000000-0000-4000-8000-000000000050")
