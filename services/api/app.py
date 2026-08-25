@@ -14,6 +14,11 @@ from services.api.errors import install_exception_handlers
 from services.api.routes import router
 from services.api.websockets import InspectionEventBroadcaster
 from services.inference.runtime import ModelRuntime, PatchCoreRuntimeConfig, load_patchcore_runtime
+from services.inference.yolo_segmentation_runtime import (
+    YoloSegmentationAdapter,
+    YoloSegmentationRuntimeConfig,
+    load_yolo_segmentation_runtime,
+)
 from services.monitoring.metrics import MonitoringMetrics, metrics_endpoint
 from services.monitoring.middleware import HttpMetricsMiddleware
 from services.persistence.database import DatabaseManager, create_database_manager
@@ -23,6 +28,7 @@ from services.persistence.inspections import (
 )
 
 type RuntimeLoader = Callable[[PatchCoreRuntimeConfig], ModelRuntime]
+type YoloRuntimeLoader = Callable[[YoloSegmentationRuntimeConfig], YoloSegmentationAdapter]
 type DatabaseLoader = Callable[[str], DatabaseManager]
 type RepositoryLoader = Callable[[DatabaseManager], InspectionRepository]
 
@@ -37,10 +43,12 @@ def load_inspection_repository(database: DatabaseManager) -> InspectionRepositor
 
 # ADD 2026-08-19: Lifespan startup과 injectable runtime loader를 가진 FastAPI app을 생성한다.
 # MODIFY 2026-08-25: WebSocket lifecycle과 optional browser monitor static mount를 추가한다.
+# MODIFY 2026-08-26: Optional enabled YOLO singleton을 startup/readiness lifecycle에 추가한다.
 def create_app(
     *,
     settings: ServingSettings | None = None,
     runtime_loader: RuntimeLoader = load_patchcore_runtime,
+    yolo_runtime_loader: YoloRuntimeLoader = load_yolo_segmentation_runtime,
     database_loader: DatabaseLoader = create_database_manager,
     repository_loader: RepositoryLoader = load_inspection_repository,
     inspection_event_broadcaster: InspectionEventBroadcaster | None = None,
@@ -53,6 +61,7 @@ def create_app(
 
     # ADD 2026-08-19: Startup load가 완료된 뒤에만 ready 상태로 전환한다.
     # MODIFY 2026-08-21: Loaded model identity를 app-local Info metric에 한 번 게시한다.
+    # MODIFY 2026-08-26: Enabled YOLO load 성공도 ready 전환의 필수 조건으로 포함한다.
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         active_settings = settings or ServingSettings.from_environment()
@@ -67,14 +76,21 @@ def create_app(
 
             # Artifact와 threshold를 검증하고 process-local runtime을 정확히 한 번 생성한다.
             runtime = runtime_loader(active_settings.runtime_config())
+            yolo_runtime = (
+                yolo_runtime_loader(active_settings.yolo_segmentation_runtime_config())
+                if active_settings.yolo_segmentation_enabled
+                else None
+            )
             monitoring_metrics.set_model_info(runtime)
             application.state.serving_settings = active_settings
             application.state.database = database
             application.state.inspection_repository = inspection_repository
             application.state.serving_runtime = runtime
+            application.state.yolo_segmentation_runtime = yolo_runtime
             yield
         finally:
             await event_broadcaster.close_all()
+            application.state.yolo_segmentation_runtime = None
             application.state.serving_runtime = None
             application.state.inspection_repository = None
             application.state.database = None
@@ -87,6 +103,7 @@ def create_app(
     )
     app.state.serving_settings = None
     app.state.serving_runtime = None
+    app.state.yolo_segmentation_runtime = None
     app.state.database = None
     app.state.inspection_repository = None
     app.state.inspection_event_broadcaster = event_broadcaster

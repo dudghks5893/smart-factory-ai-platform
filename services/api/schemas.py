@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HealthResponse(BaseModel):
@@ -34,6 +34,62 @@ class InferenceResponse(BaseModel):
     anomaly_score: float
     threshold: float
     comparison_operator: Literal[">"]
+
+
+class KnownDefectModelIdentity(BaseModel):
+    """Loaded known-defect segmentation model identity."""
+
+    name: str
+    task: Literal["segment"]
+    category: str
+    device: str
+
+
+class KnownDefectImageSummary(BaseModel):
+    """Original image dimensions used by normalized masks and boxes."""
+
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+
+
+class KnownDefectBoundingBox(BaseModel):
+    """Pixel-space bounding box clipped to the original image."""
+
+    x_min: float
+    y_min: float
+    x_max: float
+    y_max: float
+
+
+class KnownDefectMaskSummary(BaseModel):
+    """Compact mask area without raw 700x700 pixels."""
+
+    pixel_count: int = Field(gt=0)
+    area_ratio: float = Field(gt=0.0, le=1.0)
+
+
+class KnownDefectInstanceResponse(BaseModel):
+    """One normalized defect instance returned by the YOLO endpoint."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    class_id: int = Field(ge=0)
+    class_name: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    box: KnownDefectBoundingBox
+    mask: KnownDefectMaskSummary
+
+
+class KnownDefectResponse(BaseModel):
+    """Known-defect segmentation response without manufacturing decision or raw mask."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    model: KnownDefectModelIdentity
+    image: KnownDefectImageSummary
+    diagnostic_confidence: float = Field(gt=0.0, lt=1.0)
+    inference_ms: float = Field(ge=0.0)
+    instances: list[KnownDefectInstanceResponse]
 
 
 class InspectionResponse(BaseModel):

@@ -20,7 +20,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from services.api.config import ServingSettings
 from services.api.errors import ApiError
-from services.api.images import decode_uploaded_image
+from services.api.images import decode_uploaded_image, decode_uploaded_rgb_array
 from services.api.schemas import (
     HealthResponse,
     InferenceResponse,
@@ -28,12 +28,22 @@ from services.api.schemas import (
     InspectionCreatedPayload,
     InspectionHistoryResponse,
     InspectionResponse,
+    KnownDefectBoundingBox,
+    KnownDefectImageSummary,
+    KnownDefectInstanceResponse,
+    KnownDefectMaskSummary,
+    KnownDefectModelIdentity,
+    KnownDefectResponse,
     ReadinessResponse,
 )
 from services.api.websockets import InspectionEventBroadcaster
 from services.inference.runtime import (
     ModelRuntime,
     require_serving_provenance,
+)
+from services.inference.yolo_segmentation_runtime import (
+    YoloSegmentationAdapter,
+    YoloSegmentationResult,
 )
 from services.monitoring.metrics import MonitoringMetrics
 from services.persistence.database import DatabaseManager, PersistenceError
@@ -57,10 +67,12 @@ async def health() -> HealthResponse:
 
 # ADD 2026-08-19: Startup에서 model이 복원된 경우에만 readiness를 반환한다.
 # MODIFY 2026-08-20: Required database connectivity를 readiness 응답 전에 재확인한다.
+# MODIFY 2026-08-26: Enabled YOLO singleton도 aggregate readiness에 포함한다.
 @router.get("/ready", response_model=ReadinessResponse)
 async def ready(request: Request) -> ReadinessResponse:
     """Report model identity only while the required database is reachable."""
     runtime = _runtime_from_request(request)
+    _require_yolo_readiness(request)
     database = _database_from_request(request)
     repository = _repository_from_request(request)
     try:
@@ -78,6 +90,7 @@ async def ready(request: Request) -> ReadinessResponse:
 
 # ADD 2026-08-19: Multipart image를 검증하고 shared runtime의 image-level prediction을 반환한다.
 # MODIFY 2026-08-25: Commit된 inspection event를 response 이후 best-effort broadcast한다.
+# MODIFY 2026-08-26: Shared bounded upload read를 YOLO endpoint와 재사용한다.
 @router.post("/v1/predictions", response_model=InferenceResponse)
 async def create_prediction(
     request: Request,
@@ -91,10 +104,7 @@ async def create_prediction(
     monitoring = _monitoring_from_request(request)
 
     # Upload를 bounded read하고 application-side temporary file 없이 tensor로 decode한다.
-    try:
-        content = await image.read(settings.max_upload_bytes + 1)
-    finally:
-        await image.close()
+    content = await _read_bounded_upload(image, max_upload_bytes=settings.max_upload_bytes)
     image_tensor = decode_uploaded_image(
         content,
         content_type=image.content_type,
@@ -163,6 +173,47 @@ async def create_prediction(
         anomaly_score=prediction.anomaly_score,
         threshold=prediction.threshold,
         comparison_operator=cast(Literal[">"], prediction.comparison_operator),
+    )
+
+
+# ADD 2026-08-26: Multipart image를 enabled YOLO singleton으로 known-defect segmentation한다.
+@router.post("/v1/known-defects", response_model=KnownDefectResponse)
+async def create_known_defect_prediction(
+    request: Request,
+    image: Annotated[UploadFile, File(description="JPEG or PNG inspection image")],
+) -> KnownDefectResponse:
+    """Return normalized known-defect instances without persistence or final disposition."""
+    runtime = _yolo_runtime_from_request(request)
+    settings = _settings_from_request(request)
+    monitoring = _monitoring_from_request(request)
+
+    # PatchCore와 같은 bounded media/format 정책으로 upload를 RGB array까지 decode한다.
+    content = await _read_bounded_upload(image, max_upload_bytes=settings.max_upload_bytes)
+    image_rgb = decode_uploaded_rgb_array(
+        content,
+        content_type=image.content_type,
+        max_upload_bytes=settings.max_upload_bytes,
+    )
+
+    # Blocking singleton inference를 threadpool에서 실행하고 internal detail은 숨긴다.
+    try:
+        with monitoring.track_inference(
+            model_name=runtime.metadata.model_name,
+            category=runtime.metadata.category,
+            device=runtime.device,
+        ):
+            prediction = await run_in_threadpool(
+                runtime.predict,
+                image_rgb,
+                diagnostic_confidence=settings.yolo_segmentation_diagnostic_confidence,
+            )
+    except Exception as exc:
+        LOGGER.exception("YOLO segmentation request inference failed", exc_info=exc)
+        raise ApiError(500, "inference_failed", "Model inference failed.") from exc
+    return _known_defect_response(
+        runtime=runtime,
+        prediction=prediction,
+        diagnostic_confidence=settings.yolo_segmentation_diagnostic_confidence,
     )
 
 
@@ -260,12 +311,99 @@ def _inspection_created_event(inspection: Inspection) -> InspectionCreatedEvent:
     )
 
 
+# ADD 2026-08-26: Runtime result를 raw mask 없는 known-defect API schema로 변환한다.
+def _known_defect_response(
+    *,
+    runtime: YoloSegmentationAdapter,
+    prediction: YoloSegmentationResult,
+    diagnostic_confidence: float,
+) -> KnownDefectResponse:
+    return KnownDefectResponse(
+        model=KnownDefectModelIdentity(
+            name=runtime.metadata.model_name,
+            task="segment",
+            category=runtime.metadata.category,
+            device=runtime.device,
+        ),
+        image=KnownDefectImageSummary(
+            width=prediction.image_width,
+            height=prediction.image_height,
+        ),
+        diagnostic_confidence=diagnostic_confidence,
+        inference_ms=prediction.inference_ms,
+        instances=[
+            KnownDefectInstanceResponse(
+                class_id=instance.class_id,
+                class_name=instance.class_name,
+                confidence=instance.confidence,
+                box=KnownDefectBoundingBox(
+                    x_min=instance.box_xyxy[0],
+                    y_min=instance.box_xyxy[1],
+                    x_max=instance.box_xyxy[2],
+                    y_max=instance.box_xyxy[3],
+                ),
+                mask=KnownDefectMaskSummary(
+                    pixel_count=instance.mask_pixel_count,
+                    area_ratio=instance.mask_area_ratio,
+                ),
+            )
+            for instance in prediction.instances
+        ],
+    )
+
+
+# ADD 2026-08-26: UploadFile을 bounded read하고 inference 전에 handle을 닫는다.
+async def _read_bounded_upload(image: UploadFile, *, max_upload_bytes: int) -> bytes:
+    try:
+        return await image.read(max_upload_bytes + 1)
+    finally:
+        await image.close()
+
+
 # ADD 2026-08-19: Request state에서 ready runtime을 가져오고 unavailable 상태를 503으로 변환한다.
 def _runtime_from_request(request: Request) -> ModelRuntime:
     runtime = getattr(request.app.state, "serving_runtime", None)
     if runtime is None:
         raise ApiError(503, "model_not_ready", "Model runtime is not ready.")
     return cast(ModelRuntime, runtime)
+
+
+# ADD 2026-08-26: Request state에서 enabled YOLO runtime을 가져오거나 stable 503을 반환한다.
+def _yolo_runtime_from_request(request: Request) -> YoloSegmentationAdapter:
+    settings = _settings_from_request(request)
+    if not settings.yolo_segmentation_enabled:
+        raise ApiError(
+            503,
+            "known_defect_model_disabled",
+            "Known-defect model is disabled.",
+        )
+    runtime = getattr(request.app.state, "yolo_segmentation_runtime", None)
+    if runtime is None:
+        raise ApiError(
+            503,
+            "known_defect_model_not_ready",
+            "Known-defect model runtime is not ready.",
+        )
+    return cast(YoloSegmentationAdapter, runtime)
+
+
+# ADD 2026-08-26: Enabled YOLO component가 없으면 aggregate readiness를 503으로 전환한다.
+def _require_yolo_readiness(request: Request) -> None:
+    settings = _settings_from_request(request)
+    if (
+        settings.yolo_segmentation_enabled
+        and getattr(
+            request.app.state,
+            "yolo_segmentation_runtime",
+            None,
+        )
+        is None
+    ):
+        raise ApiError(
+            503,
+            "known_defect_model_not_ready",
+            "Known-defect model runtime is not ready.",
+        )
 
 
 # ADD 2026-08-19: Startup에서 검증한 serving settings를 request state에서 반환한다.

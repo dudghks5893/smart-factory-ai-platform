@@ -2,6 +2,8 @@
 
 from io import BytesIO
 
+import numpy as np
+from numpy.typing import NDArray
 from PIL import Image, UnidentifiedImageError
 from torch import Tensor
 
@@ -15,6 +17,7 @@ SUPPORTED_IMAGE_MEDIA_TYPES = {
 
 
 # ADD 2026-08-19: Upload bytes의 size/media/format을 검증하고 RGB batch tensor로 변환한다.
+# MODIFY 2026-08-26: Shared RGB decode contract를 재사용해 YOLO와 upload validation을 일치시킨다.
 def decode_uploaded_image(
     content: bytes,
     *,
@@ -22,6 +25,38 @@ def decode_uploaded_image(
     max_upload_bytes: int,
 ) -> Tensor:
     """Decode one supported JPEG or PNG upload without application-side temp files."""
+    image = _decode_uploaded_rgb_image(
+        content,
+        content_type=content_type,
+        max_upload_bytes=max_upload_bytes,
+    )
+    return image_to_float_tensor(image).unsqueeze(0)
+
+
+# ADD 2026-08-26: Validated upload를 YOLO runtime용 HWC uint8 RGB array로 변환한다.
+def decode_uploaded_rgb_array(
+    content: bytes,
+    *,
+    content_type: str | None,
+    max_upload_bytes: int,
+) -> NDArray[np.uint8]:
+    """Decode one supported upload with the same policy as PatchCore requests."""
+    image = _decode_uploaded_rgb_image(
+        content,
+        content_type=content_type,
+        max_upload_bytes=max_upload_bytes,
+    )
+    return np.asarray(image, dtype=np.uint8)
+
+
+# ADD 2026-08-26: Bounded media/format validation을 하나의 RGB Pillow decode 경계로 제공한다.
+def _decode_uploaded_rgb_image(
+    content: bytes,
+    *,
+    content_type: str | None,
+    max_upload_bytes: int,
+) -> Image.Image:
+    """Return a detached RGB image after fully validating the uploaded payload."""
     normalized_media_type = (content_type or "").lower()
     expected_format = SUPPORTED_IMAGE_MEDIA_TYPES.get(normalized_media_type)
     if expected_format is None:
@@ -45,7 +80,7 @@ def decode_uploaded_image(
                     "unsupported_image_format",
                     "Uploaded content does not match its supported media type.",
                 )
-            return image_to_float_tensor(image).unsqueeze(0)
+            return image.convert("RGB")
     except ApiError:
         raise
     except (UnidentifiedImageError, OSError, ValueError) as exc:

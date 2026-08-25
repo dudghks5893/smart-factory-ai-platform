@@ -116,7 +116,8 @@ See [MVTec AD Pipeline](docs/data/MVTEC_AD_PIPELINE.md),
 
 ## 5. Serving and inspection data
 
-The Vision API loads validated `model.pt`, `metadata.json`, and `thresholds.json` artifacts once during startup.
+The Vision API loads validated PatchCore artifacts once during startup. An optional YOLO segmentation singleton
+serves compact known-defect instances at `/v1/known-defects` without changing the PatchCore prediction contract.
 Successful predictions are persisted with UUID, UTC timestamp, score, threshold, result, device and model/manifest/
 threshold provenance. PostgreSQL migrations run as a separate Alembic lifecycle; application startup does not run
 migrations implicitly.
@@ -128,7 +129,8 @@ The browser-native Live Inspection Monitor is served from the Vision API at `/li
 loading REST history, merges buffered events by inspection UUID, and reloads PostgreSQL-backed history after bounded
 reconnects. It complements rather than replaces the manual-refresh Streamlit analytical dashboard.
 
-See [PatchCore API](docs/serving/PATCHCORE_API.md) and
+See [PatchCore API](docs/serving/PATCHCORE_API.md),
+[YOLO Segmentation API](docs/serving/YOLO_SEGMENTATION_API.md), and
 [Inspection History](docs/serving/INSPECTION_HISTORY.md).
 
 ## 6. MLOps and operations
@@ -372,7 +374,7 @@ See [Kubernetes/GCP Foundation](docs/deployment/KUBERNETES_GCP.md).
 |---|---|
 | Architecture | [Overview](docs/architecture/overview.md), [Project Scope](docs/PROJECT_SCOPE.md), [ADRs](docs/adr/) |
 | Data / Vision | [MVTec Pipeline](docs/data/MVTEC_AD_PIPELINE.md), [PatchCore](docs/vision/PATCHCORE_BASELINE.md) |
-| Serving / Data | [API](docs/serving/PATCHCORE_API.md), [Inspection History](docs/serving/INSPECTION_HISTORY.md) |
+| Serving / Data | [PatchCore API](docs/serving/PATCHCORE_API.md), [YOLO API](docs/serving/YOLO_SEGMENTATION_API.md), [Inspection History](docs/serving/INSPECTION_HISTORY.md) |
 | MLOps | [MLflow](docs/mlops/MLFLOW_TRACKING.md), [Artifact Policy](docs/DATA_ARTIFACT_POLICY.md) |
 | Deployment | [Docker](docs/deployment/DOCKER.md), [CI](docs/deployment/CI_CD.md), [Kubernetes/GCP](docs/deployment/KUBERNETES_GCP.md) |
 | Operations | [Monitoring](docs/monitoring/MONITORING.md), [Drift](docs/monitoring/DRIFT.md), [Dashboard](docs/dashboard/DASHBOARD.md) |

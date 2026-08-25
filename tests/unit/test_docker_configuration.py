@@ -49,6 +49,7 @@ def test_dockerfile_runtime_and_context_policy() -> None:
 
 # ADD 2026-08-20: Compose startup ordering, pin, volume과 external model mount를 검증한다.
 # MODIFY 2026-08-21: Dashboard/RAG observer image와 read-only artifact contract를 추가한다.
+# MODIFY 2026-08-26: Optional YOLO config와 read-only runtime artifact mount를 검증한다.
 def test_compose_postgres_migration_and_api_contract() -> None:
     compose = yaml.safe_load((_project_root() / "compose.yaml").read_text(encoding="utf-8"))
     services = compose["services"]
@@ -71,7 +72,20 @@ def test_compose_postgres_migration_and_api_contract() -> None:
         "service_completed_successfully"
     )
     assert services["api"]["environment"]["MODEL_DEVICE"] == "${MODEL_DEVICE:-cpu}"
+    assert services["api"]["environment"]["YOLO_SEGMENTATION_ENABLED"] == (
+        "${YOLO_SEGMENTATION_ENABLED:-false}"
+    )
+    assert services["api"]["environment"]["YOLO_SEGMENTATION_ARTIFACT_DIR"] == (
+        "/runtime/yolo-segmentation"
+    )
+    assert services["api"]["environment"]["YOLO_SEGMENTATION_DEVICE"] == (
+        "${YOLO_SEGMENTATION_DEVICE:-cpu}"
+    )
+    assert services["api"]["environment"]["YOLO_SEGMENTATION_CONFIDENCE"] == (
+        "${YOLO_SEGMENTATION_CONFIDENCE:-0.25}"
+    )
     assert all(volume["read_only"] for volume in services["api"]["volumes"])
+    assert services["api"]["volumes"][2]["target"] == "/runtime/yolo-segmentation"
     assert services["test"]["build"]["target"] == "test"
     assert services["test"]["profiles"] == ["test"]
     assert services["prometheus"]["image"] == "prom/prometheus:v3.12.0"

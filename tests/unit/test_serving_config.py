@@ -56,3 +56,64 @@ def test_serving_settings_reject_missing_or_invalid_values() -> None:
                 "DATABASE_URL": "postgresql://user:password@localhost/database",
             }
         )
+
+
+# ADD 2026-08-26: Optional YOLO environment를 enabled runtime config로 strict parsing한다.
+def test_serving_settings_parse_enabled_yolo_segmentation() -> None:
+    settings = ServingSettings.from_environment(
+        {
+            "PATCHCORE_ARTIFACT_DIR": "artifacts/patchcore",
+            "PATCHCORE_THRESHOLDS_PATH": "outputs/thresholds.json",
+            "DATABASE_URL": "sqlite+pysqlite:///:memory:",
+            "YOLO_SEGMENTATION_ENABLED": "true",
+            "YOLO_SEGMENTATION_ARTIFACT_DIR": "artifacts/yolo-runtime",
+            "YOLO_SEGMENTATION_DEVICE": "mps",
+            "YOLO_SEGMENTATION_CONFIDENCE": "0.25",
+        }
+    )
+    runtime_config = settings.yolo_segmentation_runtime_config()
+    assert settings.yolo_segmentation_enabled is True
+    assert runtime_config.artifact_dir == Path("artifacts/yolo-runtime")
+    assert runtime_config.device == "mps"
+    assert settings.yolo_segmentation_diagnostic_confidence == 0.25
+
+
+# ADD 2026-08-26: Disabled default와 enabled missing/invalid YOLO settings를 검증한다.
+def test_serving_settings_validate_yolo_enablement_policy() -> None:
+    disabled = ServingSettings.from_environment(
+        {
+            "PATCHCORE_ARTIFACT_DIR": "artifacts/patchcore",
+            "PATCHCORE_THRESHOLDS_PATH": "outputs/thresholds.json",
+            "DATABASE_URL": "sqlite+pysqlite:///:memory:",
+        }
+    )
+    assert disabled.yolo_segmentation_enabled is False
+    with pytest.raises(ValueError, match="not enabled"):
+        disabled.yolo_segmentation_runtime_config()
+
+    base = {
+        "PATCHCORE_ARTIFACT_DIR": "artifacts/patchcore",
+        "PATCHCORE_THRESHOLDS_PATH": "outputs/thresholds.json",
+        "DATABASE_URL": "sqlite+pysqlite:///:memory:",
+        "YOLO_SEGMENTATION_ENABLED": "true",
+    }
+    with pytest.raises(ValueError, match="YOLO_SEGMENTATION_ARTIFACT_DIR"):
+        ServingSettings.from_environment(base)
+    with pytest.raises(ValueError, match="true.*false"):
+        ServingSettings.from_environment({**base, "YOLO_SEGMENTATION_ENABLED": "yes"})
+    with pytest.raises(ValueError, match="YOLO_SEGMENTATION_DEVICE"):
+        ServingSettings.from_environment(
+            {
+                **base,
+                "YOLO_SEGMENTATION_ARTIFACT_DIR": "artifact",
+                "YOLO_SEGMENTATION_DEVICE": "metal",
+            }
+        )
+    with pytest.raises(ValueError, match="Diagnostic confidence"):
+        ServingSettings.from_environment(
+            {
+                **base,
+                "YOLO_SEGMENTATION_ARTIFACT_DIR": "artifact",
+                "YOLO_SEGMENTATION_CONFIDENCE": "1.0",
+            }
+        )

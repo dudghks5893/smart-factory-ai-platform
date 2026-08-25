@@ -386,7 +386,9 @@ Floating-point/device 차이를 허용하며 byte equality 또는 새 fixed tole
 original image 위에 predicted mask, bbox, class/confidence를 표시한다. Giant mask nested list는 JSON에
 저장하지 않는다. 전체 directory는 Git 제외 대상이다.
 
-C2-3은 runtime restore/inference/normalization/visualization까지만 다룬다. FastAPI endpoint, database,
-WebSocket, Live Monitor와 PatchCore+YOLO decision logic은 변경하지 않았다. Transport-independent adapter는
-후속 C2-4 serving lifecycle에서 process-local singleton으로 재사용할 수 있지만 production confidence
-정책은 validation-only calibration 또는 별도 승인 없이는 정해지지 않는다.
+C2-3은 runtime restore/inference/normalization/visualization까지만 다뤘다. C2-4A는 이
+transport-independent adapter를 optional process-local FastAPI singleton과
+`POST /v1/known-defects`에 연결했다. Database, WebSocket, Live Monitor와 PatchCore+YOLO decision logic은
+여전히 분리되어 있으며 production confidence 정책은 validation-only calibration 또는 별도 승인 없이는
+정해지지 않는다. HTTP contract와 actual MPS API smoke는
+[`YOLO_SEGMENTATION_API.md`](../serving/YOLO_SEGMENTATION_API.md)에 기록한다.

@@ -52,6 +52,10 @@ services:
       PATCHCORE_ARTIFACT_DIR: /runtime/model
       PATCHCORE_THRESHOLDS_PATH: /runtime/thresholds/thresholds.json
       MODEL_DEVICE: ${MODEL_DEVICE:-cpu}
+      YOLO_SEGMENTATION_ENABLED: ${YOLO_SEGMENTATION_ENABLED:-false}
+      YOLO_SEGMENTATION_ARTIFACT_DIR: /runtime/yolo-segmentation
+      YOLO_SEGMENTATION_DEVICE: ${YOLO_SEGMENTATION_DEVICE:-cpu}
+      YOLO_SEGMENTATION_CONFIDENCE: ${YOLO_SEGMENTATION_CONFIDENCE:-0.25}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-10485760}
     depends_on:
       postgres:
@@ -66,6 +70,10 @@ services:
       - type: bind
         source: ${PATCHCORE_THRESHOLDS_PATH_HOST:-./outputs/evaluation/patchcore/thresholds/current/thresholds.json}
         target: /runtime/thresholds/thresholds.json
+        read_only: true
+      - type: bind
+        source: ${YOLO_SEGMENTATION_ARTIFACT_DIR_HOST:-./artifacts/runtime/yolo_segmentation/current}
+        target: /runtime/yolo-segmentation
         read_only: true
     ports:
       - "${API_PORT:-8000}:8000"
