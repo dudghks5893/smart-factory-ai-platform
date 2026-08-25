@@ -1,0 +1,41 @@
+dataset:
+  name: mvtec_ad_metal_nut_yolo_segmentation
+  version: v1
+  source_dataset: mvtec_ad
+  source_dataset_version: original
+  category: metal_nut
+  task: yolo_segmentation
+  source_root: data/raw/mvtec_ad
+  source_manifest: data/interim/manifests/mvtec_ad_metal_nut.csv
+
+classes:
+  0: bent
+  1: color
+  2: scratch
+
+split:
+  seed: 42
+  train_ratio: 0.6
+  validation_ratio: 0.2
+  test_ratio: 0.2
+
+negatives:
+  ratio_to_positive: 1.0
+  source_defect_type: good
+
+polygon:
+  connectivity: 8
+  contour_chain: simple_lossless
+  simplification_epsilon_pixels: 0.0
+  minimum_vertices: 3
+
+fidelity_gate:
+  minimum_sample_iou: 0.998
+  minimum_sample_precision: 0.998
+  minimum_sample_recall: 0.999
+  minimum_defect_p05_iou: 0.999
+
+output:
+  dataset_root: data/processed/supervised_derived/mvtec_ad/metal_nut/yolo_segmentation/v1
+  visualization_root: outputs/analysis/mvtec_ad/metal_nut/yolo_segmentation/v1
+  package_path: outputs/packages/mvtec_ad_metal_nut_yolo_seg_v1.zip

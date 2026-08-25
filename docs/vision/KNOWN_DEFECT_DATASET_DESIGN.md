@@ -288,3 +288,10 @@ Synthetic unit/integration fixture는 mask loading, empty/malformed/missing mask
 YOLO coordinate bounds, edge touch, path escape, deterministic order, defect aggregation과 CSV/JSON/PNG artifact
 round-trip만 검증한다. 이 fixture는 위 task recommendation에 사용하지 않았다. 결론은
 local raw dataset 93장에서 생성한 actual metric과 visualization을 기준으로 한다.
+
+## 14. C2-1 implementation
+
+C1 recommendation에 따라 `bent/color/scratch`만 포함한 supervised-derived YOLO segmentation dataset과
+real-good negative split을 구현했다. 실제 split, polygon topology, round-trip fidelity와 Kaggle package
+contract는 [YOLO_SEGMENTATION_DATASET.md](YOLO_SEGMENTATION_DATASET.md)에 기록한다. `flip`은 C2-1
+segmentation/negative dataset에 포함하지 않았다.
