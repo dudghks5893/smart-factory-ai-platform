@@ -299,3 +299,94 @@ Training/evaluation core는 raw MVTec directory나 mask naming을 읽지 않는�
 self-contained representation과 추가 domain lineage를 만들면 orchestration/artifact/evaluation 구조를
 재사용할 수 있다. 다만 현재 config의 protocol, category, class/count/hash는 C2-2 baseline에 고정되어
 있으므로 새 dataset은 별도 versioned config와 승인된 contract를 가져야 한다.
+
+## 18. C2-2 actual Kaggle artifact
+
+Tesla T4에서 학습한 artifact는 local ignored runtime bundle
+`artifacts/runtime/yolo_segmentation/smartfactory_yolo11n_seg_metal_nut_seed42_t4/`에 배치했다.
+`model/model.pt` SHA-256은
+`594003121b0e071c47d68c3e53c10f438dcec18b5b56b4e5d8831d64001192bd`이며 metadata 및
+`SHA256SUMS.txt`와 일치한다. Ultralytics `8.4.128`, torch `2.13.0+cu130`, seed 42의 best epoch
+60 artifact다. Dataset Manifest SHA와 semantic fingerprint는 각각
+`1746338c091c18e96a11399c81ea9be0d7350105c4860cfa6a4162144ddb9905`,
+`768125f38580864e8240dc6a242d7e29eeb1bf0c3167b098456cfec7610dddbf`다.
+
+Derived test 28장의 actual mask metric은 precision `0.8427370779`, recall `0.5397984928`, mAP50
+`0.6961360407`, mAP50-95 `0.4250304964`다. Diagnostic confidence `0.25`에서 test good-negative
+14장은 `0/14` false-positive image였다. 이는 **MVTec AD-derived supervised segmentation
+feasibility split** 결과이며 production threshold calibration 결과가 아니다.
+
+## 19. C2-3 local runtime contract
+
+`YoloSegmentationAdapter`는 runtime bundle의 metadata/task/architecture/classes/framework/version과
+checkpoint SHA를 검증한 뒤 `model.pt`를 한 번만 복원한다. Explicit `mps` 또는 `cuda` 요청이 unavailable이면
+CPU로 silently fallback하지 않는다. Runtime result는 original image dimensions, actual device,
+inference latency와 instance별 class/confidence/bounded `xyxy`/original-size CPU boolean mask만 노출한다.
+Raw Ultralytics `Results` 및 MPS/CUDA tensor는 adapter 밖으로 전달하지 않는다.
+
+Project input은 RGB지만 Ultralytics NumPy inference source는 OpenCV-style BGR contract를 사용하므로
+adapter 경계에서 RGB를 BGR로 변환한다. Resize file은 만들지 않고 `imgsz=640`, letterbox와 다른
+preprocessing은 Ultralytics에 맡긴다. `retina_masks=True`로 original-size mask를 받고 shape/alignment를
+검증한다.
+
+```bash
+uv run python -m pipelines.smoke_yolo_segmentation_runtime \
+  --artifact-dir \
+  artifacts/runtime/yolo_segmentation/smartfactory_yolo11n_seg_metal_nut_seed42_t4 \
+  --device mps \
+  --compare-device cpu \
+  --confidence 0.25 \
+  --output-dir outputs/analysis/yolo_segmentation/runtime_smoke
+```
+
+`--image`를 생략하면 실제 `test/{good,bent,color,scratch}/000.png` 네 장을 한 장씩 lazy load한다.
+`0.25`는 C2-2 negative diagnostic operating point를 재현하기 위한 **diagnostic confidence**다.
+Production threshold 또는 test-tuned serving threshold로 부르지 않는다.
+
+## 20. Actual macOS MPS and CPU smoke
+
+macOS arm64, torch `2.13.0`에서 `mps_built=True`, `mps_available=True`, CUDA unavailable을 확인했다.
+동일 model instance를 device별 한 번만 load하고 다음 actual image를 사용했다.
+
+| Image | MPS instances | MPS expected hit | MPS inference | CPU instances | CPU expected hit | CPU inference |
+| --- | ---: | --- | ---: | ---: | --- | ---: |
+| `test/good/000.png` | 0 | N/A | 1674.312 ms cold | 0 | N/A | 87.200 ms cold |
+| `test/bent/000.png` | 3 | Yes | 282.565 ms | 3 | Yes | 85.467 ms |
+| `test/color/000.png` | 1 | Yes | 218.980 ms | 1 | Yes | 54.384 ms |
+| `test/scratch/000.png` | 1 | Yes | 35.385 ms | 1 | Yes | 54.265 ms |
+
+Bent sample은 bent instance 2개와 scratch instance 1개를 반환했다. Color와 scratch sample은 각각
+expected class instance 1개를 반환했다. 이는 model-quality observation이지 네 장으로 계산한 accuracy,
+recall 또는 false-positive rate가 아니다. 특히 good 한 장의 zero prediction과 Kaggle test good-negative
+`0/14` 결과는 별도 evidence다.
+
+Model restore는 MPS runtime `151.783 ms`, CPU runtime `55.241 ms`였다. 첫 MPS inference에는 Metal graph
+준비 등이 포함되어 이후 호출과 분리했다. 이 latency는 disk image loading과 visualization을 제외한 local
+development smoke 관찰값이며 production benchmark 또는 API latency가 아니다.
+
+## 21. MPS/CPU portability observation
+
+네 image 모두 MPS/CPU predicted class set과 instance count가 같았다. Same-class mask IoU로 instance를
+대응한 결과는 다음과 같다.
+
+| Image | Matched | Max confidence delta | Max bbox delta | Min mask IoU |
+| --- | ---: | ---: | ---: | ---: |
+| good | 0 | N/A | N/A | N/A |
+| bent | 3 | 0.0000012517 | 0.000122 px | 1.0 |
+| color | 1 | 0.0 | 0.0 px | 1.0 |
+| scratch | 1 | 0.0000004172 | 0.000061 px | 1.0 |
+
+이 관찰값은 CUDA-trained artifact가 local MPS와 CPU에서 semantic consistency를 유지했음을 보여준다.
+Floating-point/device 차이를 허용하며 byte equality 또는 새 fixed tolerance gate로 사용하지 않는다.
+
+## 22. Runtime smoke outputs and scope
+
+`outputs/analysis/yolo_segmentation/runtime_smoke/`에는 `good_mps.png`, `bent_mps.png`,
+`color_mps.png`, `scratch_mps.png`와 대응 CPU image, `smoke_summary.json`을 생성했다. Visualization은
+original image 위에 predicted mask, bbox, class/confidence를 표시한다. Giant mask nested list는 JSON에
+저장하지 않는다. 전체 directory는 Git 제외 대상이다.
+
+C2-3은 runtime restore/inference/normalization/visualization까지만 다룬다. FastAPI endpoint, database,
+WebSocket, Live Monitor와 PatchCore+YOLO decision logic은 변경하지 않았다. Transport-independent adapter는
+후속 C2-4 serving lifecycle에서 process-local singleton으로 재사용할 수 있지만 production confidence
+정책은 validation-only calibration 또는 별도 승인 없이는 정해지지 않는다.
