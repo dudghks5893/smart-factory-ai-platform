@@ -1,0 +1,52 @@
+model:
+  architecture: yolo11n-seg
+  weights: yolo11n-seg.pt
+  task: segment
+  pretrained: true
+
+training:
+  seed: 42
+  epochs: 100
+  imgsz: 640
+  batch: 16
+  workers: 2
+  optimizer: auto
+  lr0: null
+  lrf: null
+  patience: 20
+  deterministic: true
+  amp: true
+  device: auto
+
+evaluation:
+  split: test
+  batch: 16
+  workers: 2
+  diagnostic_confidence: 0.25
+  save_visualizations: true
+
+dataset_contract:
+  protocol_name: MVTec AD-derived supervised segmentation feasibility split
+  task: yolo_segmentation
+  category: metal_nut
+  manifest_sha256: 1746338c091c18e96a11399c81ea9be0d7350105c4860cfa6a4162144ddb9905
+  semantic_fingerprint_sha256: 768125f38580864e8240dc6a242d7e29eeb1bf0c3167b098456cfec7610dddbf
+  classes:
+    0: bent
+    1: color
+    2: scratch
+  sample_counts:
+    train: 84
+    val: 28
+    test: 28
+    train_positive: 42
+    train_negative: 42
+    val_positive: 14
+    val_negative: 14
+    test_positive: 14
+    test_negative: 14
+
+output:
+  artifact_root: artifacts/models/yolo_segmentation
+  training_runtime_root: outputs/training/yolo_segmentation
+  evaluation_root: outputs/evaluation/yolo_segmentation

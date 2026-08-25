@@ -64,6 +64,7 @@ logs/
 /checkpoints/
 /outputs/
 /mlruns/
+/yolo*.pt
 
 # ============================================
 # Coverage

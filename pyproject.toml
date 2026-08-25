@@ -17,6 +17,7 @@ dependencies = [
     "sqlalchemy>=2.0,<3",
     "torch==2.13.0",
     "torchvision==0.28.0",
+    "ultralytics==8.4.128",
     "uvicorn>=0.52.4",
     "websockets>=16,<17",
 ]

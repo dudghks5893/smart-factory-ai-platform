@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import shutil
 import tempfile
@@ -37,49 +36,17 @@ from ml.datasets.segmentation_annotations import (
     stratified_split_sample_ids,
     summarize_fidelity,
 )
+from ml.datasets.yolo_segmentation_manifest import (
+    DerivedManifestRecord,
+    read_derived_manifest,
+    write_derived_manifest,
+)
 from shared.hashing import sha256_bytes, sha256_file
 
 DEFAULT_CONFIG_PATH = Path("configs/data/mvtec_ad_metal_nut_yolo_segmentation.yaml")
 MANIFEST_NAME = "manifest.csv"
 METADATA_NAME = "metadata.json"
 DATASET_YAML_NAME = "dataset.yaml"
-
-
-@dataclass(frozen=True)
-class DerivedManifestRecord:
-    """One copied training sample with immutable source and polygon lineage."""
-
-    dataset_name: str
-    dataset_version: str
-    derived_task: str
-    source_manifest_sha256: str
-    source_split: str
-    source_manifest_split: str
-    source_image_path: str
-    source_mask_path: str
-    category: str
-    sample_id: str
-    defect_type: str
-    target_class: str
-    target_class_id: str
-    derived_split: str
-    is_negative: bool
-    image_width: int
-    image_height: int
-    image_path: str
-    label_path: str
-    image_sha256: str
-    mask_sha256: str
-    polygon_count: int
-    component_count: int
-    hole_count: int
-    polygon_vertex_count: int
-    round_trip_iou: str
-    pixel_precision: str
-    pixel_recall: str
-
-
-DERIVED_MANIFEST_FIELDS = tuple(DerivedManifestRecord.__dataclass_fields__)
 
 
 @dataclass(frozen=True)
@@ -190,67 +157,6 @@ def build_split_assignments(
     if len(assignments) != len(positive_assignments) + len(negative_assignments):
         raise ValueError("Positive and negative source samples overlap.")
     return assignments
-
-
-# ADD 2026-08-25: Stable schema의 source-lineage manifest를 기록한다.
-def write_derived_manifest(records: list[DerivedManifestRecord], path: Path) -> None:
-    """Write deterministic rows and columns for training and audit consumers."""
-    with path.open("w", encoding="utf-8", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=DERIVED_MANIFEST_FIELDS)
-        writer.writeheader()
-        for record in records:
-            writer.writerow(asdict(record))
-
-
-# ADD 2026-08-25: Derived manifest를 exact schema와 typed boolean로 복원한다.
-def read_derived_manifest(path: Path) -> list[DerivedManifestRecord]:
-    """Read the generated manifest without accepting missing or extra columns."""
-    records: list[DerivedManifestRecord] = []
-    with path.open(encoding="utf-8", newline="") as file:
-        reader = csv.DictReader(file)
-        if reader.fieldnames != list(DERIVED_MANIFEST_FIELDS):
-            raise ValueError("Unexpected C2-1 derived manifest schema.")
-        for row in reader:
-            values = {
-                field: row[field] for field in DERIVED_MANIFEST_FIELDS if row[field] is not None
-            }
-            if len(values) != len(DERIVED_MANIFEST_FIELDS):
-                raise ValueError("Derived manifest row contains a missing value.")
-            if values["is_negative"] not in {"True", "False"}:
-                raise ValueError("Derived manifest boolean must be True or False.")
-            records.append(
-                DerivedManifestRecord(
-                    dataset_name=values["dataset_name"],
-                    dataset_version=values["dataset_version"],
-                    derived_task=values["derived_task"],
-                    source_manifest_sha256=values["source_manifest_sha256"],
-                    source_split=values["source_split"],
-                    source_manifest_split=values["source_manifest_split"],
-                    source_image_path=values["source_image_path"],
-                    source_mask_path=values["source_mask_path"],
-                    category=values["category"],
-                    sample_id=values["sample_id"],
-                    defect_type=values["defect_type"],
-                    target_class=values["target_class"],
-                    target_class_id=values["target_class_id"],
-                    derived_split=values["derived_split"],
-                    is_negative=values["is_negative"] == "True",
-                    image_width=int(values["image_width"]),
-                    image_height=int(values["image_height"]),
-                    image_path=values["image_path"],
-                    label_path=values["label_path"],
-                    image_sha256=values["image_sha256"],
-                    mask_sha256=values["mask_sha256"],
-                    polygon_count=int(values["polygon_count"]),
-                    component_count=int(values["component_count"]),
-                    hole_count=int(values["hole_count"]),
-                    polygon_vertex_count=int(values["polygon_vertex_count"]),
-                    round_trip_iou=values["round_trip_iou"],
-                    pixel_precision=values["pixel_precision"],
-                    pixel_recall=values["pixel_recall"],
-                )
-            )
-    return records
 
 
 # ADD 2026-08-25: Ultralytics-compatible relative dataset YAML을 dependency 없이 생성한다.
