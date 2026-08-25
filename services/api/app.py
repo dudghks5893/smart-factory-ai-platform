@@ -12,7 +12,10 @@ from fastapi.staticfiles import StaticFiles
 from services.api.config import ServingSettings
 from services.api.errors import install_exception_handlers
 from services.api.routes import router
-from services.api.websockets import InspectionEventBroadcaster
+from services.api.websockets import (
+    InspectionEventBroadcaster,
+    KnownDefectEventBroadcaster,
+)
 from services.inference.runtime import ModelRuntime, PatchCoreRuntimeConfig, load_patchcore_runtime
 from services.inference.yolo_segmentation_runtime import (
     YoloSegmentationAdapter,
@@ -26,11 +29,16 @@ from services.persistence.inspections import (
     InspectionRepository,
     SqlAlchemyInspectionRepository,
 )
+from services.persistence.known_defects import (
+    KnownDefectRepository,
+    SqlAlchemyKnownDefectRepository,
+)
 
 type RuntimeLoader = Callable[[PatchCoreRuntimeConfig], ModelRuntime]
 type YoloRuntimeLoader = Callable[[YoloSegmentationRuntimeConfig], YoloSegmentationAdapter]
 type DatabaseLoader = Callable[[str], DatabaseManager]
 type RepositoryLoader = Callable[[DatabaseManager], InspectionRepository]
+type KnownDefectRepositoryLoader = Callable[[DatabaseManager], KnownDefectRepository]
 
 DEFAULT_LIVE_MONITOR_DIR = Path(__file__).resolve().parents[2] / "apps" / "live_monitor"
 
@@ -41,9 +49,16 @@ def load_inspection_repository(database: DatabaseManager) -> InspectionRepositor
     return SqlAlchemyInspectionRepository(database.session_factory)
 
 
+# ADD 2026-08-26: Database Session factory로 known-defect parent/child repository를 생성한다.
+def load_known_defect_repository(database: DatabaseManager) -> KnownDefectRepository:
+    """Build the production known-defect repository without creating schema."""
+    return SqlAlchemyKnownDefectRepository(database.session_factory)
+
+
 # ADD 2026-08-19: Lifespan startup과 injectable runtime loader를 가진 FastAPI app을 생성한다.
 # MODIFY 2026-08-25: WebSocket lifecycle과 optional browser monitor static mount를 추가한다.
 # MODIFY 2026-08-26: Optional enabled YOLO singleton을 startup/readiness lifecycle에 추가한다.
+# MODIFY 2026-08-26: Known-defect repository와 별도 event channel을 lifecycle에 추가한다.
 def create_app(
     *,
     settings: ServingSettings | None = None,
@@ -51,17 +66,21 @@ def create_app(
     yolo_runtime_loader: YoloRuntimeLoader = load_yolo_segmentation_runtime,
     database_loader: DatabaseLoader = create_database_manager,
     repository_loader: RepositoryLoader = load_inspection_repository,
+    known_defect_repository_loader: KnownDefectRepositoryLoader = (load_known_defect_repository),
     inspection_event_broadcaster: InspectionEventBroadcaster | None = None,
+    known_defect_event_broadcaster: KnownDefectEventBroadcaster | None = None,
     live_monitor_dir: Path = DEFAULT_LIVE_MONITOR_DIR,
 ) -> FastAPI:
     """Create an app that requires database and model readiness during startup."""
 
     monitoring_metrics = MonitoringMetrics()
     event_broadcaster = inspection_event_broadcaster or InspectionEventBroadcaster()
+    known_defect_broadcaster = known_defect_event_broadcaster or KnownDefectEventBroadcaster()
 
     # ADD 2026-08-19: Startup load가 완료된 뒤에만 ready 상태로 전환한다.
     # MODIFY 2026-08-21: Loaded model identity를 app-local Info metric에 한 번 게시한다.
     # MODIFY 2026-08-26: Enabled YOLO load 성공도 ready 전환의 필수 조건으로 포함한다.
+    # MODIFY 2026-08-26: Known-defect schema와 WebSocket channel을 required lifecycle에 포함한다.
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         active_settings = settings or ServingSettings.from_environment()
@@ -73,6 +92,8 @@ def create_app(
             database.check_connection()
             inspection_repository = repository_loader(database)
             inspection_repository.check_ready()
+            known_defect_repository = known_defect_repository_loader(database)
+            known_defect_repository.check_ready()
 
             # Artifact와 threshold를 검증하고 process-local runtime을 정확히 한 번 생성한다.
             runtime = runtime_loader(active_settings.runtime_config())
@@ -85,14 +106,17 @@ def create_app(
             application.state.serving_settings = active_settings
             application.state.database = database
             application.state.inspection_repository = inspection_repository
+            application.state.known_defect_repository = known_defect_repository
             application.state.serving_runtime = runtime
             application.state.yolo_segmentation_runtime = yolo_runtime
             yield
         finally:
             await event_broadcaster.close_all()
+            await known_defect_broadcaster.close_all()
             application.state.yolo_segmentation_runtime = None
             application.state.serving_runtime = None
             application.state.inspection_repository = None
+            application.state.known_defect_repository = None
             application.state.database = None
             database.dispose()
 
@@ -106,7 +130,9 @@ def create_app(
     app.state.yolo_segmentation_runtime = None
     app.state.database = None
     app.state.inspection_repository = None
+    app.state.known_defect_repository = None
     app.state.inspection_event_broadcaster = event_broadcaster
+    app.state.known_defect_event_broadcaster = known_defect_broadcaster
     app.state.monitoring_metrics = monitoring_metrics
     app.add_middleware(HttpMetricsMiddleware, metrics=monitoring_metrics)
     install_exception_handlers(app)

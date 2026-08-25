@@ -5,6 +5,7 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 from typing import cast
+from uuid import UUID, uuid4
 
 import numpy as np
 import pytest
@@ -15,7 +16,12 @@ from torch import Tensor
 from ml.training.yolo_segmentation import ARTIFACT_SCHEMA_VERSION, YoloArtifactMetadata
 from services.api.app import create_app
 from services.api.config import ServingSettings
-from services.api.schemas import KnownDefectResponse
+from services.api.schemas import (
+    InspectionCreatedEvent,
+    KnownDefectCreatedEvent,
+    KnownDefectResponse,
+)
+from services.api.websockets import KnownDefectEventBroadcaster
 from services.inference.runtime import (
     InferenceResult,
     ModelRuntime,
@@ -29,6 +35,13 @@ from services.inference.yolo_segmentation_runtime import (
     YoloSegmentationResult,
     YoloSegmentationRuntimeConfig,
 )
+from services.persistence.database import PersistenceError
+from services.persistence.known_defects import (
+    KnownDefectCreate,
+    KnownDefectInspectionDetail,
+    KnownDefectInspectionPage,
+)
+from shared.hashing import sha256_bytes
 from tests.persistence_helpers import prepare_sqlite_database
 
 CLASSES = {0: "bent", 1: "color", 2: "scratch"}
@@ -122,6 +135,36 @@ class FakeYoloRuntime:
         )
 
 
+class FailingKnownDefectRepository:
+    """Repository double that fails insert after startup readiness succeeds."""
+
+    def check_ready(self) -> None:
+        return None
+
+    def create(self, values: KnownDefectCreate) -> KnownDefectInspectionDetail:
+        raise PersistenceError("private known-defect database detail")
+
+    def get(self, inspection_id: UUID) -> KnownDefectInspectionDetail | None:
+        return None
+
+    def list(self, *, limit: int, offset: int) -> KnownDefectInspectionPage:
+        return KnownDefectInspectionPage(items=(), limit=limit, offset=offset, has_more=False)
+
+
+class RecordingKnownDefectBroadcaster(KnownDefectEventBroadcaster):
+    """Dedicated real broadcaster with observable committed event scheduling."""
+
+    # ADD 2026-08-26: Test에서 commit 뒤 scheduled known-defect events를 기록한다.
+    def __init__(self) -> None:
+        super().__init__()
+        self.events: list[KnownDefectCreatedEvent] = []
+
+    # ADD 2026-08-26: Event를 기록한 뒤 실제 purpose-specific channel로 broadcast한다.
+    async def broadcast(self, event: KnownDefectCreatedEvent) -> None:
+        self.events.append(event)
+        await super().broadcast(event)
+
+
 # ADD 2026-08-26: Fake YOLO runtime metadata를 actual artifact schema로 생성한다.
 def _metadata() -> YoloArtifactMetadata:
     return YoloArtifactMetadata(
@@ -201,6 +244,8 @@ def test_known_defect_endpoint_response_and_singleton_reuse(tmp_path: Path) -> N
             "/v1/predictions",
             files={"image": ("sample.png", _png_bytes(), "image/png")},
         )
+        history = client.get("/v1/known-defects")
+        detail = client.get(f"/v1/known-defects/{first.json()['inspection_id']}")
 
     assert ready.status_code == 200
     assert ready.json() == {
@@ -211,6 +256,7 @@ def test_known_defect_endpoint_response_and_singleton_reuse(tmp_path: Path) -> N
     }
     assert first.status_code == second.status_code == 200
     payload = KnownDefectResponse.model_validate(first.json())
+    assert payload.inspection_id != UUID(second.json()["inspection_id"])
     assert payload.model.name == "yolo11n-seg.pt"
     assert payload.model.task == "segment"
     assert payload.image.model_dump() == {"width": 8, "height": 8}
@@ -232,6 +278,20 @@ def test_known_defect_endpoint_response_and_singleton_reuse(tmp_path: Path) -> N
     assert "decision" not in first.text
     assert len(load_calls) == 1
     assert runtime.predict_calls == 2
+    assert history.status_code == detail.status_code == 200
+    assert history.json()["returned_count"] == 2
+    assert {item["inspection_id"] for item in history.json()["items"]} == {
+        first.json()["inspection_id"],
+        second.json()["inspection_id"],
+    }
+    detail_payload = detail.json()
+    assert detail_payload["inspection_id"] == first.json()["inspection_id"]
+    assert detail_payload["image_sha256"] == sha256_bytes(_png_bytes())
+    assert detail_payload["model_sha256"] == "d" * 64
+    assert detail_payload["artifact_metadata_sha256"] == "c" * 64
+    assert detail_payload["dataset_manifest_sha256"] == "a" * 64
+    assert detail_payload["dataset_semantic_fingerprint_sha256"] == "b" * 64
+    assert [instance["instance_index"] for instance in detail_payload["instances"]] == [0, 1]
 
     # Existing PatchCore endpoint의 response shape와 persistence behavior를 유지한다.
     assert patchcore.status_code == 200
@@ -259,8 +319,12 @@ def test_known_defect_endpoint_empty_prediction(tmp_path: Path) -> None:
             "/v1/known-defects",
             files={"image": ("good.png", _png_bytes(), "image/png")},
         )
+        detail = client.get(f"/v1/known-defects/{response.json()['inspection_id']}")
     assert response.status_code == 200
     assert response.json()["instances"] == []
+    assert detail.status_code == 200
+    assert detail.json()["instance_count"] == 0
+    assert detail.json()["instances"] == []
 
 
 # ADD 2026-08-26: Malformed/empty/unsupported upload가 shared safe errors를 반환하는지 검증한다.
@@ -290,9 +354,11 @@ def test_known_defect_endpoint_reuses_upload_errors(
             "/v1/known-defects",
             files={"image": ("sample.png", content, content_type)},
         )
+        history = client.get("/v1/known-defects")
     assert response.status_code == status_code
     assert response.json()["error"]["code"] == error_code
     assert runtime.predict_calls == 0
+    assert history.json()["returned_count"] == 0
 
 
 # ADD 2026-08-26: Runtime failure가 internal detail 없는 stable inference error인지 검증한다.
@@ -308,12 +374,14 @@ def test_known_defect_endpoint_hides_inference_failure(tmp_path: Path) -> None:
             "/v1/known-defects",
             files={"image": ("sample.png", _png_bytes(), "image/png")},
         )
+        history = client.get("/v1/known-defects")
     assert response.status_code == 500
     assert response.json()["error"] == {
         "code": "inference_failed",
         "message": "Model inference failed.",
     }
     assert "accelerator" not in response.text
+    assert history.json()["returned_count"] == 0
 
 
 # ADD 2026-08-26: Disabled YOLO가 load 없이 기존 readiness를 유지하고 endpoint는 503인지 검증한다.
@@ -374,3 +442,141 @@ def test_enabled_yolo_runtime_loss_changes_readiness(tmp_path: Path) -> None:
     assert ready.status_code == endpoint.status_code == 503
     assert ready.json()["error"]["code"] == "known_defect_model_not_ready"
     assert endpoint.json()["error"]["code"] == "known_defect_model_not_ready"
+
+
+# ADD 2026-08-26: Persistence failure가 safe 503이며 committed event를 예약하지 않는지 검증한다.
+def test_known_defect_persistence_failure_returns_safe_error_and_no_event(
+    tmp_path: Path,
+) -> None:
+    runtime = FakeYoloRuntime()
+    broadcaster = RecordingKnownDefectBroadcaster()
+    app = create_app(
+        settings=_settings(tmp_path),
+        runtime_loader=_patchcore_loader,
+        yolo_runtime_loader=lambda _config: cast(YoloSegmentationAdapter, runtime),
+        known_defect_repository_loader=lambda _database: FailingKnownDefectRepository(),
+        known_defect_event_broadcaster=broadcaster,
+    )
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/v1/known-defects",
+            files={"image": ("sample.png", _png_bytes(), "image/png")},
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {
+            "code": "persistence_unavailable",
+            "message": "Inspection persistence is unavailable.",
+        }
+    }
+    assert "private known-defect" not in response.text
+    assert broadcaster.events == []
+
+
+# ADD 2026-08-26: Malformed/inference failures가 known-defect event를 예약하지 않는지 검증한다.
+@pytest.mark.parametrize(
+    ("runtime", "content", "expected_status"),
+    [
+        (FakeYoloRuntime(), b"not-an-image", 400),
+        (FakeYoloRuntime(fail=True), _png_bytes(), 500),
+    ],
+)
+def test_failed_known_defect_request_schedules_no_event(
+    tmp_path: Path,
+    runtime: FakeYoloRuntime,
+    content: bytes,
+    expected_status: int,
+) -> None:
+    broadcaster = RecordingKnownDefectBroadcaster()
+    app = create_app(
+        settings=_settings(tmp_path),
+        runtime_loader=_patchcore_loader,
+        yolo_runtime_loader=lambda _config: cast(YoloSegmentationAdapter, runtime),
+        known_defect_event_broadcaster=broadcaster,
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/known-defects",
+            files={"image": ("sample.png", content, "image/png")},
+        )
+        history = client.get("/v1/known-defects")
+
+    assert response.status_code == expected_status
+    assert history.json()["returned_count"] == 0
+    assert broadcaster.events == []
+
+
+# ADD 2026-08-26: Dedicated YOLO channel과 기존 PatchCore event contract를 함께 회귀 검증한다.
+def test_known_defect_websocket_commit_event_and_patchcore_channel_compatibility(
+    tmp_path: Path,
+) -> None:
+    runtime = FakeYoloRuntime()
+    app = create_app(
+        settings=_settings(tmp_path),
+        runtime_loader=_patchcore_loader,
+        yolo_runtime_loader=lambda _config: cast(YoloSegmentationAdapter, runtime),
+    )
+    with TestClient(app) as client:
+        with client.websocket_connect("/v1/ws/known-defects") as known_socket:
+            with client.websocket_connect("/v1/ws/inspections") as patchcore_socket:
+                known_response = client.post(
+                    "/v1/known-defects",
+                    files={"image": ("known.png", _png_bytes(), "image/png")},
+                )
+                known_event = KnownDefectCreatedEvent.model_validate(known_socket.receive_json())
+                patchcore_response = client.post(
+                    "/v1/predictions",
+                    files={"image": ("patchcore.png", _png_bytes(), "image/png")},
+                )
+                patchcore_event = InspectionCreatedEvent.model_validate(
+                    patchcore_socket.receive_json()
+                )
+        recovered_history = client.get("/v1/known-defects")
+        recovered_detail = client.get(f"/v1/known-defects/{known_response.json()['inspection_id']}")
+
+    assert known_response.status_code == patchcore_response.status_code == 200
+    assert str(known_event.inspection.inspection_id) == known_response.json()["inspection_id"]
+    assert known_event.type == "known_defect.created"
+    assert known_event.inspection.instance_count == 2
+    assert known_event.inspection.classes == ["bent", "scratch"]
+    assert (
+        str(patchcore_event.inspection.inspection_id)
+        == (patchcore_response.json()["inspection_id"])
+    )
+    assert patchcore_event.type == "inspection.created"
+    assert recovered_history.json()["returned_count"] == 1
+    assert recovered_detail.status_code == 200
+    assert recovered_detail.json()["inspection_id"] == known_response.json()["inspection_id"]
+
+
+# ADD 2026-08-26: History pagination과 unknown detail safe 404 contract를 검증한다.
+def test_known_defect_history_pagination_and_missing_detail(tmp_path: Path) -> None:
+    runtime = FakeYoloRuntime()
+    app = create_app(
+        settings=_settings(tmp_path),
+        runtime_loader=_patchcore_loader,
+        yolo_runtime_loader=lambda _config: cast(YoloSegmentationAdapter, runtime),
+    )
+    with TestClient(app) as client:
+        first = client.post(
+            "/v1/known-defects",
+            files={"image": ("first.png", _png_bytes(), "image/png")},
+        )
+        second = client.post(
+            "/v1/known-defects",
+            files={"image": ("second.png", _png_bytes(), "image/png")},
+        )
+        first_page = client.get("/v1/known-defects?limit=1&offset=0")
+        second_page = client.get("/v1/known-defects?limit=1&offset=1")
+        invalid_limit = client.get("/v1/known-defects?limit=101")
+        missing = client.get(f"/v1/known-defects/{uuid4()}")
+
+    assert first.status_code == second.status_code == 200
+    assert first_page.json()["returned_count"] == 1
+    assert first_page.json()["has_more"] is True
+    assert second_page.json()["returned_count"] == 1
+    assert second_page.json()["has_more"] is False
+    assert invalid_limit.status_code == 422
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "known_defect_inspection_not_found"

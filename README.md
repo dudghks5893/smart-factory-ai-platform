@@ -118,6 +118,8 @@ See [MVTec AD Pipeline](docs/data/MVTEC_AD_PIPELINE.md),
 
 The Vision API loads validated PatchCore artifacts once during startup. An optional YOLO segmentation singleton
 serves compact known-defect instances at `/v1/known-defects` without changing the PatchCore prediction contract.
+YOLO parent/child results are stored independently, recoverable through REST history/detail, and notified through the
+separate best-effort `/v1/ws/known-defects` channel after commit.
 Successful predictions are persisted with UUID, UTC timestamp, score, threshold, result, device and model/manifest/
 threshold provenance. PostgreSQL migrations run as a separate Alembic lifecycle; application startup does not run
 migrations implicitly.

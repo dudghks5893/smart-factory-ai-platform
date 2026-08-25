@@ -9,8 +9,16 @@ from uuid import UUID
 
 from fastapi import WebSocket
 
-from services.api.schemas import InspectionCreatedEvent, InspectionCreatedPayload
-from services.api.websockets import InspectionEventBroadcaster
+from services.api.schemas import (
+    InspectionCreatedEvent,
+    InspectionCreatedPayload,
+    KnownDefectCreatedEvent,
+    KnownDefectCreatedPayload,
+)
+from services.api.websockets import (
+    InspectionEventBroadcaster,
+    KnownDefectEventBroadcaster,
+)
 
 
 class _FakeWebSocket:
@@ -125,3 +133,46 @@ def test_slow_client_timeout_does_not_block_healthy_delivery() -> None:
         assert await broadcaster.active_connection_count() == 1
 
     asyncio.run(scenario())
+
+
+# ADD 2026-08-26: Dedicated known-defect event가 compact summary만 전달하는지 검증한다.
+def test_known_defect_created_event_uses_separate_compact_channel() -> None:
+    broadcaster = KnownDefectEventBroadcaster()
+    connection = _FakeWebSocket()
+    event = KnownDefectCreatedEvent(
+        inspection=KnownDefectCreatedPayload(
+            inspection_id=UUID(int=2),
+            model_name="yolo11n-seg.pt",
+            category="metal_nut",
+            device="mps",
+            diagnostic_confidence=0.25,
+            instance_count=3,
+            classes=["bent", "scratch"],
+            created_at=datetime(2026, 8, 26, tzinfo=UTC),
+        )
+    )
+
+    async def scenario() -> None:
+        await broadcaster.connect(cast(WebSocket, connection))
+        await broadcaster.broadcast(event)
+        await broadcaster.close_all()
+
+    asyncio.run(scenario())
+    assert len(connection.sent) == 1
+    payload = cast(dict[str, object], connection.sent[0])
+    assert payload["schema_version"] == "1"
+    assert payload["type"] == "known_defect.created"
+    inspection = cast(dict[str, object], payload["inspection"])
+    assert set(inspection) == {
+        "inspection_id",
+        "model_name",
+        "category",
+        "device",
+        "diagnostic_confidence",
+        "instance_count",
+        "classes",
+        "created_at",
+    }
+    assert "image" not in inspection
+    assert "instances" not in inspection
+    assert "mask" not in inspection

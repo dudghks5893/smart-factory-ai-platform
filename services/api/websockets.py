@@ -7,15 +7,16 @@ import logging
 import math
 
 from fastapi import WebSocket
+from pydantic import BaseModel
 
-from services.api.schemas import InspectionCreatedEvent
+from services.api.schemas import InspectionCreatedEvent, KnownDefectCreatedEvent
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_SEND_TIMEOUT_SECONDS = 1.0
 
 
-class InspectionEventBroadcaster:
-    """Track process-local clients and isolate failures during one broadcast."""
+class EventBroadcaster[EventModel: BaseModel]:
+    """Track one domain channel's process-local clients and isolate send failures."""
 
     # ADD 2026-08-25: Per-client send timeout과 instance-local connection set을 초기화한다.
     def __init__(self, *, send_timeout_seconds: float = DEFAULT_SEND_TIMEOUT_SECONDS) -> None:
@@ -39,7 +40,8 @@ class InspectionEventBroadcaster:
             self._connections.discard(websocket)
 
     # ADD 2026-08-25: Snapshot의 모든 client에 event를 보내고 broken client만 정리한다.
-    async def broadcast(self, event: InspectionCreatedEvent) -> None:
+    # MODIFY 2026-08-26: Domain-specific typed broadcaster가 connection policy를 재사용하게 한다.
+    async def broadcast(self, event: EventModel) -> None:
         """Best-effort broadcast without allowing one failed client to stop others."""
         payload = event.model_dump(mode="json")
         async with self._lock:
@@ -98,3 +100,11 @@ class InspectionEventBroadcaster:
             )
         except Exception as exc:
             LOGGER.debug("Inspection WebSocket was already closed", exc_info=exc)
+
+
+class InspectionEventBroadcaster(EventBroadcaster[InspectionCreatedEvent]):
+    """Purpose-specific channel preserving the existing inspection.created contract."""
+
+
+class KnownDefectEventBroadcaster(EventBroadcaster[KnownDefectCreatedEvent]):
+    """Independent channel for committed known_defect.created notifications."""

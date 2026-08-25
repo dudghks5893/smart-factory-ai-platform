@@ -39,7 +39,16 @@ from services.inference.runtime import (
 from services.persistence.database import PersistenceError, create_database_manager
 from services.persistence.drift import SqlAlchemyDriftWindowRepository
 from services.persistence.inspections import InspectionCreate, SqlAlchemyInspectionRepository
-from services.persistence.models import InspectionRecord
+from services.persistence.known_defects import (
+    KnownDefectCreate,
+    KnownDefectInstanceCreate,
+    SqlAlchemyKnownDefectRepository,
+)
+from services.persistence.models import (
+    InspectionRecord,
+    KnownDefectInspectionRecord,
+    KnownDefectInstanceRecord,
+)
 
 POSTGRES_INTEGRATION_DATABASE_URL = os.getenv("POSTGRES_INTEGRATION_DATABASE_URL", "")
 pytestmark = pytest.mark.skipif(
@@ -92,6 +101,7 @@ def _png_bytes() -> bytes:
 
 
 # ADD 2026-08-20: 실제 PostgreSQL migration, schema, transaction과 FastAPI persistence를 검증한다.
+# MODIFY 2026-08-26: Additive known-defect parent/child schema와 atomic transaction을 검증한다.
 def test_postgres_migration_and_fastapi_persistence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -107,6 +117,8 @@ def test_postgres_migration_and_fastapi_persistence(
 
     try:
         with database.engine.begin() as connection:
+            connection.execute(delete(KnownDefectInstanceRecord))
+            connection.execute(delete(KnownDefectInspectionRecord))
             connection.execute(delete(InspectionRecord))
             migration_revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
             postgres_types = {
@@ -135,8 +147,30 @@ def test_postgres_migration_and_fastapi_persistence(
                     )
                 )
             )
+            known_defect_indexes = set(
+                connection.scalars(
+                    text(
+                        "SELECT indexname FROM pg_indexes "
+                        "WHERE schemaname = 'public' "
+                        "AND tablename IN ("
+                        "'known_defect_inspections', 'known_defect_instances'"
+                        ")"
+                    )
+                )
+            )
+            known_defect_constraints = set(
+                connection.scalars(
+                    text(
+                        "SELECT conname FROM pg_constraint "
+                        "WHERE conrelid IN ("
+                        "'public.known_defect_inspections'::regclass, "
+                        "'public.known_defect_instances'::regclass"
+                        ")"
+                    )
+                )
+            )
 
-        assert migration_revision == "20260820_01"
+        assert migration_revision == "20260826_01"
         assert postgres_types == {
             "created_at": "timestamp with time zone",
             "id": "uuid",
@@ -151,6 +185,58 @@ def test_postgres_migration_and_fastapi_persistence(
             "ck_inspections_image_size_positive",
             "ck_inspections_model_sha256_length",
         } <= constraints
+        assert {
+            "ix_known_defect_inspections_created_at",
+            "ix_known_defect_instances_inspection_id",
+        } <= known_defect_indexes
+        assert {
+            "fk_known_defect_instances_inspection_id",
+            "uq_known_defect_instances_inspection_index",
+            "ck_known_defect_inspections_confidence_range",
+            "ck_known_defect_instances_mask_pixels_positive",
+        } <= known_defect_constraints
+
+        # Real PostgreSQL에서 multi-instance parent와 children을 한 commit으로 저장한다.
+        known_defect_repository = SqlAlchemyKnownDefectRepository(database.session_factory)
+        known_detail = known_defect_repository.create(
+            KnownDefectCreate(
+                model_name="yolo11n-seg.pt",
+                task="segment",
+                category="metal_nut",
+                device="cpu",
+                diagnostic_confidence=0.25,
+                inference_ms=12.5,
+                image_width=8,
+                image_height=8,
+                image_sha256="4" * 64,
+                model_sha256="5" * 64,
+                artifact_metadata_sha256="6" * 64,
+                dataset_manifest_sha256="7" * 64,
+                dataset_semantic_fingerprint_sha256="8" * 64,
+                instances=(
+                    KnownDefectInstanceCreate(
+                        class_id=0,
+                        class_name="bent",
+                        confidence=0.95,
+                        bbox_x_min=1.0,
+                        bbox_y_min=1.0,
+                        bbox_x_max=5.0,
+                        bbox_y_max=5.0,
+                        mask_pixel_count=16,
+                        mask_area_ratio=0.25,
+                    ),
+                ),
+            )
+        )
+        assert known_defect_repository.get(known_detail.inspection.id) == known_detail
+        with database.engine.connect() as connection:
+            assert (
+                connection.scalar(select(func.count()).select_from(KnownDefectInspectionRecord))
+                == 1
+            )
+            assert (
+                connection.scalar(select(func.count()).select_from(KnownDefectInstanceRecord)) == 1
+            )
 
         settings = ServingSettings(
             artifact_dir=tmp_path / "external-model",

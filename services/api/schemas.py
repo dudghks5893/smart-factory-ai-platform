@@ -85,11 +85,86 @@ class KnownDefectResponse(BaseModel):
 
     model_config = ConfigDict(allow_inf_nan=False)
 
+    inspection_id: UUID
     model: KnownDefectModelIdentity
     image: KnownDefectImageSummary
     diagnostic_confidence: float = Field(gt=0.0, lt=1.0)
     inference_ms: float = Field(ge=0.0)
     instances: list[KnownDefectInstanceResponse]
+
+
+class KnownDefectHistoryItemResponse(BaseModel):
+    """Compact persisted parent summary without child hydration or raw payloads."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    inspection_id: UUID
+    created_at: datetime
+    model: KnownDefectModelIdentity
+    image: KnownDefectImageSummary
+    diagnostic_confidence: float = Field(gt=0.0, lt=1.0)
+    inference_ms: float = Field(ge=0.0)
+    instance_count: int = Field(ge=0)
+
+
+class KnownDefectHistoryResponse(BaseModel):
+    """Newest-first known-defect parent page without aggregate count query."""
+
+    items: list[KnownDefectHistoryItemResponse]
+    limit: int
+    offset: int
+    returned_count: int
+    has_more: bool
+
+
+class KnownDefectPersistedInstanceResponse(KnownDefectInstanceResponse):
+    """Persisted child identity and stable inference order for detail recovery."""
+
+    instance_id: UUID
+    instance_index: int = Field(ge=0)
+
+
+class KnownDefectDetailResponse(BaseModel):
+    """Durable parent provenance and every compact child in inference order."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    inspection_id: UUID
+    created_at: datetime
+    model: KnownDefectModelIdentity
+    image: KnownDefectImageSummary
+    diagnostic_confidence: float = Field(gt=0.0, lt=1.0)
+    inference_ms: float = Field(ge=0.0)
+    image_sha256: str
+    model_sha256: str
+    artifact_metadata_sha256: str
+    dataset_manifest_sha256: str
+    dataset_semantic_fingerprint_sha256: str
+    instance_count: int = Field(ge=0)
+    instances: list[KnownDefectPersistedInstanceResponse]
+
+
+class KnownDefectCreatedPayload(BaseModel):
+    """Compact durable known-defect fields sent in one live notification."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    inspection_id: UUID
+    model_name: str
+    category: str
+    device: str
+    diagnostic_confidence: float = Field(gt=0.0, lt=1.0)
+    instance_count: int = Field(ge=0)
+    classes: list[str]
+    created_at: datetime
+
+
+class KnownDefectCreatedEvent(BaseModel):
+    """Versioned best-effort notification emitted after known-defect commit."""
+
+    schema_version: Literal["1"] = "1"
+    type: Literal["known_defect.created"] = "known_defect.created"
+    inspection: KnownDefectCreatedPayload
 
 
 class InspectionResponse(BaseModel):

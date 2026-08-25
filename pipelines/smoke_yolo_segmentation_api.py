@@ -9,6 +9,7 @@ from pathlib import Path
 from time import perf_counter
 
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 
 from ml.training.device import SUPPORTED_DEVICES
 from pipelines.smoke_yolo_segmentation_runtime import (
@@ -22,13 +23,26 @@ from services.api.config import (
     ServingSettings,
     required_database_url,
 )
-from services.api.schemas import HealthResponse, KnownDefectResponse, ReadinessResponse
+from services.api.schemas import (
+    HealthResponse,
+    KnownDefectCreatedEvent,
+    KnownDefectDetailResponse,
+    KnownDefectHistoryResponse,
+    KnownDefectResponse,
+    ReadinessResponse,
+)
 from services.api.tooling import prepare_image_upload
 from services.inference.runtime import load_patchcore_runtime
 from services.inference.yolo_segmentation_runtime import (
     load_yolo_segmentation_runtime,
     validate_diagnostic_confidence,
 )
+from services.persistence.database import create_database_manager
+from services.persistence.models import (
+    KnownDefectInspectionRecord,
+    KnownDefectInstanceRecord,
+)
+from shared.hashing import sha256_bytes
 
 DEFAULT_OUTPUT_PATH = Path("outputs/analysis/yolo_segmentation/api_smoke/smoke_summary.json")
 
@@ -50,10 +64,13 @@ class KnownDefectApiImageSummary:
     """One actual multipart response and application-level timing observation."""
 
     source: str
+    inspection_id: str
     status_code: int
     device: str
     expected_class: str | None
     expected_class_detected: bool | None
+    event_type: str
+    detail_recovered: bool
     instance_count: int
     classes: tuple[str, ...]
     confidences: tuple[float, ...]
@@ -74,6 +91,14 @@ class KnownDefectApiSmokeSummary:
     actual_device: str
     diagnostic_confidence: float
     model_sha256: str
+    artifact_metadata_sha256: str
+    dataset_manifest_sha256: str
+    dataset_semantic_fingerprint_sha256: str
+    parent_count_before: int
+    parent_count_after: int
+    child_count_before: int
+    child_count_after: int
+    history_recovered_ids: tuple[str, ...]
     images: tuple[KnownDefectApiImageSummary, ...]
     output_path: str
 
@@ -91,7 +116,25 @@ def _require_success(status_code: int, operation: str, response_text: str) -> No
         raise RuntimeError(f"{operation} failed with HTTP {status_code}: {response_text}")
 
 
+# ADD 2026-08-26: Actual database에서 known-defect parent/child row count를 관찰한다.
+def _database_counts(database_url: str) -> tuple[int, int]:
+    database = create_database_manager(database_url)
+    try:
+        with database.engine.connect() as connection:
+            parent_count = int(
+                connection.scalar(select(func.count()).select_from(KnownDefectInspectionRecord))
+                or 0
+            )
+            child_count = int(
+                connection.scalar(select(func.count()).select_from(KnownDefectInstanceRecord)) or 0
+            )
+    finally:
+        database.dispose()
+    return parent_count, child_count
+
+
 # ADD 2026-08-26: Real FastAPI lifespan에서 YOLO singleton과 multi-image multipart smoke를 조율한다.
+# MODIFY 2026-08-26: Durable rows, REST recovery와 dedicated WebSocket event를 함께 검증한다.
 def smoke_yolo_segmentation_api(
     *,
     patchcore_artifact_dir: Path,
@@ -107,7 +150,7 @@ def smoke_yolo_segmentation_api(
     runtime_loader: RuntimeLoader = load_patchcore_runtime,
     yolo_runtime_loader: YoloRuntimeLoader = load_yolo_segmentation_runtime,
 ) -> KnownDefectApiSmokeSummary:
-    """Exercise startup/readiness and actual known-defect HTTP responses without persistence."""
+    """Exercise actual known-defect HTTP, persistence, recovery, and live notification."""
     validate_diagnostic_confidence(diagnostic_confidence)
     if not image_paths:
         raise ValueError("YOLO API smoke requires at least one image.")
@@ -138,6 +181,11 @@ def smoke_yolo_segmentation_api(
     category = ""
     actual_device = ""
     model_sha256 = ""
+    artifact_metadata_sha256 = ""
+    dataset_manifest_sha256 = ""
+    dataset_semantic_fingerprint_sha256 = ""
+    history_recovered_ids: tuple[str, ...] = ()
+    parent_count_before, child_count_before = _database_counts(database_url)
     # Full lifespan에서 model별 singleton을 한 번 복원하고 실제 multipart route를 호출한다.
     with TestClient(app) as client:
         health = client.get("/health")
@@ -148,59 +196,107 @@ def smoke_yolo_segmentation_api(
         ReadinessResponse.model_validate(ready.json())
         runtime = app.state.yolo_segmentation_runtime
         model_sha256 = runtime.provenance.model_sha256
+        artifact_metadata_sha256 = runtime.provenance.artifact_metadata_sha256
+        dataset_manifest_sha256 = runtime.provenance.dataset_manifest_sha256
+        dataset_semantic_fingerprint_sha256 = runtime.provenance.dataset_semantic_fingerprint_sha256
 
-        for image_path, upload in zip(image_paths, uploads, strict=True):
-            # Disk read는 timing 전에 완료하고 multipart application boundary만 관찰한다.
-            started = perf_counter()
-            response = client.post(
-                "/v1/known-defects",
-                files={"image": upload.as_multipart_file()},
-            )
-            http_application_ms = (perf_counter() - started) * 1000.0
-            _require_success(response.status_code, str(image_path), response.text)
-            payload = KnownDefectResponse.model_validate(response.json())
-            if payload.diagnostic_confidence != diagnostic_confidence:
-                raise ValueError("API response diagnostic confidence changed unexpectedly.")
-            model_name = payload.model.name
-            category = payload.model.category
-            actual_device = payload.model.device
-            expected_class = _expected_class(image_path)
-            image_summaries.append(
-                KnownDefectApiImageSummary(
-                    source=str(image_path),
-                    status_code=response.status_code,
-                    device=payload.model.device,
-                    expected_class=expected_class,
-                    expected_class_detected=(
-                        None
-                        if expected_class is None
-                        else any(
-                            instance.class_name == expected_class for instance in payload.instances
-                        )
-                    ),
-                    instance_count=len(payload.instances),
-                    classes=tuple(instance.class_name for instance in payload.instances),
-                    confidences=tuple(instance.confidence for instance in payload.instances),
-                    instances=tuple(
-                        KnownDefectApiInstanceSummary(
-                            class_id=instance.class_id,
-                            class_name=instance.class_name,
-                            confidence=instance.confidence,
-                            box=(
-                                instance.box.x_min,
-                                instance.box.y_min,
-                                instance.box.x_max,
-                                instance.box.y_max,
-                            ),
-                            mask_pixel_count=instance.mask.pixel_count,
-                            mask_area_ratio=instance.mask.area_ratio,
-                        )
-                        for instance in payload.instances
-                    ),
-                    inference_ms=payload.inference_ms,
-                    http_application_ms=http_application_ms,
+        with client.websocket_connect("/v1/ws/known-defects") as websocket:
+            for image_path, upload in zip(image_paths, uploads, strict=True):
+                # Disk read는 timing 전에 완료하고 multipart application boundary만 관찰한다.
+                started = perf_counter()
+                response = client.post(
+                    "/v1/known-defects",
+                    files={"image": upload.as_multipart_file()},
                 )
-            )
+                http_application_ms = (perf_counter() - started) * 1000.0
+                _require_success(response.status_code, str(image_path), response.text)
+                payload = KnownDefectResponse.model_validate(response.json())
+                event = KnownDefectCreatedEvent.model_validate(websocket.receive_json())
+                detail_response = client.get(f"/v1/known-defects/{payload.inspection_id}")
+                _require_success(
+                    detail_response.status_code,
+                    f"detail {payload.inspection_id}",
+                    detail_response.text,
+                )
+                detail = KnownDefectDetailResponse.model_validate(detail_response.json())
+                if payload.diagnostic_confidence != diagnostic_confidence:
+                    raise ValueError("API response diagnostic confidence changed unexpectedly.")
+                if event.inspection.inspection_id != payload.inspection_id:
+                    raise ValueError("WebSocket event inspection ID differs from POST response.")
+                if detail.inspection_id != payload.inspection_id:
+                    raise ValueError("REST detail inspection ID differs from POST response.")
+                if detail.instance_count != len(payload.instances):
+                    raise ValueError("REST detail instance count differs from POST response.")
+                if detail.image_sha256 != sha256_bytes(upload.content):
+                    raise ValueError("Persisted image SHA differs from multipart bytes.")
+                if (
+                    detail.model_sha256 != model_sha256
+                    or detail.artifact_metadata_sha256 != artifact_metadata_sha256
+                    or detail.dataset_manifest_sha256 != dataset_manifest_sha256
+                    or detail.dataset_semantic_fingerprint_sha256
+                    != dataset_semantic_fingerprint_sha256
+                ):
+                    raise ValueError("Persisted provenance differs from the loaded runtime.")
+                model_name = payload.model.name
+                category = payload.model.category
+                actual_device = payload.model.device
+                expected_class = _expected_class(image_path)
+                image_summaries.append(
+                    KnownDefectApiImageSummary(
+                        source=str(image_path),
+                        inspection_id=str(payload.inspection_id),
+                        status_code=response.status_code,
+                        device=payload.model.device,
+                        expected_class=expected_class,
+                        expected_class_detected=(
+                            None
+                            if expected_class is None
+                            else any(
+                                instance.class_name == expected_class
+                                for instance in payload.instances
+                            )
+                        ),
+                        event_type=event.type,
+                        detail_recovered=True,
+                        instance_count=len(payload.instances),
+                        classes=tuple(instance.class_name for instance in payload.instances),
+                        confidences=tuple(instance.confidence for instance in payload.instances),
+                        instances=tuple(
+                            KnownDefectApiInstanceSummary(
+                                class_id=instance.class_id,
+                                class_name=instance.class_name,
+                                confidence=instance.confidence,
+                                box=(
+                                    instance.box.x_min,
+                                    instance.box.y_min,
+                                    instance.box.x_max,
+                                    instance.box.y_max,
+                                ),
+                                mask_pixel_count=instance.mask.pixel_count,
+                                mask_area_ratio=instance.mask.area_ratio,
+                            )
+                            for instance in payload.instances
+                        ),
+                        inference_ms=payload.inference_ms,
+                        http_application_ms=http_application_ms,
+                    )
+                )
+        history_response = client.get("/v1/known-defects?limit=100")
+        _require_success(
+            history_response.status_code,
+            "known-defect history",
+            history_response.text,
+        )
+        history = KnownDefectHistoryResponse.model_validate(history_response.json())
+        created_ids = {image.inspection_id for image in image_summaries}
+        history_recovered_ids = tuple(
+            str(item.inspection_id)
+            for item in history.items
+            if str(item.inspection_id) in created_ids
+        )
+        if set(history_recovered_ids) != created_ids:
+            raise ValueError("REST history did not recover every smoke inspection ID.")
+    parent_count_after, child_count_after = _database_counts(database_url)
     summary = KnownDefectApiSmokeSummary(
         endpoint="POST /v1/known-defects",
         transport="in_process_asgi_testclient",
@@ -210,6 +306,14 @@ def smoke_yolo_segmentation_api(
         actual_device=actual_device,
         diagnostic_confidence=diagnostic_confidence,
         model_sha256=model_sha256,
+        artifact_metadata_sha256=artifact_metadata_sha256,
+        dataset_manifest_sha256=dataset_manifest_sha256,
+        dataset_semantic_fingerprint_sha256=dataset_semantic_fingerprint_sha256,
+        parent_count_before=parent_count_before,
+        parent_count_after=parent_count_after,
+        child_count_before=child_count_before,
+        child_count_after=child_count_after,
+        history_recovered_ids=history_recovered_ids,
         images=tuple(image_summaries),
         output_path=str(output_path),
     )
@@ -230,19 +334,27 @@ def format_yolo_api_smoke_summary(summary: KnownDefectApiSmokeSummary) -> str:
         f"Model/category: {summary.model_name}/{summary.category}",
         f"Requested/actual device: {summary.requested_device}/{summary.actual_device}",
         f"Model SHA256: {summary.model_sha256}",
+        f"Artifact metadata SHA256: {summary.artifact_metadata_sha256}",
+        f"Dataset Manifest SHA256: {summary.dataset_manifest_sha256}",
+        f"Dataset fingerprint SHA256: {summary.dataset_semantic_fingerprint_sha256}",
         f"Diagnostic confidence: {summary.diagnostic_confidence} (not production threshold)",
+        f"Parent rows: {summary.parent_count_before} -> {summary.parent_count_after}",
+        f"Child rows: {summary.child_count_before} -> {summary.child_count_after}",
     ]
     for image in summary.images:
         lines.extend(
             (
                 "",
                 f"IMAGE: {image.source}",
+                f"Inspection ID: {image.inspection_id}",
                 f"HTTP status: {image.status_code}",
                 f"Device: {image.device}",
                 f"Instances: {image.instance_count}",
                 f"Classes: {image.classes}",
                 f"Confidences: {image.confidences}",
                 f"Expected class detected: {image.expected_class_detected}",
+                f"WebSocket event: {image.event_type}",
+                f"REST detail recovered: {image.detail_recovered}",
                 f"Inference: {image.inference_ms:.6f} ms",
                 f"HTTP application E2E: {image.http_application_ms:.6f} ms",
             )

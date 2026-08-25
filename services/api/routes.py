@@ -29,20 +29,30 @@ from services.api.schemas import (
     InspectionHistoryResponse,
     InspectionResponse,
     KnownDefectBoundingBox,
+    KnownDefectCreatedEvent,
+    KnownDefectCreatedPayload,
+    KnownDefectDetailResponse,
+    KnownDefectHistoryItemResponse,
+    KnownDefectHistoryResponse,
     KnownDefectImageSummary,
     KnownDefectInstanceResponse,
     KnownDefectMaskSummary,
     KnownDefectModelIdentity,
+    KnownDefectPersistedInstanceResponse,
     KnownDefectResponse,
     ReadinessResponse,
 )
-from services.api.websockets import InspectionEventBroadcaster
+from services.api.websockets import (
+    InspectionEventBroadcaster,
+    KnownDefectEventBroadcaster,
+)
 from services.inference.runtime import (
     ModelRuntime,
     require_serving_provenance,
 )
 from services.inference.yolo_segmentation_runtime import (
     YoloSegmentationAdapter,
+    YoloSegmentationProvenance,
     YoloSegmentationResult,
 )
 from services.monitoring.metrics import MonitoringMetrics
@@ -51,6 +61,14 @@ from services.persistence.inspections import (
     Inspection,
     InspectionCreate,
     InspectionRepository,
+)
+from services.persistence.known_defects import (
+    KnownDefectCreate,
+    KnownDefectInspection,
+    KnownDefectInspectionDetail,
+    KnownDefectInstance,
+    KnownDefectInstanceCreate,
+    KnownDefectRepository,
 )
 from shared.hashing import sha256_bytes
 
@@ -68,6 +86,7 @@ async def health() -> HealthResponse:
 # ADD 2026-08-19: Startup에서 model이 복원된 경우에만 readiness를 반환한다.
 # MODIFY 2026-08-20: Required database connectivity를 readiness 응답 전에 재확인한다.
 # MODIFY 2026-08-26: Enabled YOLO singleton도 aggregate readiness에 포함한다.
+# MODIFY 2026-08-26: Known-defect parent/child schema readiness도 재확인한다.
 @router.get("/ready", response_model=ReadinessResponse)
 async def ready(request: Request) -> ReadinessResponse:
     """Report model identity only while the required database is reachable."""
@@ -75,9 +94,11 @@ async def ready(request: Request) -> ReadinessResponse:
     _require_yolo_readiness(request)
     database = _database_from_request(request)
     repository = _repository_from_request(request)
+    known_defect_repository = _known_defect_repository_from_request(request)
     try:
         await run_in_threadpool(database.check_connection)
         await run_in_threadpool(repository.check_ready)
+        await run_in_threadpool(known_defect_repository.check_ready)
     except PersistenceError as exc:
         raise ApiError(503, "database_not_ready", "Required database is not ready.") from exc
     return ReadinessResponse(
@@ -177,14 +198,17 @@ async def create_prediction(
 
 
 # ADD 2026-08-26: Multipart image를 enabled YOLO singleton으로 known-defect segmentation한다.
+# MODIFY 2026-08-26: Result를 atomically persist하고 commit 뒤 event를 예약한다.
 @router.post("/v1/known-defects", response_model=KnownDefectResponse)
 async def create_known_defect_prediction(
     request: Request,
+    background_tasks: BackgroundTasks,
     image: Annotated[UploadFile, File(description="JPEG or PNG inspection image")],
 ) -> KnownDefectResponse:
-    """Return normalized known-defect instances without persistence or final disposition."""
+    """Persist normalized known-defect instances without a final disposition."""
     runtime = _yolo_runtime_from_request(request)
     settings = _settings_from_request(request)
+    repository = _known_defect_repository_from_request(request)
     monitoring = _monitoring_from_request(request)
 
     # PatchCore와 같은 bounded media/format 정책으로 upload를 RGB array까지 decode한다.
@@ -210,11 +234,97 @@ async def create_known_defect_prediction(
     except Exception as exc:
         LOGGER.exception("YOLO segmentation request inference failed", exc_info=exc)
         raise ApiError(500, "inference_failed", "Model inference failed.") from exc
+
+    # Runtime-validated provenance와 compact instance summary를 한 DB transaction으로 저장한다.
+    provenance = _require_yolo_provenance(runtime)
+    try:
+        with monitoring.track_persistence(operation="insert"):
+            persisted = await run_in_threadpool(
+                repository.create,
+                KnownDefectCreate(
+                    model_name=runtime.metadata.model_name,
+                    task=runtime.metadata.task,
+                    category=runtime.metadata.category,
+                    device=runtime.device,
+                    diagnostic_confidence=(settings.yolo_segmentation_diagnostic_confidence),
+                    inference_ms=prediction.inference_ms,
+                    image_width=prediction.image_width,
+                    image_height=prediction.image_height,
+                    image_sha256=sha256_bytes(content),
+                    model_sha256=provenance.model_sha256,
+                    artifact_metadata_sha256=provenance.artifact_metadata_sha256,
+                    dataset_manifest_sha256=provenance.dataset_manifest_sha256,
+                    dataset_semantic_fingerprint_sha256=(
+                        provenance.dataset_semantic_fingerprint_sha256
+                    ),
+                    instances=tuple(
+                        KnownDefectInstanceCreate(
+                            class_id=instance.class_id,
+                            class_name=instance.class_name,
+                            confidence=instance.confidence,
+                            bbox_x_min=instance.box_xyxy[0],
+                            bbox_y_min=instance.box_xyxy[1],
+                            bbox_x_max=instance.box_xyxy[2],
+                            bbox_y_max=instance.box_xyxy[3],
+                            mask_pixel_count=instance.mask_pixel_count,
+                            mask_area_ratio=instance.mask_area_ratio,
+                        )
+                        for instance in prediction.instances
+                    ),
+                ),
+            )
+    except PersistenceError:
+        monitoring.record_persistence_error(operation="insert")
+        raise
+
+    # Commit된 durable object로 event를 만들고 response 이후 best-effort broadcast한다.
+    event = _known_defect_created_event(persisted)
+    broadcaster = _known_defect_broadcaster_from_request(request)
+    background_tasks.add_task(broadcaster.broadcast, event)
     return _known_defect_response(
+        inspection_id=persisted.inspection.id,
         runtime=runtime,
         prediction=prediction,
         diagnostic_confidence=settings.yolo_segmentation_diagnostic_confidence,
     )
+
+
+# ADD 2026-08-26: Known-defect parent를 child hydration 없이 newest-first 조회한다.
+@router.get("/v1/known-defects", response_model=KnownDefectHistoryResponse)
+async def list_known_defect_inspections(
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> KnownDefectHistoryResponse:
+    repository = _known_defect_repository_from_request(request)
+    page = await run_in_threadpool(repository.list, limit=limit, offset=offset)
+    return KnownDefectHistoryResponse(
+        items=[_known_defect_history_item(item) for item in page.items],
+        limit=page.limit,
+        offset=page.offset,
+        returned_count=len(page.items),
+        has_more=page.has_more,
+    )
+
+
+# ADD 2026-08-26: Persisted known-defect parent provenance와 ordered children을 복구한다.
+@router.get(
+    "/v1/known-defects/{inspection_id}",
+    response_model=KnownDefectDetailResponse,
+)
+async def get_known_defect_inspection(
+    request: Request,
+    inspection_id: UUID,
+) -> KnownDefectDetailResponse:
+    repository = _known_defect_repository_from_request(request)
+    detail = await run_in_threadpool(repository.get, inspection_id)
+    if detail is None:
+        raise ApiError(
+            404,
+            "known_defect_inspection_not_found",
+            "Known-defect inspection was not found.",
+        )
+    return _known_defect_detail_response(detail)
 
 
 # ADD 2026-08-25: Server-push connection을 등록하고 peer disconnect까지 command 없이 유지한다.
@@ -222,6 +332,23 @@ async def create_known_defect_prediction(
 async def stream_inspections(websocket: WebSocket) -> None:
     """Push best-effort inspection.created events from this API process."""
     broadcaster = _broadcaster_from_websocket(websocket)
+    await broadcaster.connect(websocket)
+    try:
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await broadcaster.disconnect(websocket)
+
+
+# ADD 2026-08-26: Existing inspection channel과 분리된 known-defect notification stream을 제공한다.
+@router.websocket("/v1/ws/known-defects")
+async def stream_known_defects(websocket: WebSocket) -> None:
+    """Push committed known_defect.created notifications on a separate channel."""
+    broadcaster = _known_defect_broadcaster_from_websocket(websocket)
     await broadcaster.connect(websocket)
     try:
         while True:
@@ -314,11 +441,13 @@ def _inspection_created_event(inspection: Inspection) -> InspectionCreatedEvent:
 # ADD 2026-08-26: Runtime result를 raw mask 없는 known-defect API schema로 변환한다.
 def _known_defect_response(
     *,
+    inspection_id: UUID,
     runtime: YoloSegmentationAdapter,
     prediction: YoloSegmentationResult,
     diagnostic_confidence: float,
 ) -> KnownDefectResponse:
     return KnownDefectResponse(
+        inspection_id=inspection_id,
         model=KnownDefectModelIdentity(
             name=runtime.metadata.model_name,
             task="segment",
@@ -350,6 +479,116 @@ def _known_defect_response(
             for instance in prediction.instances
         ],
     )
+
+
+# ADD 2026-08-26: Persisted parent를 child-free history response로 변환한다.
+def _known_defect_history_item(
+    inspection: KnownDefectInspection,
+) -> KnownDefectHistoryItemResponse:
+    return KnownDefectHistoryItemResponse(
+        inspection_id=inspection.id,
+        created_at=inspection.created_at,
+        model=KnownDefectModelIdentity(
+            name=inspection.model_name,
+            task="segment",
+            category=inspection.category,
+            device=inspection.device,
+        ),
+        image=KnownDefectImageSummary(
+            width=inspection.image_width,
+            height=inspection.image_height,
+        ),
+        diagnostic_confidence=inspection.diagnostic_confidence,
+        inference_ms=inspection.inference_ms,
+        instance_count=inspection.instance_count,
+    )
+
+
+# ADD 2026-08-26: Persisted child를 raw mask 없는 ordered detail schema로 변환한다.
+def _known_defect_persisted_instance(
+    instance: KnownDefectInstance,
+) -> KnownDefectPersistedInstanceResponse:
+    return KnownDefectPersistedInstanceResponse(
+        instance_id=instance.id,
+        instance_index=instance.instance_index,
+        class_id=instance.class_id,
+        class_name=instance.class_name,
+        confidence=instance.confidence,
+        box=KnownDefectBoundingBox(
+            x_min=instance.bbox_x_min,
+            y_min=instance.bbox_y_min,
+            x_max=instance.bbox_x_max,
+            y_max=instance.bbox_y_max,
+        ),
+        mask=KnownDefectMaskSummary(
+            pixel_count=instance.mask_pixel_count,
+            area_ratio=instance.mask_area_ratio,
+        ),
+    )
+
+
+# ADD 2026-08-26: Durable parent provenance와 ordered children을 REST detail로 변환한다.
+def _known_defect_detail_response(
+    detail: KnownDefectInspectionDetail,
+) -> KnownDefectDetailResponse:
+    inspection = detail.inspection
+    return KnownDefectDetailResponse(
+        inspection_id=inspection.id,
+        created_at=inspection.created_at,
+        model=KnownDefectModelIdentity(
+            name=inspection.model_name,
+            task="segment",
+            category=inspection.category,
+            device=inspection.device,
+        ),
+        image=KnownDefectImageSummary(
+            width=inspection.image_width,
+            height=inspection.image_height,
+        ),
+        diagnostic_confidence=inspection.diagnostic_confidence,
+        inference_ms=inspection.inference_ms,
+        image_sha256=inspection.image_sha256,
+        model_sha256=inspection.model_sha256,
+        artifact_metadata_sha256=inspection.artifact_metadata_sha256,
+        dataset_manifest_sha256=inspection.dataset_manifest_sha256,
+        dataset_semantic_fingerprint_sha256=(inspection.dataset_semantic_fingerprint_sha256),
+        instance_count=inspection.instance_count,
+        instances=[_known_defect_persisted_instance(instance) for instance in detail.instances],
+    )
+
+
+# ADD 2026-08-26: Committed detail에서 compact unique-class live event를 생성한다.
+def _known_defect_created_event(
+    detail: KnownDefectInspectionDetail,
+) -> KnownDefectCreatedEvent:
+    inspection = detail.inspection
+    classes = list(dict.fromkeys(instance.class_name for instance in detail.instances))
+    return KnownDefectCreatedEvent(
+        inspection=KnownDefectCreatedPayload(
+            inspection_id=inspection.id,
+            model_name=inspection.model_name,
+            category=inspection.category,
+            device=inspection.device,
+            diagnostic_confidence=inspection.diagnostic_confidence,
+            instance_count=inspection.instance_count,
+            classes=classes,
+            created_at=inspection.created_at,
+        )
+    )
+
+
+# ADD 2026-08-26: Runtime provenance를 persistence 전에 concrete validated type으로 요구한다.
+def _require_yolo_provenance(
+    runtime: YoloSegmentationAdapter,
+) -> YoloSegmentationProvenance:
+    provenance = runtime.provenance
+    if not isinstance(provenance, YoloSegmentationProvenance):
+        raise ApiError(
+            500,
+            "inference_provenance_unavailable",
+            "Model provenance is unavailable.",
+        )
+    return provenance
 
 
 # ADD 2026-08-26: UploadFile을 bounded read하고 inference 전에 handle을 닫는다.
@@ -430,6 +669,14 @@ def _repository_from_request(request: Request) -> InspectionRepository:
     return cast(InspectionRepository, repository)
 
 
+# ADD 2026-08-26: Request app에서 migrated known-defect repository를 반환한다.
+def _known_defect_repository_from_request(request: Request) -> KnownDefectRepository:
+    repository = getattr(request.app.state, "known_defect_repository", None)
+    if repository is None:
+        raise ApiError(503, "database_not_ready", "Required database is not ready.")
+    return cast(KnownDefectRepository, repository)
+
+
 # ADD 2026-08-21: Request app에서 instance-isolated monitoring registry를 반환한다.
 def _monitoring_from_request(request: Request) -> MonitoringMetrics:
     monitoring = getattr(request.app.state, "monitoring_metrics", None)
@@ -451,4 +698,24 @@ def _broadcaster_from_websocket(websocket: WebSocket) -> InspectionEventBroadcas
     broadcaster = getattr(websocket.app.state, "inspection_event_broadcaster", None)
     if not isinstance(broadcaster, InspectionEventBroadcaster):
         raise RuntimeError("Inspection event broadcaster is unavailable.")
+    return broadcaster
+
+
+# ADD 2026-08-26: Request app에서 dedicated known-defect event channel을 반환한다.
+def _known_defect_broadcaster_from_request(
+    request: Request,
+) -> KnownDefectEventBroadcaster:
+    broadcaster = getattr(request.app.state, "known_defect_event_broadcaster", None)
+    if not isinstance(broadcaster, KnownDefectEventBroadcaster):
+        raise RuntimeError("Known-defect event broadcaster is unavailable.")
+    return broadcaster
+
+
+# ADD 2026-08-26: WebSocket app에서 dedicated known-defect event channel을 반환한다.
+def _known_defect_broadcaster_from_websocket(
+    websocket: WebSocket,
+) -> KnownDefectEventBroadcaster:
+    broadcaster = getattr(websocket.app.state, "known_defect_event_broadcaster", None)
+    if not isinstance(broadcaster, KnownDefectEventBroadcaster):
+        raise RuntimeError("Known-defect event broadcaster is unavailable.")
     return broadcaster
