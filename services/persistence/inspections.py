@@ -146,15 +146,12 @@ class SqlAlchemyInspectionRepository:
                 raise PersistenceError("Inspection schema readiness check failed.") from exc
 
     # ADD 2026-08-20: Inspection insert를 commit하고 failure 시 rollback한다.
+    # MODIFY 2026-08-26: Caller-owned insert helper를 standalone commit에서도 재사용한다.
     def create(self, values: InspectionCreate) -> Inspection:
         """Insert one row and expose only a committed domain value."""
-        values.validate()
-        record = InspectionRecord(**vars(values))
         with self._session_factory() as session:
             try:
-                session.add(record)
-                session.flush()
-                inspection = _to_inspection(record)
+                inspection = add_inspection(session, values)
                 session.commit()
             except SQLAlchemyError as exc:
                 session.rollback()
@@ -233,3 +230,13 @@ def _to_inspection(record: InspectionRecord) -> Inspection:
         manifest_sha256=record.manifest_sha256,
         device=record.device,
     )
+
+
+# ADD 2026-08-26: Caller-owned transaction에 PatchCore row를 flush해 atomic flow에서 재사용한다.
+def add_inspection(session: Session, values: InspectionCreate) -> Inspection:
+    """Validate and flush one inspection without committing the caller's transaction."""
+    values.validate()
+    record = InspectionRecord(**vars(values))
+    session.add(record)
+    session.flush()
+    return _to_inspection(record)

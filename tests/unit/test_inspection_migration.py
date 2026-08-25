@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, inspect, text
 
 
 # ADD 2026-08-20: Initial migration upgrade/downgrade가 inspection schema를 왕복하는지 검증한다.
-# MODIFY 2026-08-26: Additive known-defect parent/child revision과 기존 row 보존을 검증한다.
+# MODIFY 2026-08-26: Combined correlation revision, FK와 기존 row 보존을 검증한다.
 def test_initial_inspection_migration_upgrade_and_downgrade(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -45,6 +45,7 @@ def test_initial_inspection_migration_upgrade_and_downgrade(
         "inspections",
         "known_defect_inspections",
         "known_defect_instances",
+        "combined_inspections",
     } <= set(inspector.get_table_names())
     assert {index["name"] for index in inspector.get_indexes("inspections")} == {
         "ix_inspections_anomaly_created_at",
@@ -60,6 +61,14 @@ def test_initial_inspection_migration_upgrade_and_downgrade(
     foreign_keys = inspector.get_foreign_keys("known_defect_instances")
     assert len(foreign_keys) == 1
     assert foreign_keys[0]["referred_table"] == "known_defect_inspections"
+    combined_foreign_keys = {
+        foreign_key["referred_table"]
+        for foreign_key in inspector.get_foreign_keys("combined_inspections")
+    }
+    assert combined_foreign_keys == {"inspections", "known_defect_inspections"}
+    assert {index["name"] for index in inspector.get_indexes("combined_inspections")} == {
+        "ix_combined_inspections_created_at"
+    }
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT count(*) FROM inspections")) == 1
     engine.dispose()
@@ -70,6 +79,7 @@ def test_initial_inspection_migration_upgrade_and_downgrade(
     assert "inspections" in table_names
     assert "known_defect_inspections" not in table_names
     assert "known_defect_instances" not in table_names
+    assert "combined_inspections" not in table_names
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT count(*) FROM inspections")) == 1
     engine.dispose()

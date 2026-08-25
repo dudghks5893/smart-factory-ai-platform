@@ -93,6 +93,39 @@ class KnownDefectResponse(BaseModel):
     instances: list[KnownDefectInstanceResponse]
 
 
+class CombinedInspectionImageResponse(BaseModel):
+    """Shared upload identity and dimensions for a dual-model result."""
+
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    sha256: str
+
+
+class CombinedPatchCoreResponse(BaseModel):
+    """PatchCore model output linked to its existing durable inspection row."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    inspection_id: UUID
+    model_name: str
+    category: str
+    device: str
+    is_anomaly: bool
+    anomaly_score: float
+    threshold: float
+    comparison_operator: Literal[">"]
+
+
+class CombinedInspectionTimings(BaseModel):
+    """Model and orchestration observations, excluding upload decode and persistence."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    patchcore_inference_ms: float = Field(ge=0.0)
+    yolo_inference_ms: float = Field(ge=0.0)
+    orchestration_ms: float = Field(ge=0.0)
+
+
 class KnownDefectHistoryItemResponse(BaseModel):
     """Compact persisted parent summary without child hydration or raw payloads."""
 
@@ -142,6 +175,17 @@ class KnownDefectDetailResponse(BaseModel):
     dataset_semantic_fingerprint_sha256: str
     instance_count: int = Field(ge=0)
     instances: list[KnownDefectPersistedInstanceResponse]
+
+
+class CombinedInspectionResponse(BaseModel):
+    """Recoverable dual-model observation without a manufacturing disposition."""
+
+    combined_inspection_id: UUID
+    created_at: datetime
+    image: CombinedInspectionImageResponse
+    patchcore: CombinedPatchCoreResponse
+    known_defects: KnownDefectDetailResponse
+    timings: CombinedInspectionTimings
 
 
 class KnownDefectCreatedPayload(BaseModel):

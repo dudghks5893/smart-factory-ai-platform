@@ -193,3 +193,58 @@ class KnownDefectInstanceRecord(Base):
     bbox_y_max: Mapped[float] = mapped_column(Float, nullable=False)
     mask_pixel_count: Mapped[int] = mapped_column(nullable=False)
     mask_area_ratio: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class CombinedInspectionRecord(Base):
+    """Correlation record for one atomically persisted dual-model inspection."""
+
+    __tablename__ = "combined_inspections"
+    __table_args__ = (
+        CheckConstraint(
+            "image_width > 0 AND image_height > 0",
+            name="ck_combined_inspections_image_dimensions_positive",
+        ),
+        CheckConstraint(
+            "image_size_bytes > 0",
+            name="ck_combined_inspections_image_size_positive",
+        ),
+        CheckConstraint(
+            "length(image_sha256) = 64",
+            name="ck_combined_inspections_image_sha256_length",
+        ),
+        CheckConstraint(
+            "patchcore_inference_ms >= 0 AND orchestration_ms >= 0",
+            name="ck_combined_inspections_timings_nonnegative",
+        ),
+        UniqueConstraint(
+            "patchcore_inspection_id",
+            name="uq_combined_inspections_patchcore_id",
+        ),
+        UniqueConstraint(
+            "known_defect_inspection_id",
+            name="uq_combined_inspections_known_defect_id",
+        ),
+        Index("ix_combined_inspections_created_at", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    patchcore_inspection_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("inspections.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    known_defect_inspection_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("known_defect_inspections.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    image_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    image_width: Mapped[int] = mapped_column(nullable=False)
+    image_height: Mapped[int] = mapped_column(nullable=False)
+    image_size_bytes: Mapped[int] = mapped_column(nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    patchcore_inference_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    orchestration_ms: Mapped[float] = mapped_column(Float, nullable=False)

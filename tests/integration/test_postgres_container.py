@@ -45,6 +45,7 @@ from services.persistence.known_defects import (
     SqlAlchemyKnownDefectRepository,
 )
 from services.persistence.models import (
+    CombinedInspectionRecord,
     InspectionRecord,
     KnownDefectInspectionRecord,
     KnownDefectInstanceRecord,
@@ -101,7 +102,7 @@ def _png_bytes() -> bytes:
 
 
 # ADD 2026-08-20: 실제 PostgreSQL migration, schema, transaction과 FastAPI persistence를 검증한다.
-# MODIFY 2026-08-26: Additive known-defect parent/child schema와 atomic transaction을 검증한다.
+# MODIFY 2026-08-26: Combined correlation schema와 기존 persistence를 함께 검증한다.
 def test_postgres_migration_and_fastapi_persistence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -117,6 +118,7 @@ def test_postgres_migration_and_fastapi_persistence(
 
     try:
         with database.engine.begin() as connection:
+            connection.execute(delete(CombinedInspectionRecord))
             connection.execute(delete(KnownDefectInstanceRecord))
             connection.execute(delete(KnownDefectInspectionRecord))
             connection.execute(delete(InspectionRecord))
@@ -169,8 +171,24 @@ def test_postgres_migration_and_fastapi_persistence(
                     )
                 )
             )
+            combined_indexes = set(
+                connection.scalars(
+                    text(
+                        "SELECT indexname FROM pg_indexes "
+                        "WHERE schemaname = 'public' AND tablename = 'combined_inspections'"
+                    )
+                )
+            )
+            combined_constraints = set(
+                connection.scalars(
+                    text(
+                        "SELECT conname FROM pg_constraint "
+                        "WHERE conrelid = 'public.combined_inspections'::regclass"
+                    )
+                )
+            )
 
-        assert migration_revision == "20260826_01"
+        assert migration_revision == "20260826_02"
         assert postgres_types == {
             "created_at": "timestamp with time zone",
             "id": "uuid",
@@ -195,6 +213,13 @@ def test_postgres_migration_and_fastapi_persistence(
             "ck_known_defect_inspections_confidence_range",
             "ck_known_defect_instances_mask_pixels_positive",
         } <= known_defect_constraints
+        assert "ix_combined_inspections_created_at" in combined_indexes
+        assert {
+            "fk_combined_inspections_patchcore_id",
+            "fk_combined_inspections_known_defect_id",
+            "uq_combined_inspections_patchcore_id",
+            "uq_combined_inspections_known_defect_id",
+        } <= combined_constraints
 
         # Real PostgreSQL에서 multi-instance parent와 children을 한 commit으로 저장한다.
         known_defect_repository = SqlAlchemyKnownDefectRepository(database.session_factory)

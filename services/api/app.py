@@ -24,6 +24,10 @@ from services.inference.yolo_segmentation_runtime import (
 )
 from services.monitoring.metrics import MonitoringMetrics, metrics_endpoint
 from services.monitoring.middleware import HttpMetricsMiddleware
+from services.persistence.combined_inspections import (
+    CombinedInspectionRepository,
+    SqlAlchemyCombinedInspectionRepository,
+)
 from services.persistence.database import DatabaseManager, create_database_manager
 from services.persistence.inspections import (
     InspectionRepository,
@@ -39,6 +43,7 @@ type YoloRuntimeLoader = Callable[[YoloSegmentationRuntimeConfig], YoloSegmentat
 type DatabaseLoader = Callable[[str], DatabaseManager]
 type RepositoryLoader = Callable[[DatabaseManager], InspectionRepository]
 type KnownDefectRepositoryLoader = Callable[[DatabaseManager], KnownDefectRepository]
+type CombinedInspectionRepositoryLoader = Callable[[DatabaseManager], CombinedInspectionRepository]
 
 DEFAULT_LIVE_MONITOR_DIR = Path(__file__).resolve().parents[2] / "apps" / "live_monitor"
 
@@ -55,10 +60,19 @@ def load_known_defect_repository(database: DatabaseManager) -> KnownDefectReposi
     return SqlAlchemyKnownDefectRepository(database.session_factory)
 
 
+# ADD 2026-08-26: Database Session factory로 atomic combined-inspection repository를 생성한다.
+def load_combined_inspection_repository(
+    database: DatabaseManager,
+) -> CombinedInspectionRepository:
+    """Build the production combined repository without creating schema."""
+    return SqlAlchemyCombinedInspectionRepository(database.session_factory)
+
+
 # ADD 2026-08-19: Lifespan startup과 injectable runtime loader를 가진 FastAPI app을 생성한다.
 # MODIFY 2026-08-25: WebSocket lifecycle과 optional browser monitor static mount를 추가한다.
 # MODIFY 2026-08-26: Optional enabled YOLO singleton을 startup/readiness lifecycle에 추가한다.
 # MODIFY 2026-08-26: Known-defect repository와 별도 event channel을 lifecycle에 추가한다.
+# MODIFY 2026-08-26: Combined correlation repository를 required persistence lifecycle에 추가한다.
 def create_app(
     *,
     settings: ServingSettings | None = None,
@@ -67,6 +81,9 @@ def create_app(
     database_loader: DatabaseLoader = create_database_manager,
     repository_loader: RepositoryLoader = load_inspection_repository,
     known_defect_repository_loader: KnownDefectRepositoryLoader = (load_known_defect_repository),
+    combined_inspection_repository_loader: CombinedInspectionRepositoryLoader = (
+        load_combined_inspection_repository
+    ),
     inspection_event_broadcaster: InspectionEventBroadcaster | None = None,
     known_defect_event_broadcaster: KnownDefectEventBroadcaster | None = None,
     live_monitor_dir: Path = DEFAULT_LIVE_MONITOR_DIR,
@@ -81,6 +98,7 @@ def create_app(
     # MODIFY 2026-08-21: Loaded model identity를 app-local Info metric에 한 번 게시한다.
     # MODIFY 2026-08-26: Enabled YOLO load 성공도 ready 전환의 필수 조건으로 포함한다.
     # MODIFY 2026-08-26: Known-defect schema와 WebSocket channel을 required lifecycle에 포함한다.
+    # MODIFY 2026-08-26: Combined correlation schema readiness와 state cleanup을 포함한다.
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         active_settings = settings or ServingSettings.from_environment()
@@ -94,6 +112,8 @@ def create_app(
             inspection_repository.check_ready()
             known_defect_repository = known_defect_repository_loader(database)
             known_defect_repository.check_ready()
+            combined_inspection_repository = combined_inspection_repository_loader(database)
+            combined_inspection_repository.check_ready()
 
             # Artifact와 threshold를 검증하고 process-local runtime을 정확히 한 번 생성한다.
             runtime = runtime_loader(active_settings.runtime_config())
@@ -107,6 +127,7 @@ def create_app(
             application.state.database = database
             application.state.inspection_repository = inspection_repository
             application.state.known_defect_repository = known_defect_repository
+            application.state.combined_inspection_repository = combined_inspection_repository
             application.state.serving_runtime = runtime
             application.state.yolo_segmentation_runtime = yolo_runtime
             yield
@@ -117,6 +138,7 @@ def create_app(
             application.state.serving_runtime = None
             application.state.inspection_repository = None
             application.state.known_defect_repository = None
+            application.state.combined_inspection_repository = None
             application.state.database = None
             database.dispose()
 
@@ -131,6 +153,7 @@ def create_app(
     app.state.database = None
     app.state.inspection_repository = None
     app.state.known_defect_repository = None
+    app.state.combined_inspection_repository = None
     app.state.inspection_event_broadcaster = event_broadcaster
     app.state.known_defect_event_broadcaster = known_defect_broadcaster
     app.state.monitoring_metrics = monitoring_metrics

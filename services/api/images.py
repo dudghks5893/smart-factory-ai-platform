@@ -1,5 +1,6 @@
 """Bounded in-memory image validation and decoding for inference requests."""
 
+from dataclasses import dataclass
 from io import BytesIO
 
 import numpy as np
@@ -14,6 +15,38 @@ SUPPORTED_IMAGE_MEDIA_TYPES = {
     "image/jpeg": "JPEG",
     "image/png": "PNG",
 }
+
+
+@dataclass(frozen=True)
+class DecodedInferenceInputs:
+    """One validated RGB decode materialized for both inference runtimes."""
+
+    patchcore_tensor: Tensor
+    yolo_rgb: NDArray[np.uint8]
+    width: int
+    height: int
+
+
+# ADD 2026-08-26: One Pillow decode에서 PatchCore tensor와 YOLO array를 함께 생성한다.
+def decode_uploaded_inference_inputs(
+    content: bytes,
+    *,
+    content_type: str | None,
+    max_upload_bytes: int,
+) -> DecodedInferenceInputs:
+    """Decode and validate an upload exactly once for combined inference."""
+    image = _decode_uploaded_rgb_image(
+        content,
+        content_type=content_type,
+        max_upload_bytes=max_upload_bytes,
+    )
+    width, height = image.size
+    return DecodedInferenceInputs(
+        patchcore_tensor=image_to_float_tensor(image).unsqueeze(0),
+        yolo_rgb=np.asarray(image, dtype=np.uint8),
+        width=width,
+        height=height,
+    )
 
 
 # ADD 2026-08-19: Upload bytes의 size/media/format을 검증하고 RGB batch tensor로 변환한다.

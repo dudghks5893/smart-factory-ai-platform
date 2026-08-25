@@ -212,42 +212,11 @@ class SqlAlchemyKnownDefectRepository:
                 raise PersistenceError("Known-defect schema readiness check failed.") from exc
 
     # ADD 2026-08-26: Parent와 0..N ordered child를 한 transaction으로 commit한다.
+    # MODIFY 2026-08-26: Caller-owned aggregate helper를 standalone commit에서도 재사용한다.
     def create(self, values: KnownDefectCreate) -> KnownDefectInspectionDetail:
-        values.validate()
-        parent = KnownDefectInspectionRecord(
-            model_name=values.model_name,
-            task=values.task,
-            category=values.category,
-            device=values.device,
-            diagnostic_confidence=values.diagnostic_confidence,
-            inference_ms=values.inference_ms,
-            image_width=values.image_width,
-            image_height=values.image_height,
-            image_sha256=values.image_sha256,
-            model_sha256=values.model_sha256,
-            artifact_metadata_sha256=values.artifact_metadata_sha256,
-            dataset_manifest_sha256=values.dataset_manifest_sha256,
-            dataset_semantic_fingerprint_sha256=(values.dataset_semantic_fingerprint_sha256),
-            instance_count=len(values.instances),
-        )
         with self._session_factory() as session:
             try:
-                session.add(parent)
-                session.flush()
-                children = tuple(
-                    KnownDefectInstanceRecord(
-                        inspection_id=parent.id,
-                        instance_index=index,
-                        **vars(instance),
-                    )
-                    for index, instance in enumerate(values.instances)
-                )
-                session.add_all(children)
-                session.flush()
-                detail = KnownDefectInspectionDetail(
-                    inspection=_to_inspection(parent),
-                    instances=tuple(_to_instance(child) for child in children),
-                )
+                detail = add_known_defect_inspection(session, values)
                 session.commit()
             except SQLAlchemyError as exc:
                 session.rollback()
@@ -340,4 +309,45 @@ def _to_instance(record: KnownDefectInstanceRecord) -> KnownDefectInstance:
         bbox_y_max=record.bbox_y_max,
         mask_pixel_count=record.mask_pixel_count,
         mask_area_ratio=record.mask_area_ratio,
+    )
+
+
+# ADD 2026-08-26: Caller-owned transaction에 YOLO aggregate를 flush해 atomic flow에서 재사용한다.
+def add_known_defect_inspection(
+    session: Session,
+    values: KnownDefectCreate,
+) -> KnownDefectInspectionDetail:
+    """Validate and flush one known-defect aggregate without committing it."""
+    values.validate()
+    parent = KnownDefectInspectionRecord(
+        model_name=values.model_name,
+        task=values.task,
+        category=values.category,
+        device=values.device,
+        diagnostic_confidence=values.diagnostic_confidence,
+        inference_ms=values.inference_ms,
+        image_width=values.image_width,
+        image_height=values.image_height,
+        image_sha256=values.image_sha256,
+        model_sha256=values.model_sha256,
+        artifact_metadata_sha256=values.artifact_metadata_sha256,
+        dataset_manifest_sha256=values.dataset_manifest_sha256,
+        dataset_semantic_fingerprint_sha256=values.dataset_semantic_fingerprint_sha256,
+        instance_count=len(values.instances),
+    )
+    session.add(parent)
+    session.flush()
+    children = tuple(
+        KnownDefectInstanceRecord(
+            inspection_id=parent.id,
+            instance_index=index,
+            **vars(instance),
+        )
+        for index, instance in enumerate(values.instances)
+    )
+    session.add_all(children)
+    session.flush()
+    return KnownDefectInspectionDetail(
+        inspection=_to_inspection(parent),
+        instances=tuple(_to_instance(child) for child in children),
     )
