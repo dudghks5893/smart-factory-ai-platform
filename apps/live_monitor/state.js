@@ -265,3 +265,148 @@ export function knownDefectWebSocketUrl(locationValue) {
 export function knownDefectDetailUrl(inspectionId) {
   return `/v1/known-defects/${encodeURIComponent(inspectionId)}`;
 }
+
+const COMBINED_DISPOSITIONS = new Set(["PASS", "REVIEW", "REJECT"]);
+const PATCHCORE_PREDICTIONS = new Set(["NORMAL", "ANOMALY"]);
+const DECISION_REASON_LABELS = Object.freeze({
+  NO_ANOMALY_EVIDENCE: "No anomaly evidence",
+  UNKNOWN_ANOMALY: "Unknown anomaly requires review",
+  MODEL_DISAGREEMENT: "Model disagreement requires review",
+  CONFIRMED_KNOWN_DEFECT: "Confirmed known-defect evidence",
+});
+
+// ADD 2026-08-26: History의 nested policy와 event의 flattened policy를 같은 UI identity로 읽는다.
+function normalizedDecisionPolicy(value) {
+  if (value?.policy !== null && typeof value?.policy === "object") {
+    return {
+      policy_name: value.policy.name,
+      policy_version: value.policy.version,
+    };
+  }
+  return {
+    policy_name: value?.policy_name,
+    policy_version: value?.policy_version,
+  };
+}
+
+// ADD 2026-08-26: Backend decision summary를 client-side policy 계산 없는 compact UI value로 검증한다.
+export function normalizeCombinedInspection(value) {
+  const policy = normalizedDecisionPolicy(value);
+  const classes = normalizedClassNames(value?.known_defect_classes ?? value?.classes);
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    !INSPECTION_ID_PATTERN.test(value.combined_inspection_id ?? "") ||
+    !isNonEmptyString(value.created_at) ||
+    !Number.isFinite(Date.parse(value.created_at)) ||
+    !PATCHCORE_PREDICTIONS.has(value.patchcore_prediction) ||
+    !Number.isInteger(value.known_defect_instance_count) ||
+    value.known_defect_instance_count < 0 ||
+    !COMBINED_DISPOSITIONS.has(value.disposition) ||
+    !Object.hasOwn(DECISION_REASON_LABELS, value.reason_code) ||
+    !isNonEmptyString(policy.policy_name) ||
+    !isNonEmptyString(policy.policy_version)
+  ) {
+    return null;
+  }
+  return {
+    combined_inspection_id: value.combined_inspection_id,
+    created_at: value.created_at,
+    patchcore_prediction: value.patchcore_prediction,
+    known_defect_instance_count: value.known_defect_instance_count,
+    known_defect_classes: classes,
+    disposition: value.disposition,
+    reason_code: value.reason_code,
+    policy_name: policy.policy_name,
+    policy_version: policy.policy_version,
+  };
+}
+
+// ADD 2026-08-26: Versioned combined decision event만 parsing하고 child-domain event를 무시한다.
+export function parseCombinedInspectionEvent(value) {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    value.schema_version !== "1" ||
+    value.type !== "combined_inspection.created"
+  ) {
+    return null;
+  }
+  return normalizeCombinedInspection(value.inspection);
+}
+
+// ADD 2026-08-26: PostgreSQL-backed combined history의 bounded summary list를 검증한다.
+export function parseCombinedInspectionHistory(value) {
+  if (value === null || typeof value !== "object" || !Array.isArray(value.items)) {
+    throw new TypeError("Combined inspection history response is malformed.");
+  }
+  const items = value.items.map(normalizeCombinedInspection);
+  if (items.some((item) => item === null)) {
+    throw new TypeError("Combined inspection history contains a malformed item.");
+  }
+  return items;
+}
+
+// ADD 2026-08-26: REST summary와 event가 같은 ID면 event class summary를 잃지 않고 병합한다.
+function mergeCombinedValue(previous, incoming) {
+  if (previous === undefined) {
+    return incoming;
+  }
+  return {
+    ...previous,
+    ...incoming,
+    known_defect_classes: normalizedClassNames([
+      ...previous.known_defect_classes,
+      ...incoming.known_defect_classes,
+    ]),
+  };
+}
+
+// ADD 2026-08-26: Combined summary를 UUID dedupe, deterministic newest-first, visible 100으로 제한한다.
+export function mergeCombinedInspections(...groups) {
+  const byId = new Map();
+  for (const group of groups) {
+    for (const candidate of group) {
+      const inspection = normalizeCombinedInspection(candidate);
+      if (inspection !== null) {
+        byId.set(
+          inspection.combined_inspection_id,
+          mergeCombinedValue(byId.get(inspection.combined_inspection_id), inspection),
+        );
+      }
+    }
+  }
+  return [...byId.values()]
+    .sort(
+      (left, right) =>
+        Date.parse(right.created_at) - Date.parse(left.created_at) ||
+        right.combined_inspection_id.localeCompare(left.combined_inspection_id),
+    )
+    .slice(0, MAX_VISIBLE_INSPECTIONS);
+}
+
+// ADD 2026-08-26: 현재 combined visible window의 persisted disposition count만 집계한다.
+export function calculateCombinedKpis(inspections) {
+  return {
+    visible: inspections.length,
+    pass: inspections.filter((inspection) => inspection.disposition === "PASS").length,
+    review: inspections.filter((inspection) => inspection.disposition === "REVIEW").length,
+    reject: inspections.filter((inspection) => inspection.disposition === "REJECT").length,
+  };
+}
+
+// ADD 2026-08-26: Stable reason code를 operator-facing label로 변환하되 code 자체는 보존한다.
+export function decisionReasonLabel(reasonCode) {
+  return DECISION_REASON_LABELS[reasonCode] ?? "Unknown decision reason";
+}
+
+// ADD 2026-08-26: Browser location에서 독립 combined ws/wss endpoint를 구성한다.
+export function combinedInspectionWebSocketUrl(locationValue) {
+  const protocol = locationValue.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${locationValue.host}/v1/ws/combined-inspections`;
+}
+
+// ADD 2026-08-26: Combined UUID를 encode해 same-origin persisted detail endpoint를 구성한다.
+export function combinedInspectionDetailUrl(combinedInspectionId) {
+  return `/v1/combined-inspections/${encodeURIComponent(combinedInspectionId)}`;
+}

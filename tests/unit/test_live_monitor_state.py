@@ -85,6 +85,80 @@ def _run_state_contract() -> dict[str, object]:
         type: "known_defect.created",
         inspection: duplicateKnownEvent,
       }};
+      const combinedHistoryItem = (
+        index,
+        disposition = "PASS",
+        reasonCode = "NO_ANOMALY_EVIDENCE",
+        createdAt = null,
+      ) => ({{
+        combined_inspection_id: `20000000-0000-4000-8000-${{String(index).padStart(12, "0")}}`,
+        created_at: createdAt ?? new Date(Date.UTC(2026, 7, 26, 1, 0, index)).toISOString(),
+        patchcore_prediction: disposition === "PASS" ? "NORMAL" : "ANOMALY",
+        known_defect_instance_count: disposition === "PASS" ? 0 : 1,
+        disposition,
+        reason_code: reasonCode,
+        policy: {{name: "model_agreement", version: "1"}},
+      }});
+      const combinedEventItem = (
+        index,
+        disposition,
+        reasonCode,
+        classes,
+        createdAt = null,
+      ) => ({{
+        combined_inspection_id: `20000000-0000-4000-8000-${{String(index).padStart(12, "0")}}`,
+        created_at: createdAt ?? new Date(Date.UTC(2026, 7, 26, 1, 0, index)).toISOString(),
+        patchcore_prediction: disposition === "PASS" ? "NORMAL" : "ANOMALY",
+        known_defect_instance_count: classes.length,
+        known_defect_classes: classes,
+        disposition,
+        reason_code: reasonCode,
+        policy_name: "model_agreement",
+        policy_version: "1",
+      }});
+      const combinedHistory = Array.from({{length: 100}}, (_, index) =>
+        combinedHistoryItem(index),
+      );
+      const duplicateCombinedEvent = combinedEventItem(
+        50,
+        "REJECT",
+        "CONFIRMED_KNOWN_DEFECT",
+        ["scratch", "bent", "bent"],
+      );
+      const combinedBuffered = [
+        duplicateCombinedEvent,
+        combinedEventItem(100, "REVIEW", "UNKNOWN_ANOMALY", []),
+        combinedEventItem(101, "REJECT", "CONFIRMED_KNOWN_DEFECT", ["color"]),
+      ];
+      const combinedMerged = state.mergeCombinedInspections(
+        combinedHistory,
+        combinedBuffered,
+      );
+      const combinedReconnected = state.mergeCombinedInspections(
+        combinedHistory,
+        combinedMerged,
+        [duplicateCombinedEvent],
+      );
+      const combinedTieTime = "2026-08-26T02:00:00.000Z";
+      const combinedTied = state.mergeCombinedInspections([
+        combinedHistoryItem(1, "PASS", "NO_ANOMALY_EVIDENCE", combinedTieTime),
+        combinedHistoryItem(2, "PASS", "NO_ANOMALY_EVIDENCE", combinedTieTime),
+      ]);
+      const combinedKpiSample = state.mergeCombinedInspections([
+        combinedHistoryItem(200, "PASS", "NO_ANOMALY_EVIDENCE"),
+        combinedEventItem(201, "REVIEW", "MODEL_DISAGREEMENT", ["bent"]),
+        combinedEventItem(202, "REJECT", "CONFIRMED_KNOWN_DEFECT", ["scratch"]),
+      ]);
+      const combinedValidEvent = {{
+        schema_version: "1",
+        type: "combined_inspection.created",
+        inspection: duplicateCombinedEvent,
+      }};
+      const normalizedCombinedDetail = state.normalizeCombinedInspection({{
+        ...combinedHistoryItem(300),
+        patchcore: {{inspection_id: item(1).inspection_id}},
+        known_defects: {{inspection_id: knownHistoryItem(1).inspection_id}},
+      }});
       console.log(JSON.stringify({{
         length: merged.length,
         ids: merged.map((value) => value.inspection_id),
@@ -112,6 +186,47 @@ def _run_state_contract() -> dict[str, object]:
         knownHttpsUrl: state.knownDefectWebSocketUrl({{protocol: "https:", host: "factory.test"}}),
         knownDetailUrl: state.knownDefectDetailUrl(duplicateKnownEvent.inspection_id),
         patchContainsKnown: merged.some((value) => value.inspection_id.startsWith("10000000")),
+        combinedLength: combinedMerged.length,
+        combinedIds: combinedMerged.map((value) => value.combined_inspection_id),
+        combinedDuplicate: combinedMerged.find((value) =>
+          value.combined_inspection_id.endsWith("000000000050"),
+        ),
+        combinedReconnectIds: combinedReconnected.map((value) =>
+          value.combined_inspection_id,
+        ),
+        combinedTiedIds: combinedTied.map((value) => value.combined_inspection_id),
+        combinedKpis: state.calculateCombinedKpis(combinedKpiSample),
+        combinedValidEvent: state.parseCombinedInspectionEvent(combinedValidEvent),
+        combinedWrongEvent: state.parseCombinedInspectionEvent(knownValidEvent),
+        combinedHistoryLength: state.parseCombinedInspectionHistory({{
+          items: combinedHistory,
+        }}).length,
+        combinedHttpUrl: state.combinedInspectionWebSocketUrl({{
+          protocol: "http:",
+          host: "factory.test:8000",
+        }}),
+        combinedHttpsUrl: state.combinedInspectionWebSocketUrl({{
+          protocol: "https:",
+          host: "factory.test",
+        }}),
+        combinedDetailUrl: state.combinedInspectionDetailUrl(
+          duplicateCombinedEvent.combined_inspection_id,
+        ),
+        reasonLabels: [
+          "NO_ANOMALY_EVIDENCE",
+          "UNKNOWN_ANOMALY",
+          "MODEL_DISAGREEMENT",
+          "CONFIRMED_KNOWN_DEFECT",
+        ].map(state.decisionReasonLabel),
+        combinedDetailHasChildObjects:
+          Object.hasOwn(normalizedCombinedDetail, "patchcore") ||
+          Object.hasOwn(normalizedCombinedDetail, "known_defects"),
+        patchContainsCombined: merged.some((value) =>
+          value.inspection_id.startsWith("20000000"),
+        ),
+        knownContainsCombined: knownMerged.some((value) =>
+          value.inspection_id.startsWith("20000000"),
+        ),
       }}));
     """
     result = subprocess.run(  # noqa: S603
@@ -198,3 +313,56 @@ def test_known_defect_live_monitor_kpi_and_endpoint_contract() -> None:
     detail_url = result["knownDetailUrl"]
     assert isinstance(detail_url, str)
     assert detail_url.endswith("10000000-0000-4000-8000-000000000050")
+
+
+# ADD 2026-08-26: Combined REST/event merge, dedupe, tie ordering과 child-state 격리를 검증한다.
+def test_combined_live_monitor_merge_reconnect_and_isolation() -> None:
+    result = _run_state_contract()
+
+    assert result["combinedLength"] == 100
+    combined_ids = result["combinedIds"]
+    assert isinstance(combined_ids, list)
+    assert combined_ids[0].endswith("000000000101")
+    assert combined_ids[1].endswith("000000000100")
+    assert len(combined_ids) == len(set(combined_ids))
+    assert result["combinedReconnectIds"] == combined_ids
+    assert result["combinedTiedIds"] == [
+        "20000000-0000-4000-8000-000000000002",
+        "20000000-0000-4000-8000-000000000001",
+    ]
+    duplicate = result["combinedDuplicate"]
+    assert isinstance(duplicate, dict)
+    assert duplicate["disposition"] == "REJECT"
+    assert duplicate["known_defect_classes"] == ["bent", "scratch"]
+    assert result["combinedDetailHasChildObjects"] is False
+    assert result["patchContainsCombined"] is False
+    assert result["knownContainsCombined"] is False
+
+
+# ADD 2026-08-26: Combined disposition KPI, reason labels와 same-origin endpoints를 검증한다.
+def test_combined_live_monitor_kpi_reason_and_endpoint_contract() -> None:
+    result = _run_state_contract()
+
+    assert result["combinedKpis"] == {
+        "visible": 3,
+        "pass": 1,
+        "review": 1,
+        "reject": 1,
+    }
+    valid_event = result["combinedValidEvent"]
+    assert isinstance(valid_event, dict)
+    assert valid_event["policy_name"] == "model_agreement"
+    assert valid_event["policy_version"] == "1"
+    assert result["combinedWrongEvent"] is None
+    assert result["combinedHistoryLength"] == 100
+    assert result["combinedHttpUrl"] == "ws://factory.test:8000/v1/ws/combined-inspections"
+    assert result["combinedHttpsUrl"] == "wss://factory.test/v1/ws/combined-inspections"
+    detail_url = result["combinedDetailUrl"]
+    assert isinstance(detail_url, str)
+    assert detail_url.endswith("20000000-0000-4000-8000-000000000050")
+    assert result["reasonLabels"] == [
+        "No anomaly evidence",
+        "Unknown anomaly requires review",
+        "Model disagreement requires review",
+        "Confirmed known-defect evidence",
+    ]

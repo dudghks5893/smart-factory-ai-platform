@@ -13,6 +13,7 @@ def _project_root() -> Path:
 
 # ADD 2026-08-20: Docker image가 pinned/reproducible/non-root artifact policy를 지키는지 검증한다.
 # MODIFY 2026-08-25: API browser monitor asset과 Dashboard/RAG target isolation을 검증한다.
+# MODIFY 2026-08-26: Vision runtime의 required OpenCV shared libraries를 검증한다.
 def test_dockerfile_runtime_and_context_policy() -> None:
     root = _project_root()
     dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
@@ -30,6 +31,9 @@ def test_dockerfile_runtime_and_context_policy() -> None:
     assert "FROM application AS test" in dockerfile
     assert "FROM application-base AS dashboard-runtime" in dockerfile
     assert "FROM application-base AS rag-runtime" in dockerfile
+    assert "FROM application-base AS vision-application-base" in dockerfile
+    assert "FROM vision-application-base AS application" in dockerfile
+    assert "libgl1 libglib2.0-0 libxcb1" in dockerfile
     assert "COPY apps/live_monitor ./apps/live_monitor" in dockerfile
     assert "USER app" in dockerfile
     assert '"--workers", "1"' in dockerfile

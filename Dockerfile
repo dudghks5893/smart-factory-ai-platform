@@ -45,7 +45,12 @@ WORKDIR /app
 RUN groupadd --gid 10001 app && \
     useradd --uid 10001 --gid app --create-home --shell /usr/sbin/nologin app
 
-FROM application-base AS application
+FROM application-base AS vision-application-base
+RUN apt-get update && \
+    apt-get install --yes --no-install-recommends libgl1 libglib2.0-0 libxcb1 && \
+    rm -rf /var/lib/apt/lists/*
+
+FROM vision-application-base AS application
 COPY alembic.ini ./
 COPY apps/live_monitor ./apps/live_monitor
 COPY configs ./configs

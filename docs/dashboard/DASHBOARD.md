@@ -146,26 +146,51 @@ Manual `Refresh Data` button 또는 Streamlit rerun이 refresh boundary다. Back
 ### Browser-native live view
 
 `http://127.0.0.1:8000/live/`는 production Vision API가 same-origin으로 제공하는 별도 Live Inspection
-Monitor다. 하나의 화면 안에서 PatchCore anomaly detection과 YOLO known-defect segmentation을 시각적으로
-분리해 보여 주며, 각 domain은 독립 latest-100 window, KPI, latest observation, feed, detail modal과 connection
-indicator를 가진다.
+Monitor다. 화면 상단의 Combined Manufacturing Inspection과 기존 PatchCore anomaly detection, YOLO known-defect
+segmentation을 세 observability domain으로 분리한다. 각 domain은 독립 latest-100 window, KPI, latest observation,
+feed, detail modal과 connection indicator를 가진다. Streamlit app과 manual refresh boundary는 변경하지 않는다.
 
-PatchCore는 `/v1/ws/inspections`와 `/v1/inspections`, YOLO는 `/v1/ws/known-defects`와
-`/v1/known-defects`를 사용한다. 각 channel은 WebSocket을 먼저 연결해 event를 buffer한 다음 PostgreSQL-backed
-REST history와 merge한다. Reconnect 때도 같은 순서로 누락 event를 durable history에서 복구하며 UUID dedupe를
-적용한다. 한 channel의 장애나 recovery state는 다른 section을 offline으로 만들지 않는다. WebSocket은
-best-effort notification이고 exactly-once source가 아니다.
+Combined는 `/v1/ws/combined-inspections`와 `/v1/combined-inspections`, PatchCore는 `/v1/ws/inspections`와
+`/v1/inspections`, YOLO는 `/v1/ws/known-defects`와 `/v1/known-defects`를 사용한다. 각 channel은 WebSocket을 먼저
+연결해 event를 buffer한 다음 PostgreSQL-backed REST history와 merge한다. Reconnect 때도 같은 순서로 durable
+history를 복구하고 UUID dedupe를 적용한다. 한 channel의 장애나 recovery state는 다른 두 section을 offline으로
+만들지 않는다. WebSocket은 process-local best-effort notification이고 exactly-once source가 아니다.
+
+Combined KPI의 `PASS`, `REVIEW`, `REJECT`는 DB lifetime yield가 아니라 현재 browser-visible 최대 100건의 persisted
+policy output count다. Latest/feed는 compact event summary만으로 갱신하며, detail REST는 사용자가 row를 선택할 때만
+호출한다. Detail은 shared combined UUID/image provenance, 두 child ID, PatchCore score/threshold, YOLO instances,
+persisted decision evidence와 timings를 표시한다. Browser는 별도 PatchCore/YOLO feed의 timestamp나 image SHA를
+사용해 correlation하지 않으며 policy truth table도 다시 계산하지 않는다. Backend decision과 PostgreSQL row가
+source of truth다.
+
+`model_agreement` v1은 experimental baseline이며 production calibrated 또는 factory certified policy가 아니다.
+`PASS`는 현재 policy의 `PatchCore NORMAL + YOLO 0` output이지 defect-free 보장이 아니다. `REVIEW`는 unknown anomaly
+또는 model disagreement에 대한 정상적인 operator review candidate이며 system error로 표시하지 않는다.
 
 YOLO KPI는 현재 browser-visible window의 `NO KNOWN DEFECT`, `KNOWN DEFECT`, total instance 수이며 DB lifetime
 aggregate가 아니다. Event의 compact unique class summary로 feed를 갱신하고 event마다 detail request를 만들지
 않는다. Row interaction에서만 detail REST를 호출해 image/model/dataset provenance와 ordered bbox/mask summary를
 표시한다. Diagnostic confidence는 diagnostic operating point이며 production-calibrated 기준이 아니다.
 
-두 결과에는 shared correlation ID가 없으므로 같은 image를 사용했더라도 하나의 inspection으로 묶지 않으며 최종
-manufacturing disposition을 만들지 않는다. 공통 identity와 Decision Engine은 C3 범위다. Live Monitor는
-real-time model observability에 집중하고 Streamlit의 history analysis, drift, score trend를 대체하지 않는다.
-Streamlit code와 manual refresh boundary는 그대로 유지한다. Serving contract은 `PATCHCORE_API.md`와
-`YOLO_SEGMENTATION_API.md`에서 관리한다.
+독립 PatchCore/YOLO endpoint로 생성된 결과는 계속 correlation하지 않는다. Combined domain은 오직 backend
+orchestrator가 생성한 `combined_inspection_id`와 persisted child IDs만 신뢰한다. Live Monitor는 real-time
+observability에 집중하고 Streamlit의 history analysis, drift, score trend를 대체하지 않는다. Serving contract은
+`PATCHCORE_API.md`, `YOLO_SEGMENTATION_API.md`, `COMBINED_INSPECTION_API.md`에서 관리한다.
+
+#### C3-3 actual browser verification
+
+2026-08-26 local verification은 실제 PatchCore CPU artifact, YOLO MPS artifact, PostgreSQL과 FastAPI를 사용했다.
+두 browser tab에서 세 WebSocket이 모두 `LIVE`인 상태로 MVTec `good`, `bent`, `color`, `scratch` sample을 Combined
+API에 순서대로 제출했고, page refresh 없이 두 tab 모두 동일한 latest Combined/PatchCore/YOLO row를 수신했다.
+Visible Combined window는 기존 8건에서 12건으로 증가했으며 KPI는 `PASS 3`, `REVIEW 0`, `REJECT 9`였다. 새 결과는
+good=`PASS`, bent/color/scratch=`REJECT`였고 실제 persisted reason과 child inspection ID가 detail에 표시됐다.
+
+FastAPI를 중지했을 때 두 tab의 세 channel이 각각 `RECONNECTING`으로 전환됐고, 재시작 후 PostgreSQL REST recovery와
+UUID dedupe를 거쳐 모두 `LIVE`, 12 unique Combined rows, 동일 newest-first order로 복구됐다. Production DB에
+`REVIEW` fixture를 삽입하지 않았으며 REVIEW rendering은 deterministic browser-state test로만 검증했다. In-app
+browser의 실제 1280 px viewport에서는 page와 Combined feed에 horizontal overflow가 없었다. 900/760/640 px
+breakpoint는 CSS/static contract로 검증했으며 해당 browser session에서 viewport override가 적용되지 않아 물리적
+resize smoke로 과장하지 않는다. Browser console error와 warning은 두 tab 모두 없었다.
 
 ## 10. Portfolio Demo Dashboard
 

@@ -82,6 +82,12 @@ Combined request event scheduling order is:
 All channels remain process-local best-effort notifications. Ordering describes server scheduling after one durable
 commit, not exactly-once delivery across clients or processes. PostgreSQL plus REST remains the recovery source.
 
+The browser-native Live Monitor consumes the combined summary channel independently from both child channels. It
+connects WebSocket first, buffers messages, merges PostgreSQL-backed history by combined UUID and repeats REST
+recovery after reconnect. Visible-window KPI and cards display the persisted disposition, reason code and policy
+identity; JavaScript neither recomputes the truth table nor correlates independent child feeds. Detail is fetched only
+after operator interaction. The Combined section visibly identifies v1 as experimental and not production calibrated.
+
 ## 7. Actual local verification
 
 The actual macOS/PostgreSQL smoke preserved the existing volume, backfilled four C3-1 correlations, and then created

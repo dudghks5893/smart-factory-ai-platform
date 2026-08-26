@@ -1,11 +1,18 @@
 import {
+  calculateCombinedKpis,
   calculateKpis,
   calculateKnownDefectKpis,
+  combinedInspectionDetailUrl,
+  combinedInspectionWebSocketUrl,
+  decisionReasonLabel,
   inspectionWebSocketUrl,
   knownDefectDetailUrl,
   knownDefectWebSocketUrl,
+  mergeCombinedInspections,
   mergeInspections,
   mergeKnownDefectInspections,
+  parseCombinedInspectionEvent,
+  parseCombinedInspectionHistory,
   parseInspectionEvent,
   parseInspectionHistory,
   parseKnownDefectEvent,
@@ -40,6 +47,19 @@ const elements = {
   knownDetailBody: document.querySelector("#known-detail-body"),
   knownDetailTitle: document.querySelector("#known-detail-title"),
   knownDetailClose: document.querySelector("#known-detail-close"),
+  combinedConnection: document.querySelector("#combined-connection-state"),
+  combinedLastSync: document.querySelector("#combined-last-sync"),
+  combinedVisible: document.querySelector("#combined-kpi-visible"),
+  combinedPass: document.querySelector("#combined-kpi-pass"),
+  combinedReview: document.querySelector("#combined-kpi-review"),
+  combinedReject: document.querySelector("#combined-kpi-reject"),
+  combinedLatest: document.querySelector("#combined-latest-inspection"),
+  combinedFeed: document.querySelector("#combined-inspection-feed"),
+  combinedEmpty: document.querySelector("#combined-empty-state"),
+  combinedDetail: document.querySelector("#combined-inspection-detail"),
+  combinedDetailBody: document.querySelector("#combined-detail-body"),
+  combinedDetailTitle: document.querySelector("#combined-detail-title"),
+  combinedDetailClose: document.querySelector("#combined-detail-close"),
 };
 
 let inspections = [];
@@ -59,6 +79,14 @@ let knownGeneration = 0;
 let bufferedKnownDefects = [];
 let isKnownSynchronizing = false;
 let knownSyncAbortController = null;
+let combinedInspections = [];
+let combinedSocket = null;
+let combinedReconnectTimer = null;
+let combinedReconnectAttempt = 0;
+let combinedGeneration = 0;
+let bufferedCombinedInspections = [];
+let isCombinedSynchronizing = false;
+let combinedSyncAbortController = null;
 
 function setConnectionState(value) {
   elements.connection.textContent = value;
@@ -69,6 +97,12 @@ function setConnectionState(value) {
 function setKnownConnectionState(value) {
   elements.knownConnection.textContent = value;
   elements.knownConnection.dataset.state = value.toLowerCase();
+}
+
+// ADD 2026-08-26: Manufacturing decision channel status를 child model indicators와 분리한다.
+function setCombinedConnectionState(value) {
+  elements.combinedConnection.textContent = value;
+  elements.combinedConnection.dataset.state = value.toLowerCase();
 }
 
 function formatScore(value) {
@@ -124,6 +158,16 @@ function knownDetailButton(inspectionId, label = "View instances and lineage") {
   return button;
 }
 
+// ADD 2026-08-26: Combined detail fetch를 explicit operator interaction까지 지연한다.
+function combinedDetailButton(combinedInspectionId, label = "View decision evidence") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "detail-button";
+  button.textContent = label;
+  button.addEventListener("click", () => showCombinedInspectionDetail(combinedInspectionId));
+  return button;
+}
+
 function knownDefectLabel(inspection) {
   return inspection.instance_count === 0 ? "NO KNOWN DEFECT" : "KNOWN DEFECTS";
 }
@@ -141,6 +185,118 @@ function knownClassSummary(inspection) {
 
 function formatOptionalLatency(value) {
   return value === null ? "Available in details" : `${Number(value).toFixed(3)} ms`;
+}
+
+// ADD 2026-08-26: Combined summary의 empty/history/event class evidence를 구분해 표시한다.
+function combinedClassSummary(inspection) {
+  if (inspection.known_defect_instance_count === 0) {
+    return "None observed";
+  }
+  if (inspection.known_defect_classes.length === 0) {
+    return "Available in details";
+  }
+  return inspection.known_defect_classes.join(", ");
+}
+
+// ADD 2026-08-26: Latest persisted manufacturing decision과 child evidence summary를 함께 표시한다.
+function renderCombinedLatest() {
+  elements.combinedLatest.replaceChildren();
+  const latest = combinedInspections[0];
+  if (latest === undefined) {
+    const message = document.createElement("p");
+    message.className = "muted";
+    message.textContent = "Waiting for the first persisted combined inspection.";
+    elements.combinedLatest.append(message);
+    return;
+  }
+
+  const disposition = document.createElement("span");
+  disposition.className = `result-badge decision-${latest.disposition.toLowerCase()}`;
+  disposition.textContent = latest.disposition;
+  elements.combinedLatest.append(disposition);
+  appendValue(
+    elements.combinedLatest,
+    "Reason",
+    decisionReasonLabel(latest.reason_code),
+    "decision-reason-primary",
+  );
+  appendValue(elements.combinedLatest, "PatchCore evidence", latest.patchcore_prediction);
+  appendValue(
+    elements.combinedLatest,
+    "YOLO evidence",
+    `${latest.known_defect_instance_count} instance${
+      latest.known_defect_instance_count === 1 ? "" : "s"
+    }`,
+  );
+  appendValue(elements.combinedLatest, "Known-defect classes", combinedClassSummary(latest));
+  appendValue(
+    elements.combinedLatest,
+    "Policy",
+    `${latest.policy_name} v${latest.policy_version}`,
+  );
+  appendValue(elements.combinedLatest, "Observed", formatTimestamp(latest.created_at));
+  appendValue(elements.combinedLatest, "Combined ID", latest.combined_inspection_id);
+  appendNote(
+    elements.combinedLatest,
+    "Experimental model-agreement baseline. Not production calibrated.",
+  );
+  elements.combinedLatest.append(combinedDetailButton(latest.combined_inspection_id));
+}
+
+// ADD 2026-08-26: Combined summary event/history를 newest-first clickable feed로 렌더링한다.
+function renderCombinedFeed() {
+  elements.combinedFeed.replaceChildren();
+  elements.combinedEmpty.hidden = combinedInspections.length !== 0;
+  for (const inspection of combinedInspections) {
+    const item = document.createElement("li");
+    item.className = `feed-item combined-feed-item decision-${inspection.disposition.toLowerCase()}`;
+    item.dataset.combinedInspectionId = inspection.combined_inspection_id;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "combined-feed-button";
+    button.addEventListener("click", () =>
+      showCombinedInspectionDetail(inspection.combined_inspection_id),
+    );
+
+    const summary = document.createElement("span");
+    summary.className = "feed-summary";
+    const badge = document.createElement("strong");
+    badge.className = "feed-result";
+    badge.textContent = inspection.disposition;
+    const time = document.createElement("time");
+    time.dateTime = inspection.created_at;
+    time.textContent = formatTimestamp(inspection.created_at);
+    summary.append(badge, time);
+
+    const reason = document.createElement("span");
+    reason.className = "feed-measurement";
+    reason.textContent = decisionReasonLabel(inspection.reason_code);
+
+    const evidence = document.createElement("span");
+    evidence.className = "feed-identity";
+    evidence.textContent = `PatchCore ${inspection.patchcore_prediction} · YOLO ${
+      inspection.known_defect_instance_count
+    } · ${combinedClassSummary(inspection)}`;
+
+    const shortId = document.createElement("span");
+    shortId.className = "feed-short-id";
+    shortId.textContent = `…${inspection.combined_inspection_id.slice(-8)}`;
+    button.append(summary, reason, evidence, shortId);
+    item.append(button);
+    elements.combinedFeed.append(item);
+  }
+}
+
+// ADD 2026-08-26: Combined visible window의 backend-provided disposition counts와 cards를 갱신한다.
+function renderCombinedInspections() {
+  const kpis = calculateCombinedKpis(combinedInspections);
+  elements.combinedVisible.textContent = String(kpis.visible);
+  elements.combinedPass.textContent = String(kpis.pass);
+  elements.combinedReview.textContent = String(kpis.review);
+  elements.combinedReject.textContent = String(kpis.reject);
+  renderCombinedLatest();
+  renderCombinedFeed();
 }
 
 function renderLatest() {
@@ -437,6 +593,139 @@ async function showKnownDefectDetail(inspectionId) {
   }
 }
 
+// ADD 2026-08-26: Combined detail의 decision/evidence/timing block 경계를 표시한다.
+function appendDetailHeading(container, value) {
+  const heading = document.createElement("h3");
+  heading.className = "detail-section-title";
+  heading.textContent = value;
+  container.append(heading);
+}
+
+// ADD 2026-08-26: Persisted combined detail에서 decision, child evidence, lineage와 timings를 복원한다.
+async function showCombinedInspectionDetail(combinedInspectionId) {
+  elements.combinedDetailTitle.textContent = "Combined manufacturing decision";
+  elements.combinedDetailBody.replaceChildren();
+  appendValue(elements.combinedDetailBody, "Status", "Loading…");
+  elements.combinedDetail.showModal();
+  try {
+    const response = await fetch(combinedInspectionDetailUrl(combinedInspectionId), {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      throw new Error(`Detail request failed (${response.status}).`);
+    }
+    const detail = await response.json();
+    const decision = detail.decision;
+    const patchcore = detail.patchcore;
+    const knownDefects = detail.known_defects;
+    elements.combinedDetailBody.replaceChildren();
+
+    appendDetailHeading(elements.combinedDetailBody, "Decision");
+    appendValue(
+      elements.combinedDetailBody,
+      "Disposition",
+      decision.disposition,
+      `decision-${decision.disposition.toLowerCase()}`,
+    );
+    appendValue(elements.combinedDetailBody, "Reason", decision.reason);
+    appendValue(elements.combinedDetailBody, "Reason code", decision.reason_code);
+    appendValue(
+      elements.combinedDetailBody,
+      "Policy",
+      `${decision.policy.name} v${decision.policy.version}`,
+    );
+    appendNote(
+      elements.combinedDetailBody,
+      "Experimental model-agreement baseline. Not production calibrated.",
+    );
+
+    appendDetailHeading(elements.combinedDetailBody, "Combined inspection");
+    appendValue(elements.combinedDetailBody, "Combined ID", detail.combined_inspection_id);
+    appendValue(elements.combinedDetailBody, "Created", formatTimestamp(detail.created_at));
+    appendValue(
+      elements.combinedDetailBody,
+      "Image dimensions",
+      `${detail.image.width} × ${detail.image.height}`,
+    );
+    appendValue(elements.combinedDetailBody, "Image SHA-256", detail.image.sha256);
+
+    appendDetailHeading(elements.combinedDetailBody, "PatchCore evidence");
+    appendValue(elements.combinedDetailBody, "Child inspection ID", patchcore.inspection_id);
+    appendValue(elements.combinedDetailBody, "Model", patchcore.model_name);
+    appendValue(elements.combinedDetailBody, "Category", patchcore.category);
+    appendValue(elements.combinedDetailBody, "Device", patchcore.device.toUpperCase());
+    appendValue(
+      elements.combinedDetailBody,
+      "Model output",
+      decision.evidence.patchcore.prediction,
+    );
+    appendValue(elements.combinedDetailBody, "Anomaly score", formatScore(patchcore.anomaly_score));
+    appendValue(elements.combinedDetailBody, "Threshold", formatScore(patchcore.threshold));
+    appendValue(
+      elements.combinedDetailBody,
+      "Strict comparison",
+      `${formatScore(patchcore.anomaly_score)} ${patchcore.is_anomaly ? ">" : "≤"} ${formatScore(
+        patchcore.threshold,
+      )}`,
+    );
+
+    appendDetailHeading(elements.combinedDetailBody, "YOLO evidence");
+    appendValue(elements.combinedDetailBody, "Child inspection ID", knownDefects.inspection_id);
+    appendValue(elements.combinedDetailBody, "Model", knownDefects.model.name);
+    appendValue(elements.combinedDetailBody, "Device", knownDefects.model.device.toUpperCase());
+    appendValue(
+      elements.combinedDetailBody,
+      "Diagnostic confidence",
+      Number(knownDefects.diagnostic_confidence).toFixed(2),
+    );
+    appendValue(elements.combinedDetailBody, "Instance count", String(knownDefects.instance_count));
+    appendValue(
+      elements.combinedDetailBody,
+      "Known-defect classes",
+      decision.evidence.known_defects.classes.length === 0
+        ? "None observed"
+        : decision.evidence.known_defects.classes.join(", "),
+    );
+
+    const instanceSection = document.createElement("section");
+    instanceSection.className = "instance-list combined-instance-list";
+    const instanceHeading = document.createElement("h3");
+    instanceHeading.textContent = "Persisted YOLO instances";
+    instanceSection.append(instanceHeading);
+    if (knownDefects.instances.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "muted";
+      empty.textContent = "No known-defect instance children were persisted.";
+      instanceSection.append(empty);
+    } else {
+      for (const instance of knownDefects.instances) {
+        appendKnownDefectInstance(instanceSection, instance);
+      }
+    }
+    elements.combinedDetailBody.append(instanceSection);
+
+    appendDetailHeading(elements.combinedDetailBody, "Timing observations");
+    appendValue(
+      elements.combinedDetailBody,
+      "PatchCore inference",
+      `${Number(detail.timings.patchcore_inference_ms).toFixed(3)} ms`,
+    );
+    appendValue(
+      elements.combinedDetailBody,
+      "YOLO inference",
+      `${Number(detail.timings.yolo_inference_ms).toFixed(3)} ms`,
+    );
+    appendValue(
+      elements.combinedDetailBody,
+      "Parallel orchestration",
+      `${Number(detail.timings.orchestration_ms).toFixed(3)} ms`,
+    );
+  } catch (error) {
+    elements.combinedDetailBody.replaceChildren();
+    appendValue(elements.combinedDetailBody, "Status", error.message);
+  }
+}
+
 function acceptLiveMessage(rawValue) {
   let event;
   try {
@@ -629,13 +918,116 @@ function connectKnownAndSynchronize() {
   });
 }
 
-// MODIFY 2026-08-26: Page teardown에서 독립 PatchCore/YOLO socket, timer와 sync request를 모두 정리한다.
+// ADD 2026-08-26: Combined event를 initial/reconnect sync 중 buffer하고 이후 summary window에 반영한다.
+function acceptCombinedLiveMessage(rawValue) {
+  let event;
+  try {
+    event = parseCombinedInspectionEvent(JSON.parse(rawValue));
+  } catch {
+    return;
+  }
+  if (event === null) {
+    return;
+  }
+  if (isCombinedSynchronizing) {
+    bufferedCombinedInspections.push(event);
+    return;
+  }
+  combinedInspections = mergeCombinedInspections(combinedInspections, [event]);
+  renderCombinedInspections();
+}
+
+// ADD 2026-08-26: Combined reconnect backoff와 indicator를 두 child channel에서 격리한다.
+function scheduleCombinedReconnect() {
+  if (stopped || combinedReconnectTimer !== null) {
+    return;
+  }
+  if (!navigator.onLine) {
+    setCombinedConnectionState("OFFLINE");
+    return;
+  }
+  setCombinedConnectionState("RECONNECTING");
+  const delay = reconnectDelayMs(combinedReconnectAttempt);
+  combinedReconnectAttempt += 1;
+  combinedReconnectTimer = window.setTimeout(() => {
+    combinedReconnectTimer = null;
+    connectCombinedAndSynchronize();
+  }, delay);
+}
+
+// ADD 2026-08-26: Combined WebSocket-first buffer와 durable history를 race-safe하게 병합한다.
+function connectCombinedAndSynchronize() {
+  if (stopped) {
+    return;
+  }
+  combinedGeneration += 1;
+  const activeGeneration = combinedGeneration;
+  isCombinedSynchronizing = true;
+  bufferedCombinedInspections = [];
+  combinedSyncAbortController?.abort();
+  combinedSyncAbortController = null;
+  setCombinedConnectionState(
+    combinedReconnectAttempt === 0 ? "CONNECTING" : "RECONNECTING",
+  );
+
+  const connection = new WebSocket(combinedInspectionWebSocketUrl(window.location));
+  combinedSocket = connection;
+  connection.addEventListener("message", (message) => acceptCombinedLiveMessage(message.data));
+  connection.addEventListener("open", async () => {
+    if (activeGeneration !== combinedGeneration || stopped) {
+      connection.close();
+      return;
+    }
+    combinedSyncAbortController = new AbortController();
+    try {
+      const response = await fetch("/v1/combined-inspections?limit=100&offset=0", {
+        headers: { Accept: "application/json" },
+        signal: combinedSyncAbortController.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`History request failed (${response.status}).`);
+      }
+      const history = parseCombinedInspectionHistory(await response.json());
+      if (activeGeneration !== combinedGeneration || stopped) {
+        return;
+      }
+      combinedInspections = mergeCombinedInspections(
+        history,
+        combinedInspections,
+        bufferedCombinedInspections,
+      );
+      bufferedCombinedInspections = [];
+      isCombinedSynchronizing = false;
+      combinedReconnectAttempt = 0;
+      elements.combinedLastSync.textContent = `Synced ${new Date().toLocaleTimeString()}`;
+      renderCombinedInspections();
+      setCombinedConnectionState("LIVE");
+    } catch (error) {
+      if (error.name !== "AbortError" && activeGeneration === combinedGeneration) {
+        connection.close();
+      }
+    }
+  });
+  connection.addEventListener("error", () => connection.close());
+  connection.addEventListener("close", () => {
+    if (activeGeneration !== combinedGeneration) {
+      return;
+    }
+    combinedSyncAbortController?.abort();
+    isCombinedSynchronizing = false;
+    scheduleCombinedReconnect();
+  });
+}
+
+// MODIFY 2026-08-26: Page teardown에서 세 domain의 socket, timer와 sync request를 모두 정리한다.
 function stopConnections() {
   stopped = true;
   generation += 1;
   knownGeneration += 1;
+  combinedGeneration += 1;
   syncAbortController?.abort();
   knownSyncAbortController?.abort();
+  combinedSyncAbortController?.abort();
   if (reconnectTimer !== null) {
     window.clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -644,12 +1036,18 @@ function stopConnections() {
     window.clearTimeout(knownReconnectTimer);
     knownReconnectTimer = null;
   }
+  if (combinedReconnectTimer !== null) {
+    window.clearTimeout(combinedReconnectTimer);
+    combinedReconnectTimer = null;
+  }
   socket?.close();
   knownSocket?.close();
+  combinedSocket?.close();
 }
 
 elements.detailClose.addEventListener("click", () => elements.detail.close());
 elements.knownDetailClose.addEventListener("click", () => elements.knownDetail.close());
+elements.combinedDetailClose.addEventListener("click", () => elements.combinedDetail.close());
 window.addEventListener("offline", () => {
   if (reconnectTimer !== null) {
     window.clearTimeout(reconnectTimer);
@@ -659,17 +1057,25 @@ window.addEventListener("offline", () => {
     window.clearTimeout(knownReconnectTimer);
     knownReconnectTimer = null;
   }
+  if (combinedReconnectTimer !== null) {
+    window.clearTimeout(combinedReconnectTimer);
+    combinedReconnectTimer = null;
+  }
   setConnectionState("OFFLINE");
   setKnownConnectionState("OFFLINE");
+  setCombinedConnectionState("OFFLINE");
   socket?.close();
   knownSocket?.close();
+  combinedSocket?.close();
 });
 window.addEventListener("online", () => {
   if (!stopped) {
     reconnectAttempt = 0;
     knownReconnectAttempt = 0;
+    combinedReconnectAttempt = 0;
     connectAndSynchronize();
     connectKnownAndSynchronize();
+    connectCombinedAndSynchronize();
   }
 });
 window.addEventListener("beforeunload", stopConnections);
@@ -683,6 +1089,9 @@ Object.defineProperty(window, "__liveMonitorDebug", {
       knownConnectionState: elements.knownConnection.textContent,
       knownDefectInspections: structuredClone(knownDefectInspections),
       knownReconnectAttempt,
+      combinedConnectionState: elements.combinedConnection.textContent,
+      combinedInspections: structuredClone(combinedInspections),
+      combinedReconnectAttempt,
     }),
   }),
   writable: false,
@@ -690,5 +1099,7 @@ Object.defineProperty(window, "__liveMonitorDebug", {
 
 render();
 renderKnownDefects();
+renderCombinedInspections();
+connectCombinedAndSynchronize();
 connectAndSynchronize();
 connectKnownAndSynchronize();

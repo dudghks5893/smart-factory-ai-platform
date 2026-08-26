@@ -33,6 +33,8 @@ Dependency layer는 `pyproject.toml`과 `uv.lock`을 source보다 먼저 복사�
 Dashboard target은 `uv sync --locked --only-group dashboard --no-install-project`로 Streamlit group만 설치한다.
 RAG target은 `uv sync --locked --only-group rag --no-install-project`로 FastAPI/NumPy/Pydantic/Uvicorn만 설치한다.
 Vision runtime에는 Dashboard/RAG dependency가 없고 test target에만 quality dependency와 `tests/`를 추가한다.
+Slim Linux image에서 locked `opencv-python`을 import할 수 있도록 Vision application stage에만 최소
+`libgl1`, `libglib2.0-0`, `libxcb1` shared libraries를 설치한다. Dashboard/RAG stages에는 이를 추가하지 않는다.
 
 Runtime은 UID/GID 10001의 `app` non-root user로 실행한다. Source bind mount, reload와 development secret은
 사용하지 않는다. 기본 command는 다음과 같다.

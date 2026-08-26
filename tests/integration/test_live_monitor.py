@@ -11,6 +11,7 @@ from services.api.app import create_app
 
 # ADD 2026-08-25: Browser monitor HTML/CSS/modules이 API same-origin path에서 제공되는지 검증한다.
 # MODIFY 2026-08-26: Separate YOLO DOM, routes와 WebSocket-first recovery contract를 함께 검증한다.
+# MODIFY 2026-08-26: Combined decision DOM과 독립 recovery channel contract를 추가한다.
 def test_live_monitor_assets_are_served_from_api_origin() -> None:
     client = TestClient(create_app())
 
@@ -56,10 +57,60 @@ def test_live_monitor_assets_are_served_from_api_origin() -> None:
     assert "knownDefectInspections" in application.text
     assert "showKnownDefectDetail" in application.text
     assert "POST /v1/known-defects" not in application.text
-    for prohibited in ("PASS", "REJECT", "REVIEW"):
-        assert prohibited not in page.text
-        assert prohibited not in application.text
-        assert prohibited not in state.text
+    assert 'id="combined-domain-title"' in page.text
+    assert 'id="combined-connection-state"' in page.text
+    assert 'id="combined-kpi-visible"' in page.text
+    assert 'id="combined-kpi-pass"' in page.text
+    assert 'id="combined-kpi-review"' in page.text
+    assert 'id="combined-kpi-reject"' in page.text
+    assert 'id="combined-latest-inspection"' in page.text
+    assert 'id="combined-inspection-feed"' in page.text
+    assert 'id="combined-inspection-detail"' in page.text
+    assert "Experimental model-agreement policy v1. Not production calibrated." in page.text
+    assert 'fetch("/v1/combined-inspections?limit=100&offset=0"' in application.text
+    assert "/v1/ws/combined-inspections" in state.text
+    assert "/v1/combined-inspections/" in state.text
+    assert application.text.index(
+        "new WebSocket(combinedInspectionWebSocketUrl"
+    ) < application.text.index('fetch("/v1/combined-inspections?limit=100&offset=0"')
+    assert "bufferedCombinedInspections" in application.text
+    assert "scheduleCombinedReconnect" in application.text
+    assert "combinedInspections" in application.text
+    assert "showCombinedInspectionDetail" in application.text
+    combined_message_handler = application.text.split(
+        "function acceptCombinedLiveMessage", maxsplit=1
+    )[1].split("function scheduleCombinedReconnect", maxsplit=1)[0]
+    assert "fetch(" not in combined_message_handler
+    assert "showCombinedInspectionDetail" not in combined_message_handler
+    assert "combinedSocket" in application.text
+    assert "knownSocket" in application.text
+    assert "let socket" in application.text
+    for label in ("PASS", "REVIEW", "REJECT"):
+        assert f">{label}<" in page.text
+    for reason_label in (
+        "No anomaly evidence",
+        "Unknown anomaly requires review",
+        "Model disagreement requires review",
+        "Confirmed known-defect evidence",
+    ):
+        assert reason_label in state.text
+
+    # Browser는 persisted decision을 표시할 뿐 model evidence로 disposition을 다시 계산하지 않는다.
+    for prohibited_rule in (
+        'patchcore_prediction === "ANOMALY"',
+        'patchcore_prediction === "NORMAL"',
+        "deriveDisposition",
+        "calculateDisposition",
+        "image_sha256 ===",
+        "created_at ===",
+    ):
+        assert prohibited_rule not in application.text
+        assert prohibited_rule not in state.text
+    assert "POST /v1/combined-inspections" not in application.text
+    for class_name in ("decision-pass", "decision-review", "decision-reject"):
+        assert class_name in stylesheet.text
+    for breakpoint in ("900px", "760px", "640px"):
+        assert f"@media (max-width: {breakpoint})" in stylesheet.text
     assert "localhost" not in application.text
     assert "localhost" not in state.text
 

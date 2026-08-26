@@ -135,6 +135,12 @@ After the atomic commit, `/v1/ws/inspections` receives `inspection.created`, `/v
 `known_defect.created`, and `/v1/ws/combined-inspections` receives `combined_inspection.created`, in that scheduling
 order. These remain process-local best-effort notifications; REST and PostgreSQL remain the recovery source of truth.
 
+The browser Live Monitor manages this channel independently from PatchCore and known-defect sockets. It connects the
+combined WebSocket before loading bounded history, buffers concurrent events, merges by `combined_inspection_id`, and
+uses the same REST recovery after reconnect. Summary events update latest/feed/KPI without automatic detail fetches.
+The browser renders persisted `disposition`, `reason_code` and policy identity; it does not reproduce policy rules or
+correlate independent child feeds. All KPI counts describe the current browser-visible maximum 100 rows.
+
 ## 7. Local verification boundary
 
 The required actual smoke uses the existing PostgreSQL volume, PatchCore CPU runtime and YOLO MPS runtime with MVTec
