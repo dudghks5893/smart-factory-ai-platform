@@ -117,7 +117,9 @@ See [MVTec AD Pipeline](docs/data/MVTEC_AD_PIPELINE.md),
 YOLO11n-seg의 validation error analysis에서 Small Recall `0.25`를 확인했고, `imgsz 640 -> 1024`만 바꾸는
 validation-only C4-2A experiment와 T4 resource telemetry runner를 준비했다. Actual candidate result는 아직
 `PENDING`이며 sealed test와 runtime model은 변경하지 않았다. 자세한 predeclared protocol은
-[YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md)에 있다.
+[YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md)에 있다. Kaggle preflight, train/val EDA,
+actual augmentation/640·1024 representation preview와 post-training evidence review는 reusable
+[YOLO Experiment Workbench](notebooks/vision/yolo_segmentation_experiment_workbench.ipynb)에서 수행한다.
 
 ## 5. Serving and inspection data
 

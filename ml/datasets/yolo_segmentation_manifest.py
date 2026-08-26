@@ -6,6 +6,8 @@ import csv
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from ml.datasets.segmentation_annotations import DERIVED_SPLITS
+
 
 @dataclass(frozen=True)
 class DerivedManifestRecord:
@@ -55,8 +57,17 @@ def write_derived_manifest(records: list[DerivedManifestRecord], path: Path) -> 
 
 
 # ADD 2026-08-25: Derived manifest를 exact schema와 typed boolean로 복원한다.
-def read_derived_manifest(path: Path) -> list[DerivedManifestRecord]:
+# MODIFY 2026-08-27: Workbench가 sealed split row를 object로 만들지 않도록 filter를 추가한다.
+def read_derived_manifest(
+    path: Path,
+    *,
+    allowed_splits: set[str] | None = None,
+) -> list[DerivedManifestRecord]:
     """Read the generated manifest without accepting missing or extra columns."""
+    if allowed_splits is not None and (
+        not allowed_splits or not allowed_splits.issubset(DERIVED_SPLITS)
+    ):
+        raise ValueError("Allowed derived Manifest splits are invalid.")
     records: list[DerivedManifestRecord] = []
     with path.open(encoding="utf-8", newline="") as file:
         reader = csv.DictReader(file)
@@ -70,6 +81,8 @@ def read_derived_manifest(path: Path) -> list[DerivedManifestRecord]:
                 raise ValueError("Derived manifest row contains a missing value.")
             if values["is_negative"] not in {"True", "False"}:
                 raise ValueError("Derived manifest boolean must be True or False.")
+            if allowed_splits is not None and values["derived_split"] not in allowed_splits:
+                continue
             records.append(
                 DerivedManifestRecord(
                     dataset_name=values["dataset_name"],

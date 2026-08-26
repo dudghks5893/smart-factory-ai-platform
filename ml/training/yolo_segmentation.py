@@ -173,6 +173,30 @@ class YoloSegmentationBaselineConfig:
         self.dataset_contract.validate()
 
 
+# ADD 2026-08-27: Trainer와 preview가 공유할 Ultralytics optimization/transform overrides를 만든다.
+def build_ultralytics_training_overrides(
+    config: YoloSegmentationBaselineConfig,
+) -> dict[str, Any]:
+    config.validate()
+    return {
+        "task": config.model.task,
+        "mode": "train",
+        "epochs": config.training.epochs,
+        "imgsz": config.training.imgsz,
+        "batch": config.training.batch,
+        "workers": config.training.workers,
+        "optimizer": config.training.optimizer,
+        "patience": config.training.patience,
+        "seed": config.training.seed,
+        "deterministic": config.training.deterministic,
+        "amp": config.training.amp,
+        "pretrained": config.model.pretrained,
+        "plots": True,
+        "save": True,
+        "verbose": True,
+    }
+
+
 @dataclass(frozen=True)
 class YoloArtifactMetadata:
     """Project-owned checkpoint lineage independent of Ultralytics run directories."""

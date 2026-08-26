@@ -8,13 +8,13 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import torch
-from numpy.typing import NDArray
-from PIL import Image, ImageDraw
+from PIL import Image
 
-from ml.datasets.segmentation_annotations import parse_yolo_segmentation_label, rasterize_polygons
+from ml.datasets.segmentation_annotations import rasterize_segmentation_label_instances
 from ml.datasets.yolo_segmentation_manifest import DerivedManifestRecord, read_derived_manifest
 from ml.evaluation.yolo_segmentation_error_analysis import (
     CONFIDENCE_LEVELS,
@@ -32,6 +32,10 @@ from ml.evaluation.yolo_segmentation_error_analysis import (
     mask_box,
     rank_worst_samples,
     require_validation_records,
+)
+from ml.evaluation.yolo_segmentation_visualization import (
+    render_validation_failure_galleries,
+    save_failure_card,
 )
 from ml.training.device import SUPPORTED_DEVICES
 from ml.training.yolo_segmentation import (
@@ -85,6 +89,7 @@ class ErrorAnalysisArtifacts:
 
 
 # ADD 2026-08-26: One GT polygon/component를 source-resolution mask instance로 복원한다.
+# MODIFY 2026-08-27: Shared polygon rasterization contract를 EDA/diagnostics가 함께 사용한다.
 def load_ground_truth_instances(
     record: DerivedManifestRecord,
     *,
@@ -94,33 +99,29 @@ def load_ground_truth_instances(
     if record.derived_split != "val":
         raise ValueError("Ground-truth diagnostics accept only validation records.")
     label_text = (dataset_root / record.label_path).read_text(encoding="utf-8")
-    polygons = parse_yolo_segmentation_label(label_text, valid_class_ids=valid_class_ids)
+    rasterized = rasterize_segmentation_label_instances(
+        label_text,
+        image_width=record.image_width,
+        image_height=record.image_height,
+        valid_class_ids=valid_class_ids,
+    )
     if record.is_negative:
-        if polygons or record.component_count:
+        if rasterized or record.component_count:
             raise ValueError("Validation negative must not contain GT segmentation instances.")
         return ()
-    if len(polygons) != record.component_count:
+    if len(rasterized) != record.component_count:
         raise ValueError(
             f"GT polygon/component count mismatch for validation sample: {record.sample_id}"
         )
-    instances: list[GroundTruthInstance] = []
-    for polygon in polygons:
-        mask = rasterize_polygons(
-            (polygon,),
-            image_width=record.image_width,
-            image_height=record.image_height,
+    return tuple(
+        GroundTruthInstance(
+            class_id=instance.class_id,
+            mask=instance.mask,
+            box_xyxy=mask_box(instance.mask),
+            area_ratio=instance.area_ratio,
         )
-        mask = np.asarray(mask, dtype=np.bool_)
-        mask.setflags(write=False)
-        instances.append(
-            GroundTruthInstance(
-                class_id=polygon.class_id,
-                mask=mask,
-                box_xyxy=mask_box(mask),
-                area_ratio=float(np.count_nonzero(mask) / mask.size),
-            )
-        )
-    return tuple(instances)
+        for instance in rasterized
+    )
 
 
 # ADD 2026-08-26: Runtime-neutral result를 confidence sweep용 immutable prediction으로 변환한다.
@@ -150,64 +151,6 @@ def _write_jsonl(path: Path, analyses: list[SampleAnalysis]) -> None:
 
 
 # ADD 2026-08-26: GT/prediction mask와 bbox/class evidence를 source image 위에 그린다.
-def _overlay_masks(
-    image: NDArray[np.uint8],
-    instances: tuple[GroundTruthInstance, ...] | tuple[PredictedInstance, ...],
-    *,
-    classes: dict[int, str],
-    predicted: bool,
-) -> Image.Image:
-    colors = {0: np.array([255, 91, 91]), 1: np.array([255, 190, 72]), 2: np.array([64, 196, 255])}
-    rendered = image.copy()
-    for instance in instances:
-        color = colors[instance.class_id]
-        rendered[instance.mask] = (0.45 * rendered[instance.mask] + 0.55 * color).astype(np.uint8)
-    canvas = Image.fromarray(rendered)
-    draw = ImageDraw.Draw(canvas)
-    for instance in instances:
-        draw.rectangle(instance.box_xyxy, outline=tuple(colors[instance.class_id]), width=3)
-        label = classes[instance.class_id]
-        if predicted:
-            label += f" {instance.confidence:.3f}"  # type: ignore[union-attr]
-        draw.text((instance.box_xyxy[0] + 4, instance.box_xyxy[1] + 4), label, fill="white")
-    return canvas
-
-
-# ADD 2026-08-26: Original/GT/prediction을 한 장의 bounded diagnostic image로 저장한다.
-def save_error_visualization(
-    *,
-    record: DerivedManifestRecord,
-    dataset_root: Path,
-    ground_truth: tuple[GroundTruthInstance, ...],
-    predictions: tuple[PredictedInstance, ...],
-    analysis: SampleAnalysis,
-    classes: dict[int, str],
-    output_path: Path,
-) -> None:
-    with Image.open(dataset_root / record.image_path) as source:
-        image = np.asarray(source.convert("RGB"), dtype=np.uint8)
-    original = Image.fromarray(image)
-    gt_panel = _overlay_masks(image, ground_truth, classes=classes, predicted=False)
-    prediction_panel = _overlay_masks(image, predictions, classes=classes, predicted=True)
-    header_height = 44
-    combined = Image.new(
-        "RGB", (record.image_width * 3, record.image_height + header_height), "#101821"
-    )
-    combined.paste(original, (0, header_height))
-    combined.paste(gt_panel, (record.image_width, header_height))
-    combined.paste(prediction_panel, (record.image_width * 2, header_height))
-    draw = ImageDraw.Draw(combined)
-    draw.text((8, 8), f"ORIGINAL | {record.sample_id}", fill="white")
-    draw.text((record.image_width + 8, 8), "GROUND TRUTH", fill="white")
-    draw.text(
-        (record.image_width * 2 + 8, 8),
-        f"PREDICTION | {analysis.main_error}",
-        fill="white",
-    )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    combined.save(output_path)
-
-
 # ADD 2026-08-26: Required diagnostic scenarios를 우선한 뒤 worst ranking으로 Top-N을 채운다.
 def select_visualization_samples(
     analyses: list[SampleAnalysis], *, max_count: int = MAX_VISUALIZATIONS
@@ -235,7 +178,7 @@ def select_visualization_samples(
 
 
 # ADD 2026-08-26: Artifact 검증부터 validation diagnostics 저장까지 조율한다.
-# MODIFY 2026-08-27: Experiment comparison이 고정 C4-1 size boundary를 주입하도록 확장한다.
+# MODIFY 2026-08-27: Fixed size policy와 deterministic validation gallery evidence를 확장한다.
 def analyze_yolo_segmentation_errors(
     *,
     config: YoloSegmentationBaselineConfig,
@@ -382,7 +325,7 @@ def analyze_yolo_segmentation_errors(
             / "visualizations"
             / f"{analysis.sample_id}_{analysis.main_error.lower()}.png"
         )
-        save_error_visualization(
+        save_failure_card(
             record=record,
             dataset_root=dataset_root,
             ground_truth=ground_truth_by_sample[analysis.sample_id],
@@ -392,6 +335,16 @@ def analyze_yolo_segmentation_errors(
             output_path=path,
         )
         visualization_paths.append(path)
+    render_validation_failure_galleries(
+        records_by_sample=records_by_sample,
+        dataset_root=dataset_root,
+        ground_truth_by_sample=ground_truth_by_sample,
+        predictions_by_sample=baseline_predictions,
+        analyses=analyses,
+        classes=classes,
+        output_dir=output_dir / "visualizations" / "validation_failures",
+        provenance=cast(dict[str, Any], summary["provenance"]),
+    )
     return ErrorAnalysisArtifacts(
         output_dir=output_dir,
         sample_analysis_path=sample_analysis_path,

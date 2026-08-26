@@ -13,12 +13,14 @@ from typing import Any
 import torch
 import yaml
 
+from ml.experiments.yolo_epoch_logging import EpochMetricsLogger
 from ml.training.device import SUPPORTED_DEVICES, resolve_device
 from ml.training.reproducibility import seed_training
 from ml.training.yolo_segmentation import (
     ARTIFACT_SCHEMA_VERSION,
     YoloArtifactMetadata,
     YoloSegmentationBaselineConfig,
+    build_ultralytics_training_overrides,
     load_yolo_segmentation_config,
     validate_artifact_id,
     validate_training_dataset,
@@ -83,6 +85,7 @@ def write_runtime_dataset_yaml(
 
 
 # ADD 2026-08-25: Ultralytics를 lazy import하고 best epoch/checkpoint만 project contract로 반환한다.
+# MODIFY 2026-08-27: Shared trainer overrides와 per-epoch evidence callback을 연결한다.
 def run_ultralytics_training(
     config: YoloSegmentationBaselineConfig,
     dataset_yaml: Path,
@@ -104,6 +107,10 @@ def run_ultralytics_training(
 
     model = YOLO(config.model.weights, task=config.model.task)
     best_epoch = 0
+    epoch_logger = EpochMetricsLogger(
+        output_path=runtime_root / artifact_id / "epoch_metrics.jsonl",
+        total_epochs=config.training.epochs,
+    )
 
     # Validation fitness가 갱신된 epoch를 callback에서 1-based best epoch로 기록한다.
     def record_best_epoch(trainer: Any) -> None:
@@ -112,27 +119,20 @@ def run_ultralytics_training(
             best_epoch = int(trainer.epoch) + 1
 
     model.add_callback("on_fit_epoch_end", record_best_epoch)
+    model.add_callback("on_train_epoch_start", epoch_logger.on_train_epoch_start)
+    model.add_callback("on_fit_epoch_end", epoch_logger.on_fit_epoch_end)
     training_kwargs: dict[str, Any] = {
+        **build_ultralytics_training_overrides(config),
         "data": str(dataset_yaml),
-        "epochs": config.training.epochs,
-        "imgsz": config.training.imgsz,
-        "batch": config.training.batch,
-        "workers": config.training.workers,
-        "optimizer": config.training.optimizer,
-        "patience": config.training.patience,
-        "seed": config.training.seed,
-        "deterministic": config.training.deterministic,
-        "amp": config.training.amp,
         "device": framework_device,
         "project": str(runtime_root),
         "name": artifact_id,
         "exist_ok": True,
-        "pretrained": config.model.pretrained,
-        "plots": True,
-        "save": True,
-        "verbose": True,
     }
-    model.train(**training_kwargs)
+    try:
+        model.train(**training_kwargs)
+    finally:
+        epoch_logger.close()
     trainer = getattr(model, "trainer", None)
     best_checkpoint = Path(getattr(trainer, "best", ""))
     if not best_checkpoint.is_file() or best_epoch <= 0:

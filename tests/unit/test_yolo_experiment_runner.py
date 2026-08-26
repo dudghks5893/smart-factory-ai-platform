@@ -64,6 +64,8 @@ def test_experiment_package_contract(tmp_path: Path) -> None:
         "comparison_to_baseline.json",
         "experiment_result.json",
         "environment.json",
+        "epoch_metrics.jsonl",
+        "visualization_manifest.json",
     )
     for name in evidence_names:
         (experiment_dir / name).write_text(json.dumps({"name": name}), encoding="utf-8")

@@ -168,12 +168,14 @@ C4-2A actual Kaggle result가 아직 없으므로 quality, resource, environment
 ```text
 experiment_metadata.json
 training_metrics.json
+epoch_metrics.jsonl
 validation_metrics.json
 error_analysis_summary.json
 resource_telemetry.json
 comparison_to_baseline.json
 experiment_result.json
 environment.json
+visualization_manifest.json
 package_metadata.json
 baseline_framework_validation/
 baseline_error_analysis/
@@ -214,14 +216,37 @@ wall-clock duration, completed epoch당 평균 시간, model bytes/MiB를 기록
 parameter count를 읽는다. Python, platform, torch, torchvision, CUDA runtime, Ultralytics, NVIDIA driver와
 requested/actual device도 별도 environment evidence로 저장한다.
 
-## 8. Hardware benchmark domain
+Per-epoch evidence는 pinned Ultralytics callback lifecycle에서 `epoch_metrics.jsonl`로 기록한다.
+`epoch_time_seconds`는 project callback의 `on_train_epoch_start` 진입부터 `on_fit_epoch_end` 진입까지 측정한
+**measured fit-epoch elapsed time**이다. 따라서 scheduler step, training batches, train-epoch-end 처리와 해당
+epoch에서 실행된 validation, metric 저장 및 checkpoint 저장을 포함한다. Project `on_fit_epoch_end` callback 뒤의
+memory clear와 early-stop broadcast/break는 포함하지 않는다. `cumulative_epoch_seconds`는 이 fit-epoch 측정값의
+합이며 전체 runner의 end-to-end training wall-clock과 다른 boundary다. 제공되는 train loss/validation metric/LR와
+optional CUDA reserved memory만 compact scalar로 남긴다. Historical Baseline checkpoint cumulative epoch time
+`222.485`초 역시 새 end-to-end wall-clock과 직접 비교하지 않는다.
+
+## 8. Kaggle experiment workbench
+
+Reusable notebook [YOLO Segmentation Experiment Workbench](../../notebooks/vision/yolo_segmentation_experiment_workbench.ipynb)는
+repository module을 호출하는 thin orchestration/visualization interface다. Research Mode는 임시 training override와
+별도 ignored namespace를 사용하며 official evidence가 아니다. Official Mode는 committed config의 override를
+거부하고 Manifest, Baseline SHA, Git provenance, CUDA와 `test_split_used=false`를 preflight에서 확인한다.
+
+Pre-training view는 train/validation Manifest EDA, deterministic GT gallery, pinned Ultralytics의 실제 training
+transform preview와 actual non-augmented letterbox를 사용한 640/1024 representation 비교를 제공한다. Post-training
+view는 existing telemetry/result JSON과 C4-1-compatible validation diagnostics를 읽고 training curves, resource
+summary, taxonomy별 deterministic failure gallery 및 동일 validation sample의 Baseline/Candidate 비교를 표시한다.
+Generated PNG/JSONL은 ignored output에만 저장한다. Final Test Review는 C4-3 전까지 locked이며 test row를 load하지
+않는다.
+
+## 9. Hardware benchmark domain
 
 Kaggle T4는 CUDA training duration, VRAM, utilization과 power의 experiment domain이다. 기존 local Apple
 Silicon evidence는 MPS/CPU functional runtime smoke domain이며 측정 boundary도 다르다. Future production
 NVIDIA serving latency는 다시 별도 domain이다. 이 문서는 서로 다른 run으로부터 MPS와 T4의 상대 성능을
 결론 내리지 않는다.
 
-## 9. Kaggle T4 execution
+## 10. Kaggle T4 execution
 
 Repository, derived dataset package와 immutable Baseline runtime bundle을 각각 기본 path에 복원한 뒤 다음 cell을
 그대로 실행한다. 이 command는 C2 final test evaluator를 호출하지 않는다.

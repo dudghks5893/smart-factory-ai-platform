@@ -20,6 +20,9 @@ import torchvision  # type: ignore[import-untyped]
 
 from ml.evaluation.final_benchmark import RepositoryProvenance, resolve_repository_provenance
 from ml.evaluation.yolo_segmentation import serialize_ultralytics_metrics
+from ml.evaluation.yolo_segmentation_visualization import (
+    render_baseline_candidate_comparison,
+)
 from ml.experiments.gpu_telemetry import (
     GpuTelemetrySampler,
     collect_torch_cuda_metrics,
@@ -36,6 +39,11 @@ from ml.experiments.yolo_segmentation import (
     load_yolo_experiment_config,
     recommend_experiment,
     validate_experiment_result,
+)
+from ml.experiments.yolo_workbench_visualization import (
+    render_epoch_curves,
+    render_gpu_telemetry,
+    write_visualization_manifest,
 )
 from ml.training.device import resolve_device
 from ml.training.yolo_segmentation import (
@@ -320,6 +328,8 @@ def build_experiment_package(
         "comparison_to_baseline.json",
         "experiment_result.json",
         "environment.json",
+        "epoch_metrics.jsonl",
+        "visualization_manifest.json",
     )
     files: list[tuple[Path, str]] = [
         (experiment_dir / name, f"evidence/{name}") for name in evidence_names
@@ -357,6 +367,7 @@ def _assert_baseline_immutable(
 
 
 # ADD 2026-08-27: Training telemetry와 validation-only before/after evidence lifecycle을 조율한다.
+# MODIFY 2026-08-27: Epoch log와 validation-only visual evidence를 official package에 연결한다.
 def run_yolo_segmentation_experiment(
     *,
     experiment_config: YoloExperimentConfig,
@@ -455,7 +466,14 @@ def run_yolo_segmentation_experiment(
         "nvidia_smi": sampler.summary(),
     }
     _write_json(experiment_dir / "resource_telemetry.json", resource_metrics)
+    epoch_log_source = (
+        candidate_config.output.training_runtime_root
+        / experiment_config.experiment_id
+        / "epoch_metrics.jsonl"
+    )
     if training_error is not None:
+        if epoch_log_source.is_file():
+            shutil.copy2(epoch_log_source, experiment_dir / "epoch_metrics.partial.jsonl")
         metadata_payload["status"] = "REJECTED"
         metadata_payload["decision"] = "REJECT"
         _write_json(experiment_dir / "experiment_metadata.json", metadata_payload)
@@ -485,6 +503,15 @@ def run_yolo_segmentation_experiment(
     if training_result is None:
         raise RuntimeError("Training completed without a project artifact result.")
 
+    # Completed epoch evidence를 experiment namespace에 byte-identical하게 보존한다.
+    epoch_log_source = training_result.runtime_dir / "epoch_metrics.jsonl"
+    epoch_log_path = experiment_dir / "epoch_metrics.jsonl"
+    if not epoch_log_source.is_file():
+        raise FileNotFoundError("Project-owned epoch_metrics.jsonl is missing.")
+    shutil.copy2(epoch_log_source, epoch_log_path)
+    if sha256_file(epoch_log_source) != sha256_file(epoch_log_path):
+        raise RuntimeError("Epoch metrics evidence copy changed bytes.")
+
     progress = read_training_progress(
         training_result.runtime_dir,
         configured_epochs=candidate_config.training.epochs,
@@ -505,6 +532,15 @@ def run_yolo_segmentation_experiment(
     _write_json(experiment_dir / "training_metrics.json", training_metrics)
     resource_metrics["training"] = training_metrics
     _write_json(experiment_dir / "resource_telemetry.json", resource_metrics)
+    training_visualization_dir = experiment_dir / "visualizations" / "training"
+    epoch_curve_path = render_epoch_curves(
+        epoch_log_path,
+        training_visualization_dir / "training_curves.png",
+    )
+    gpu_visualization_path = render_gpu_telemetry(
+        experiment_dir / "resource_telemetry.json",
+        training_visualization_dir / "gpu_telemetry.png",
+    )
 
     candidate_validation = validation_runner(
         candidate_config,
@@ -535,6 +571,42 @@ def run_yolo_segmentation_experiment(
     _write_json(experiment_dir / "validation_metrics.json", validation_metrics_payload)
     candidate_summary = json.loads(candidate_analysis.summary_path.read_text(encoding="utf-8"))
     _write_json(experiment_dir / "error_analysis_summary.json", candidate_summary)
+
+    # 동일 validation sample의 Baseline/Candidate evidence를 regression-first로 비교한다.
+    comparison_gallery_path = render_baseline_candidate_comparison(
+        baseline_sample_analysis_path=baseline_analysis.sample_analysis_path,
+        candidate_sample_analysis_path=candidate_analysis.sample_analysis_path,
+        baseline_cards_dir=(
+            baseline_analysis.output_dir / "visualizations" / "validation_failures" / "all_samples"
+        ),
+        candidate_cards_dir=(
+            candidate_analysis.output_dir / "visualizations" / "validation_failures" / "all_samples"
+        ),
+        output_dir=experiment_dir / "visualizations" / "baseline_vs_candidate",
+    )
+    write_visualization_manifest(
+        output_path=experiment_dir / "visualization_manifest.json",
+        experiment_id=experiment_config.experiment_id,
+        manifest_sha256=manifest_sha,
+        repository=provenance.to_json_dict(),
+        entries=[
+            {
+                "visualization_type": "training_curves",
+                "source_split": "val",
+                "generated_path": epoch_curve_path.as_posix(),
+            },
+            {
+                "visualization_type": "gpu_telemetry",
+                "source_split": "none",
+                "generated_path": gpu_visualization_path.as_posix(),
+            },
+            {
+                "visualization_type": "baseline_vs_candidate_failures",
+                "source_split": "val",
+                "generated_path": comparison_gallery_path.as_posix(),
+            },
+        ],
+    )
 
     recommendation: ExperimentRecommendation = recommend_experiment(
         quality_before=quality_before,

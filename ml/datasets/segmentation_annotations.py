@@ -50,6 +50,15 @@ class SplitAssignment:
     derived_split: str
 
 
+@dataclass(frozen=True)
+class RasterizedSegmentationInstance:
+    """One validated YOLO polygon represented as a source-resolution mask."""
+
+    class_id: int
+    mask: NDArray[np.bool_]
+    area_ratio: float
+
+
 # ADD 2026-08-25: Seed와 sample identity를 stable SHA-256 ranking으로 결합한다.
 def deterministic_rank(sample_id: str, *, seed: int, namespace: str) -> str:
     """Return a cross-process stable rank without relying on runtime hash state."""
@@ -194,6 +203,36 @@ def rasterize_polygons(
         )
         cv2.fillPoly(canvas, [pixel_points], color=1)
     return canvas.astype(np.bool_)
+
+
+# ADD 2026-08-27: YOLO label의 polygon/component를 shared source-resolution instances로 복원한다.
+def rasterize_segmentation_label_instances(
+    label_text: str,
+    *,
+    image_width: int,
+    image_height: int,
+    valid_class_ids: set[int],
+) -> tuple[RasterizedSegmentationInstance, ...]:
+    polygons = parse_yolo_segmentation_label(label_text, valid_class_ids=valid_class_ids)
+    instances: list[RasterizedSegmentationInstance] = []
+    for polygon in polygons:
+        mask = np.asarray(
+            rasterize_polygons(
+                (polygon,),
+                image_width=image_width,
+                image_height=image_height,
+            ),
+            dtype=np.bool_,
+        )
+        mask.setflags(write=False)
+        instances.append(
+            RasterizedSegmentationInstance(
+                class_id=polygon.class_id,
+                mask=mask,
+                area_ratio=float(np.count_nonzero(mask) / mask.size),
+            )
+        )
+    return tuple(instances)
 
 
 # ADD 2026-08-25: Binary mask를 lossless chain-compressed external YOLO polygon으로 변환한다.
