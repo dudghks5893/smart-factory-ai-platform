@@ -114,6 +114,11 @@ See [MVTec AD Pipeline](docs/data/MVTEC_AD_PIPELINE.md),
 [PatchCore Baseline](docs/vision/PATCHCORE_BASELINE.md), and
 [Evaluation Contract](docs/benchmarks/PATCHCORE_EVALUATION.md).
 
+YOLO11n-seg의 validation error analysis에서 Small Recall `0.25`를 확인했고, `imgsz 640 -> 1024`만 바꾸는
+validation-only C4-2A experiment와 T4 resource telemetry runner를 준비했다. Actual candidate result는 아직
+`PENDING`이며 sealed test와 runtime model은 변경하지 않았다. 자세한 predeclared protocol은
+[YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md)에 있다.
+
 ## 5. Serving and inspection data
 
 The Vision API loads validated PatchCore artifacts once during startup. An optional YOLO segmentation singleton
@@ -383,7 +388,7 @@ See [Kubernetes/GCP Foundation](docs/deployment/KUBERNETES_GCP.md).
 | Category | Documents |
 |---|---|
 | Architecture | [Overview](docs/architecture/overview.md), [Project Scope](docs/PROJECT_SCOPE.md), [ADRs](docs/adr/) |
-| Data / Vision | [MVTec Pipeline](docs/data/MVTEC_AD_PIPELINE.md), [PatchCore](docs/vision/PATCHCORE_BASELINE.md), [YOLO Segmentation](docs/vision/YOLO_SEGMENTATION_DATASET.md), [YOLO Validation Error Analysis](docs/vision/YOLO_SEGMENTATION_ERROR_ANALYSIS.md) |
+| Data / Vision | [MVTec Pipeline](docs/data/MVTEC_AD_PIPELINE.md), [PatchCore](docs/vision/PATCHCORE_BASELINE.md), [YOLO Segmentation](docs/vision/YOLO_SEGMENTATION_DATASET.md), [YOLO Validation Error Analysis](docs/vision/YOLO_SEGMENTATION_ERROR_ANALYSIS.md), [YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md) |
 | Serving / Data | [PatchCore API](docs/serving/PATCHCORE_API.md), [YOLO API](docs/serving/YOLO_SEGMENTATION_API.md), [Combined API](docs/serving/COMBINED_INSPECTION_API.md), [Decision Engine](docs/decision/DECISION_ENGINE.md), [Inspection History](docs/serving/INSPECTION_HISTORY.md) |
 | MLOps | [MLflow](docs/mlops/MLFLOW_TRACKING.md), [Artifact Policy](docs/DATA_ARTIFACT_POLICY.md) |
 | Deployment | [Docker](docs/deployment/DOCKER.md), [CI](docs/deployment/CI_CD.md), [Kubernetes/GCP](docs/deployment/KUBERNETES_GCP.md) |

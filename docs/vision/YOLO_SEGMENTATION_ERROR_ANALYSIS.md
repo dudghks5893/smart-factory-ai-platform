@@ -171,3 +171,6 @@ Visualization은 original, GT mask/bbox와 predicted mask/bbox/class/confidence�
 
 Baseline v1 artifact는 수정하지 않는다. C4-2가 학습을 수행한다면 새 artifact ID와 validation-only selection
 record를 사용하고, test split은 experiment 선택이 끝난 뒤 최종 evaluation boundary에서만 사용한다.
+첫 controlled candidate인 C4-2A의 predeclared hypothesis, fixed protocol, resource telemetry와 planned comparison은
+[YOLO Segmentation Experiment Log](YOLO_SEGMENTATION_EXPERIMENT_LOG.md)에 기록한다. Actual Kaggle result는 아직
+없으며 이 문서의 C4-1 evidence를 덮어쓰지 않는다.

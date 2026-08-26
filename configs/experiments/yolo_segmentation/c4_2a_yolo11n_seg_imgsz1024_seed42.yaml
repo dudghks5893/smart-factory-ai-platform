@@ -1,0 +1,122 @@
+experiment:
+  experiment_id: c4_2a_yolo11n_seg_imgsz1024_seed42
+  date: 2026-08-27
+  status: PLANNED
+  hypothesis: imgsz=640 may lose spatial information required for small defect components.
+  target_failure_mode: small_defect_miss
+  baseline_config: configs/model/yolo_segmentation_baseline.yaml
+
+baseline:
+  model: yolo11n-seg
+  pretrained_checkpoint: yolo11n-seg.pt
+  imgsz: 640
+  seed: 42
+  batch: 16
+  epochs: 100
+  patience: 20
+
+baseline_evidence:
+  sources:
+    checkpoint_path: artifacts/runtime/yolo_segmentation/smartfactory_yolo11n_seg_metal_nut_seed42_t4/model/model.pt
+    checkpoint_sha256: 594003121b0e071c47d68c3e53c10f438dcec18b5b56b4e5d8831d64001192bd
+    metadata_path: artifacts/runtime/yolo_segmentation/smartfactory_yolo11n_seg_metal_nut_seed42_t4/model/metadata.json
+    metadata_sha256: 9f3e3878141e831a6721c5136d67057da906485b9825262bd4e0897b2879fc6b
+    checkpoint_metric_field: train_metrics
+    checkpoint_epoch_field: train_results.epoch
+    baseline_documentation: docs/vision/YOLO_SEGMENTATION_DATASET.md
+    dependency_contract: pyproject.toml + uv.lock
+  environment:
+    gpu_model: Tesla T4
+    torch_version: 2.13.0+cu130
+    torchvision_version: 0.28.0+cu130
+    torchvision_evidence_scope: linux_x86_64_uv_lock_resolution
+    ultralytics_version: 8.4.128
+  training:
+    configured_epochs: 100
+    completed_epochs: 80
+    early_stopping: true
+    best_epoch: 60
+    checkpoint_cumulative_epoch_time_seconds: 222.485
+    exact_end_to_end_wall_clock_seconds: null
+  validation_framework:
+    split: val
+    test_split_used: false
+    metric_source: selected_best_checkpoint.train_metrics
+    box:
+      precision: 0.55955
+      recall: 0.59848
+      map50: 0.56157
+      map50_95: 0.32398
+    mask:
+      precision: 0.55955
+      recall: 0.59848
+      map50: 0.59929
+      map50_95: 0.34359
+  resource_metrics:
+    pytorch_peak_allocated_bytes: null
+    pytorch_peak_reserved_bytes: null
+    sampled_device_memory_mib: null
+    gpu_utilization_percent: null
+    gpu_power_watts: null
+  derived_test_metrics_used_for_selection: false
+
+candidate:
+  model: yolo11n-seg
+  pretrained_checkpoint: yolo11n-seg.pt
+  imgsz: 1024
+  seed: 42
+  batch: 16
+  epochs: 100
+  patience: 20
+
+controlled_change:
+  field: training.imgsz
+  before: 640
+  after: 1024
+
+validation_protocol:
+  split: val
+  test_split_used: false
+  diagnostic_confidence: 0.25
+  matching_method: class_aware_greedy_max_mask_iou
+  mask_iou_threshold: 0.5
+  small_max_area_ratio: 0.015947619047619047
+  medium_max_area_ratio: 0.02447142857142857
+
+telemetry:
+  sample_interval_seconds: 5.0
+  nvidia_smi_timeout_seconds: 2.0
+
+output:
+  experiment_root: outputs/experiments/yolo_segmentation
+  artifact_root: artifacts/models/yolo_segmentation/experiments
+  training_runtime_root: outputs/training/yolo_segmentation/experiments
+  package_root: outputs/packages
+
+evaluation_priorities:
+  primary:
+    - validation_mask_map50_95
+    - diagnostic_instance_recall
+  failure_focused:
+    - small_defect_recall
+    - multi_component_recall
+  guardrail:
+    - good_negative_fp_image_rate
+  secondary:
+    - precision
+    - f1
+    - per_class_recall
+    - unmatched_prediction_behavior
+    - wrong_class_behavior
+    - localization_behavior
+  resource_tradeoff:
+    - peak_vram
+    - training_duration
+    - artifact_size
+
+decision_policy:
+  require_mask_map50_95_non_regression: true
+  require_instance_recall_non_regression: true
+  require_small_recall_improvement: true
+  require_multi_component_recall_non_regression: true
+  allow_good_negative_fp_rate_increase: false

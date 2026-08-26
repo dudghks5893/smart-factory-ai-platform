@@ -22,6 +22,7 @@ from ml.evaluation.yolo_segmentation_error_analysis import (
     GroundTruthInstance,
     PredictedInstance,
     SampleAnalysis,
+    SizeBucketPolicy,
     aggregate_analysis,
     analyze_sample,
     build_confidence_sweep,
@@ -234,6 +235,7 @@ def select_visualization_samples(
 
 
 # ADD 2026-08-26: Artifact 검증부터 validation diagnostics 저장까지 조율한다.
+# MODIFY 2026-08-27: Experiment comparison이 고정 C4-1 size boundary를 주입하도록 확장한다.
 def analyze_yolo_segmentation_errors(
     *,
     config: YoloSegmentationBaselineConfig,
@@ -241,6 +243,7 @@ def analyze_yolo_segmentation_errors(
     artifact_dir: Path,
     output_dir: Path,
     requested_device: str,
+    size_policy_override: SizeBucketPolicy | None = None,
     runtime_loader: RuntimeLoader = load_yolo_segmentation_runtime,
     created_at: str | None = None,
 ) -> ErrorAnalysisArtifacts:
@@ -294,7 +297,7 @@ def analyze_yolo_segmentation_errors(
             runtime.predict(image_rgb, diagnostic_confidence=CONFIDENCE_LEVELS[0])
         )
 
-    size_policy = derive_size_bucket_policy(all_ground_truth)
+    size_policy = size_policy_override or derive_size_bucket_policy(all_ground_truth)
     baseline_predictions = filter_predictions(predictions_by_sample, BASELINE_CONFIDENCE)
     analyses = [
         analyze_sample(
