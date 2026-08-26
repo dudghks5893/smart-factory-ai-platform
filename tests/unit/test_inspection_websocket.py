@@ -10,15 +10,19 @@ from uuid import UUID
 from fastapi import WebSocket
 
 from services.api.schemas import (
+    CombinedInspectionCreatedEvent,
+    CombinedInspectionCreatedPayload,
     InspectionCreatedEvent,
     InspectionCreatedPayload,
     KnownDefectCreatedEvent,
     KnownDefectCreatedPayload,
 )
 from services.api.websockets import (
+    CombinedInspectionEventBroadcaster,
     InspectionEventBroadcaster,
     KnownDefectEventBroadcaster,
 )
+from services.decision.models import Disposition, ModelPrediction, ReasonCode
 
 
 class _FakeWebSocket:
@@ -176,3 +180,46 @@ def test_known_defect_created_event_uses_separate_compact_channel() -> None:
     assert "image" not in inspection
     assert "instances" not in inspection
     assert "mask" not in inspection
+
+
+# ADD 2026-08-26: Combined decision event가 dedicated channel에서 compact schema를 유지한다.
+def test_combined_decision_event_uses_separate_compact_channel() -> None:
+    broadcaster = CombinedInspectionEventBroadcaster()
+    connection = _FakeWebSocket()
+    event = CombinedInspectionCreatedEvent(
+        inspection=CombinedInspectionCreatedPayload(
+            combined_inspection_id=UUID(int=3),
+            created_at=datetime(2026, 8, 26, tzinfo=UTC),
+            patchcore_prediction=ModelPrediction.ANOMALY,
+            known_defect_instance_count=3,
+            known_defect_classes=["bent", "scratch"],
+            disposition=Disposition.REJECT,
+            reason_code=ReasonCode.CONFIRMED_KNOWN_DEFECT,
+            policy_name="model_agreement",
+            policy_version="1",
+        )
+    )
+
+    async def scenario() -> None:
+        await broadcaster.connect(cast(WebSocket, connection))
+        await broadcaster.broadcast(event)
+        await broadcaster.close_all()
+
+    asyncio.run(scenario())
+    payload = cast(dict[str, object], connection.sent[0])
+    assert payload["type"] == "combined_inspection.created"
+    inspection = cast(dict[str, object], payload["inspection"])
+    assert set(inspection) == {
+        "combined_inspection_id",
+        "created_at",
+        "patchcore_prediction",
+        "known_defect_instance_count",
+        "known_defect_classes",
+        "disposition",
+        "reason_code",
+        "policy_name",
+        "policy_version",
+    }
+    assert "image" not in inspection
+    assert "instances" not in inspection
+    assert "provenance" not in inspection

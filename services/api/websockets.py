@@ -9,7 +9,11 @@ import math
 from fastapi import WebSocket
 from pydantic import BaseModel
 
-from services.api.schemas import InspectionCreatedEvent, KnownDefectCreatedEvent
+from services.api.schemas import (
+    CombinedInspectionCreatedEvent,
+    InspectionCreatedEvent,
+    KnownDefectCreatedEvent,
+)
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_SEND_TIMEOUT_SECONDS = 1.0
@@ -108,3 +112,7 @@ class InspectionEventBroadcaster(EventBroadcaster[InspectionCreatedEvent]):
 
 class KnownDefectEventBroadcaster(EventBroadcaster[KnownDefectCreatedEvent]):
     """Independent channel for committed known_defect.created notifications."""
+
+
+class CombinedInspectionEventBroadcaster(EventBroadcaster[CombinedInspectionCreatedEvent]):
+    """Manufacturing-level channel for committed combined decisions."""

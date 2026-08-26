@@ -12,7 +12,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from services.decision.models import DecisionResult, Disposition, ReasonCode
 from services.persistence.database import PersistenceError
+from services.persistence.decisions import (
+    InspectionDecision,
+    add_inspection_decision,
+    decision_from_record,
+)
 from services.persistence.inspections import (
     Inspection,
     InspectionCreate,
@@ -30,6 +36,7 @@ from services.persistence.known_defects import (
 )
 from services.persistence.models import (
     CombinedInspectionRecord,
+    InspectionDecisionRecord,
     InspectionRecord,
     KnownDefectInspectionRecord,
     KnownDefectInstanceRecord,
@@ -51,6 +58,7 @@ class CombinedInspectionCreate:
     orchestration_ms: float
     patchcore: InspectionCreate
     known_defect: KnownDefectCreate
+    decision: DecisionResult
 
     # ADD 2026-08-26: Shared-image identity와 timing 및 child invariant를 함께 검증한다.
     def validate(self) -> None:
@@ -78,6 +86,27 @@ class CombinedInspectionCreate:
             self.image_height,
         ):
             raise ValueError("Known-defect child dimensions must match the combined image.")
+        self.decision.evidence.validate()
+        if self.decision.evidence.patchcore.is_anomaly is not self.patchcore.is_anomaly:
+            raise ValueError("Decision PatchCore prediction must match its durable child.")
+        if not math.isclose(
+            self.decision.evidence.patchcore.score,
+            self.patchcore.anomaly_score,
+            rel_tol=0.0,
+            abs_tol=0.0,
+        ) or not math.isclose(
+            self.decision.evidence.patchcore.threshold,
+            self.patchcore.threshold,
+            rel_tol=0.0,
+            abs_tol=0.0,
+        ):
+            raise ValueError("Decision PatchCore score evidence must match its durable child.")
+        child_classes = tuple(instance.class_name for instance in self.known_defect.instances)
+        if (
+            self.decision.evidence.known_defects.instance_count != len(self.known_defect.instances)
+            or self.decision.evidence.known_defects.instance_classes != child_classes
+        ):
+            raise ValueError("Decision known-defect evidence must match its durable children.")
 
 
 @dataclass(frozen=True)
@@ -95,6 +124,31 @@ class CombinedInspection:
     orchestration_ms: float
     patchcore: Inspection
     known_defect: KnownDefectInspectionDetail
+    decision: InspectionDecision
+
+
+@dataclass(frozen=True)
+class CombinedInspectionSummary:
+    """Child-free decision summary for bounded newest-first recovery."""
+
+    id: UUID
+    created_at: datetime
+    patchcore_is_anomaly: bool
+    known_defect_instance_count: int
+    disposition: Disposition
+    reason_code: ReasonCode
+    policy_name: str
+    policy_version: str
+
+
+@dataclass(frozen=True)
+class CombinedInspectionPage:
+    """Offset page that uses limit+1 instead of an aggregate count query."""
+
+    items: tuple[CombinedInspectionSummary, ...]
+    limit: int
+    offset: int
+    has_more: bool
 
 
 class CombinedInspectionRepository(Protocol):
@@ -105,6 +159,8 @@ class CombinedInspectionRepository(Protocol):
     def create(self, values: CombinedInspectionCreate) -> CombinedInspection: ...
 
     def get(self, combined_inspection_id: UUID) -> CombinedInspection | None: ...
+
+    def list(self, *, limit: int, offset: int) -> CombinedInspectionPage: ...
 
 
 class SqlAlchemyCombinedInspectionRepository:
@@ -119,12 +175,14 @@ class SqlAlchemyCombinedInspectionRepository:
         with self._session_factory() as session:
             try:
                 session.execute(select(CombinedInspectionRecord.id).limit(1))
+                session.execute(select(InspectionDecisionRecord.id).limit(1))
             except SQLAlchemyError as exc:
                 raise PersistenceError(
                     "Combined inspection schema readiness check failed."
                 ) from exc
 
     # ADD 2026-08-26: 두 child aggregate와 correlation을 하나의 transaction으로 commit한다.
+    # MODIFY 2026-08-26: Policy decision을 같은 transaction의 required final row로 추가한다.
     def create(self, values: CombinedInspectionCreate) -> CombinedInspection:
         values.validate()
         with self._session_factory() as session:
@@ -145,7 +203,12 @@ class SqlAlchemyCombinedInspectionRepository:
                 )
                 session.add(record)
                 session.flush()
-                combined = _to_combined(record, patchcore, known_defect)
+                decision = add_inspection_decision(
+                    session,
+                    combined_inspection_id=record.id,
+                    decision=values.decision,
+                )
+                combined = _to_combined(record, patchcore, known_defect, decision)
                 session.commit()
             except SQLAlchemyError as exc:
                 session.rollback()
@@ -165,6 +228,13 @@ class SqlAlchemyCombinedInspectionRepository:
                 )
                 if patchcore_record is None or known_record is None:
                     raise PersistenceError("Combined inspection references missing child rows.")
+                decision_record = session.scalar(
+                    select(InspectionDecisionRecord).where(
+                        InspectionDecisionRecord.combined_inspection_id == combined_inspection_id
+                    )
+                )
+                if decision_record is None:
+                    raise PersistenceError("Combined inspection is missing its decision row.")
                 children = tuple(
                     session.scalars(
                         select(KnownDefectInstanceRecord)
@@ -182,9 +252,37 @@ class SqlAlchemyCombinedInspectionRepository:
                         inspection=_to_known_inspection(known_record),
                         instances=tuple(_to_instance(child) for child in children),
                     ),
+                    decision_from_record(decision_record),
                 )
             except SQLAlchemyError as exc:
                 raise PersistenceError("Combined inspection lookup failed.") from exc
+
+    # ADD 2026-08-26: Decision snapshot join으로 child-free newest-first history를 반환한다.
+    def list(self, *, limit: int, offset: int) -> CombinedInspectionPage:
+        statement = (
+            select(CombinedInspectionRecord, InspectionDecisionRecord)
+            .join(
+                InspectionDecisionRecord,
+                InspectionDecisionRecord.combined_inspection_id == CombinedInspectionRecord.id,
+            )
+            .order_by(
+                CombinedInspectionRecord.created_at.desc(),
+                CombinedInspectionRecord.id.desc(),
+            )
+            .offset(offset)
+            .limit(limit + 1)
+        )
+        with self._session_factory() as session:
+            try:
+                records = tuple(session.execute(statement).all())
+            except SQLAlchemyError as exc:
+                raise PersistenceError("Combined inspection history lookup failed.") from exc
+        return CombinedInspectionPage(
+            items=tuple(_to_summary(combined, decision) for combined, decision in records[:limit]),
+            limit=limit,
+            offset=offset,
+            has_more=len(records) > limit,
+        )
 
 
 # ADD 2026-08-26: ORM correlation을 timezone-aware durable aggregate로 변환한다.
@@ -192,6 +290,7 @@ def _to_combined(
     record: CombinedInspectionRecord,
     patchcore: Inspection,
     known_defect: KnownDefectInspectionDetail,
+    decision: InspectionDecision,
 ) -> CombinedInspection:
     created_at = record.created_at
     if created_at.tzinfo is None:
@@ -210,4 +309,27 @@ def _to_combined(
         orchestration_ms=record.orchestration_ms,
         patchcore=patchcore,
         known_defect=known_defect,
+        decision=decision,
+    )
+
+
+# ADD 2026-08-26: Correlation과 decision snapshot을 child-free history domain으로 변환한다.
+def _to_summary(
+    combined: CombinedInspectionRecord,
+    decision: InspectionDecisionRecord,
+) -> CombinedInspectionSummary:
+    created_at = combined.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    else:
+        created_at = created_at.astimezone(UTC)
+    return CombinedInspectionSummary(
+        id=combined.id,
+        created_at=created_at,
+        patchcore_is_anomaly=decision.patchcore_is_anomaly,
+        known_defect_instance_count=decision.known_defect_instance_count,
+        disposition=Disposition(decision.disposition),
+        reason_code=ReasonCode(decision.reason_code),
+        policy_name=decision.policy_name,
+        policy_version=decision.policy_version,
     )

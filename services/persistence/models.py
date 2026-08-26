@@ -248,3 +248,52 @@ class CombinedInspectionRecord(Base):
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     patchcore_inference_ms: Mapped[float] = mapped_column(Float, nullable=False)
     orchestration_ms: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class InspectionDecisionRecord(Base):
+    """Versioned manufacturing disposition linked one-to-one to a combined inspection."""
+
+    __tablename__ = "inspection_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "disposition IN ('PASS', 'REJECT', 'REVIEW')",
+            name="ck_inspection_decisions_disposition",
+        ),
+        CheckConstraint(
+            "reason_code IN ('NO_ANOMALY_EVIDENCE', 'UNKNOWN_ANOMALY', "
+            "'MODEL_DISAGREEMENT', 'CONFIRMED_KNOWN_DEFECT')",
+            name="ck_inspection_decisions_reason_code",
+        ),
+        CheckConstraint(
+            "known_defect_instance_count >= 0",
+            name="ck_inspection_decisions_instance_count_nonnegative",
+        ),
+        CheckConstraint(
+            "length(policy_name) > 0 AND length(policy_version) > 0",
+            name="ck_inspection_decisions_policy_identity_nonempty",
+        ),
+        UniqueConstraint(
+            "combined_inspection_id",
+            name="uq_inspection_decisions_combined_id",
+        ),
+        Index("ix_inspection_decisions_created_at", "created_at"),
+        Index("ix_inspection_decisions_disposition_created_at", "disposition", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    combined_inspection_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("combined_inspections.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    disposition: Mapped[str] = mapped_column(String(20), nullable=False)
+    policy_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    patchcore_is_anomaly: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    patchcore_score: Mapped[float] = mapped_column(Float, nullable=False)
+    patchcore_threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    known_defect_instance_count: Mapped[int] = mapped_column(nullable=False)

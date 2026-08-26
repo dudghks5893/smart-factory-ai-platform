@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from services.decision.models import Disposition, ModelPrediction, ReasonCode
+
 
 class HealthResponse(BaseModel):
     """Liveness response independent of model readiness."""
@@ -126,6 +128,47 @@ class CombinedInspectionTimings(BaseModel):
     orchestration_ms: float = Field(ge=0.0)
 
 
+class DecisionPolicyResponse(BaseModel):
+    """Stable policy identity attached to a durable decision."""
+
+    name: str
+    version: str
+
+
+class DecisionPatchCoreEvidenceResponse(BaseModel):
+    """PatchCore state snapshot used by the decision policy."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    prediction: ModelPrediction
+    score: float
+    threshold: float
+
+
+class DecisionKnownDefectEvidenceResponse(BaseModel):
+    """Known-defect count and deterministic unique class summary."""
+
+    instance_count: int = Field(ge=0)
+    classes: list[str]
+
+
+class DecisionEvidenceResponse(BaseModel):
+    """Minimal explainability evidence without raw model payloads."""
+
+    patchcore: DecisionPatchCoreEvidenceResponse
+    known_defects: DecisionKnownDefectEvidenceResponse
+
+
+class InspectionDecisionResponse(BaseModel):
+    """Versioned experimental manufacturing disposition."""
+
+    disposition: Disposition
+    policy: DecisionPolicyResponse
+    reason_code: ReasonCode
+    reason: str
+    evidence: DecisionEvidenceResponse
+
+
 class KnownDefectHistoryItemResponse(BaseModel):
     """Compact persisted parent summary without child hydration or raw payloads."""
 
@@ -178,14 +221,59 @@ class KnownDefectDetailResponse(BaseModel):
 
 
 class CombinedInspectionResponse(BaseModel):
-    """Recoverable dual-model observation without a manufacturing disposition."""
+    """Recoverable dual-model observation and its durable v1 disposition."""
 
     combined_inspection_id: UUID
     created_at: datetime
     image: CombinedInspectionImageResponse
     patchcore: CombinedPatchCoreResponse
     known_defects: KnownDefectDetailResponse
+    decision: InspectionDecisionResponse
     timings: CombinedInspectionTimings
+
+
+class CombinedInspectionHistoryItemResponse(BaseModel):
+    """Child-free combined decision summary for REST recovery."""
+
+    combined_inspection_id: UUID
+    created_at: datetime
+    patchcore_prediction: ModelPrediction
+    known_defect_instance_count: int = Field(ge=0)
+    disposition: Disposition
+    reason_code: ReasonCode
+    policy: DecisionPolicyResponse
+
+
+class CombinedInspectionHistoryResponse(BaseModel):
+    """Newest-first bounded combined decision page."""
+
+    items: list[CombinedInspectionHistoryItemResponse]
+    limit: int
+    offset: int
+    returned_count: int
+    has_more: bool
+
+
+class CombinedInspectionCreatedPayload(BaseModel):
+    """Compact manufacturing-level summary emitted after durable commit."""
+
+    combined_inspection_id: UUID
+    created_at: datetime
+    patchcore_prediction: ModelPrediction
+    known_defect_instance_count: int = Field(ge=0)
+    known_defect_classes: list[str]
+    disposition: Disposition
+    reason_code: ReasonCode
+    policy_name: str
+    policy_version: str
+
+
+class CombinedInspectionCreatedEvent(BaseModel):
+    """Versioned best-effort decision notification for combined inspections."""
+
+    schema_version: Literal["1"] = "1"
+    type: Literal["combined_inspection.created"] = "combined_inspection.created"
+    inspection: CombinedInspectionCreatedPayload
 
 
 class KnownDefectCreatedPayload(BaseModel):

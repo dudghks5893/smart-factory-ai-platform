@@ -13,6 +13,7 @@ from services.api.config import ServingSettings
 from services.api.errors import install_exception_handlers
 from services.api.routes import router
 from services.api.websockets import (
+    CombinedInspectionEventBroadcaster,
     InspectionEventBroadcaster,
     KnownDefectEventBroadcaster,
 )
@@ -73,6 +74,7 @@ def load_combined_inspection_repository(
 # MODIFY 2026-08-26: Optional enabled YOLO singleton을 startup/readiness lifecycle에 추가한다.
 # MODIFY 2026-08-26: Known-defect repository와 별도 event channel을 lifecycle에 추가한다.
 # MODIFY 2026-08-26: Combined correlation repository를 required persistence lifecycle에 추가한다.
+# MODIFY 2026-08-26: Combined decision WebSocket channel을 process lifecycle에 추가한다.
 def create_app(
     *,
     settings: ServingSettings | None = None,
@@ -86,6 +88,7 @@ def create_app(
     ),
     inspection_event_broadcaster: InspectionEventBroadcaster | None = None,
     known_defect_event_broadcaster: KnownDefectEventBroadcaster | None = None,
+    combined_inspection_event_broadcaster: CombinedInspectionEventBroadcaster | None = None,
     live_monitor_dir: Path = DEFAULT_LIVE_MONITOR_DIR,
 ) -> FastAPI:
     """Create an app that requires database and model readiness during startup."""
@@ -93,12 +96,16 @@ def create_app(
     monitoring_metrics = MonitoringMetrics()
     event_broadcaster = inspection_event_broadcaster or InspectionEventBroadcaster()
     known_defect_broadcaster = known_defect_event_broadcaster or KnownDefectEventBroadcaster()
+    combined_broadcaster = (
+        combined_inspection_event_broadcaster or CombinedInspectionEventBroadcaster()
+    )
 
     # ADD 2026-08-19: Startup load가 완료된 뒤에만 ready 상태로 전환한다.
     # MODIFY 2026-08-21: Loaded model identity를 app-local Info metric에 한 번 게시한다.
     # MODIFY 2026-08-26: Enabled YOLO load 성공도 ready 전환의 필수 조건으로 포함한다.
     # MODIFY 2026-08-26: Known-defect schema와 WebSocket channel을 required lifecycle에 포함한다.
     # MODIFY 2026-08-26: Combined correlation schema readiness와 state cleanup을 포함한다.
+    # MODIFY 2026-08-26: Combined decision event connection cleanup을 포함한다.
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         active_settings = settings or ServingSettings.from_environment()
@@ -134,6 +141,7 @@ def create_app(
         finally:
             await event_broadcaster.close_all()
             await known_defect_broadcaster.close_all()
+            await combined_broadcaster.close_all()
             application.state.yolo_segmentation_runtime = None
             application.state.serving_runtime = None
             application.state.inspection_repository = None
@@ -156,6 +164,7 @@ def create_app(
     app.state.combined_inspection_repository = None
     app.state.inspection_event_broadcaster = event_broadcaster
     app.state.known_defect_event_broadcaster = known_defect_broadcaster
+    app.state.combined_inspection_event_broadcaster = combined_broadcaster
     app.state.monitoring_metrics = monitoring_metrics
     app.add_middleware(HttpMetricsMiddleware, metrics=monitoring_metrics)
     install_exception_handlers(app)

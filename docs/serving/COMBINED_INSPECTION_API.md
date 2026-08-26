@@ -6,9 +6,10 @@
 known-defect segmentation observations under one `combined_inspection_id`. Existing `POST /v1/predictions` and
 `POST /v1/known-defects` contracts remain unchanged.
 
-This endpoint is an orchestration boundary, not a manufacturing Decision Engine. PatchCore `is_anomaly` remains a
-model output. The combined response does not contain `PASS`, `REJECT`, `REVIEW`, `decision` or `disposition`.
-C3-2 owns any future decision policy and final-decision persistence.
+After both model results succeed, the pure Manufacturing Decision Engine applies Decision Policy v1 and returns a
+durable `PASS`, `REJECT` or `REVIEW` disposition. PatchCore `is_anomaly` remains a model output, while `decision` is
+the versioned experimental model-agreement baseline described in `docs/decision/DECISION_ENGINE.md`. It is not a
+production-calibrated or factory-certified policy.
 
 ## 2. Execution flow
 
@@ -24,9 +25,11 @@ Tensor input + uint8 RGB array + one image SHA-256
 │ existing runtime lock   │ existing runtime lock    │
 └─────────────────────────┴──────────────────────────┘
         ↓ both successful
-One SQLAlchemy transaction: PatchCore row + YOLO parent/children + correlation row
+Decision Policy v1 (pure normalized-evidence evaluation)
+        ↓
+One SQLAlchemy transaction: PatchCore + YOLO + correlation + decision
         ↓ commit successful
-Existing inspection.created and known_defect.created broadcasts
+Child events, then combined_inspection.created
 ```
 
 Blocking runtime calls execute in separate threadpool workers and are awaited together. The orchestrator has no
@@ -40,17 +43,18 @@ persistence values.
 ## 3. Availability and errors
 
 Combined serving requires PatchCore runtime readiness, enabled and ready YOLO runtime, database connectivity, all
-three migrated persistence schemas, and valid model provenance. If YOLO is disabled, the combined endpoint returns
+required migrated persistence schemas, and valid model provenance. If YOLO is disabled, the combined endpoint returns
 `503 known_defect_model_disabled`; the PatchCore-only endpoint remains usable. An enabled but missing YOLO runtime
 returns `503 known_defect_model_not_ready`.
 
 Malformed/unsupported/oversized image errors reuse the existing image contract. Either inference failure returns the
-safe `500 inference_failed` envelope. Persistence failure returns `503 persistence_unavailable`. Internal exception,
+safe `500 inference_failed` envelope. Invalid normalized decision evidence returns safe `500 decision_failed`.
+Persistence failure returns `503 persistence_unavailable`. Internal exception,
 artifact path, database credential and accelerator detail are not returned.
 
 Combined HTTP success requires both inference branches and the persistence transaction to succeed. A model failure
-occurs before persistence. A SQL failure rolls back both child aggregates and the correlation, so no partial durable
-combined result or post-commit event is produced.
+occurs before persistence. A SQL failure rolls back both child aggregates, correlation and decision, so no partial
+durable result or post-commit event is produced.
 
 ## 4. Persistence and recovery
 
@@ -61,13 +65,14 @@ Migration `20260826_02` adds `combined_inspections` without changing the existin
 - shared image SHA-256, dimensions, byte size and media type;
 - PatchCore branch wall time and combined orchestration wall time.
 
-YOLO instances remain normalized children of `known_defect_inspections`. Raw upload bytes, raw masks and a final
-manufacturing decision are not stored. Restrictive child foreign keys prevent a correlation from silently becoming
-incomplete. Existing independently-created PatchCore and YOLO rows need no nullable correlation field.
+Migration `20260826_03` adds the one-to-one `inspection_decisions` table and backfills existing C3-1 correlations from
+their immutable child evidence. YOLO instances remain normalized children of `known_defect_inspections`. Raw upload
+bytes and raw masks are not stored. Restrictive foreign keys prevent an aggregate from silently becoming incomplete.
+Existing independently-created PatchCore and YOLO rows need no nullable correlation field or decision.
 
 `GET /v1/combined-inspections/{combined_inspection_id}` reconstructs the correlation, PatchCore row, YOLO parent and
-ordered YOLO instances. Unknown IDs return `404 combined_inspection_not_found`. A combined history endpoint is not
-added in C3-1.
+ordered YOLO instances and its persisted decision. Unknown IDs return `404 combined_inspection_not_found`.
+`GET /v1/combined-inspections` provides bounded newest-first decision summaries without hydrating children.
 
 ## 5. Response contract
 
@@ -101,6 +106,16 @@ added in C3-1.
     "instance_count": 0,
     "instances": []
   },
+  "decision": {
+    "disposition": "REVIEW",
+    "policy": {"name": "model_agreement", "version": "1"},
+    "reason_code": "UNKNOWN_ANOMALY",
+    "reason": "PatchCore detected an anomaly without a matching known-defect instance.",
+    "evidence": {
+      "patchcore": {"prediction": "ANOMALY", "score": 54.0, "threshold": 41.19657897949219},
+      "known_defects": {"instance_count": 0, "classes": []}
+    }
+  },
   "timings": {
     "patchcore_inference_ms": 80.0,
     "yolo_inference_ms": 65.0,
@@ -116,10 +131,9 @@ excluded. Their sum is therefore not HTTP latency or a guaranteed serial estimat
 
 ## 6. WebSocket compatibility
 
-C3-1 adds no combined WebSocket. After the atomic commit, each child is published through its existing independent
-channel: `/v1/ws/inspections` receives `inspection.created`, and `/v1/ws/known-defects` receives
-`known_defect.created`. These remain process-local best-effort notifications; REST and PostgreSQL remain the recovery
-source of truth.
+After the atomic commit, `/v1/ws/inspections` receives `inspection.created`, `/v1/ws/known-defects` receives
+`known_defect.created`, and `/v1/ws/combined-inspections` receives `combined_inspection.created`, in that scheduling
+order. These remain process-local best-effort notifications; REST and PostgreSQL remain the recovery source of truth.
 
 ## 7. Local verification boundary
 
@@ -173,3 +187,30 @@ The same loaded runtimes were also called sequentially and through the parallel 
 This four-sample, sequential-then-parallel observation demonstrates actual overlapping execution, not a controlled
 benchmark. It is order-sensitive, has no repeated trials or distribution statistics, and the first row contains cold
 MPS initialization. No production performance claim is made.
+
+### C3-2 actual Decision Policy v1 smoke
+
+The same PostgreSQL volume was preserved for C3-2. Before migration, its revision was `20260826_02` with PatchCore
+`341`, known-defect parent `12`, known-defect instance `15` and combined correlation `4` rows. Additive upgrade to
+`20260826_03` preserved every row and backfilled exactly four decisions: one `PASS / NO_ANOMALY_EVIDENCE` and three
+`REJECT / CONFIRMED_KNOWN_DEFECT` results.
+
+Fresh actual PatchCore CPU, YOLO MPS, PostgreSQL and FastAPI TestClient requests then applied the pre-defined v1 truth
+table to the same four sample categories:
+
+| Sample | Combined ID | PatchCore score / output | YOLO instances / classes | Decision |
+| --- | --- | --- | --- | --- |
+| `good/000.png` | `2bc5b67b-6545-4573-8c1e-6c941fc9b49f` | `34.763465881347656` / normal | `0` / none | `PASS / NO_ANOMALY_EVIDENCE` |
+| `bent/000.png` | `12b5cdb5-c8e6-439e-b2ea-871192c62b6b` | `54.36902618408203` / anomaly | `3` / bent, bent, scratch | `REJECT / CONFIRMED_KNOWN_DEFECT` |
+| `color/000.png` | `424d7418-b42e-48ed-b0de-feda74f1f3bd` | `49.58808898925781` / anomaly | `1` / color | `REJECT / CONFIRMED_KNOWN_DEFECT` |
+| `scratch/000.png` | `3f699030-78a0-43a0-b371-2afdd9c268a1` | `41.75379180908203` / anomaly | `1` / scratch | `REJECT / CONFIRMED_KNOWN_DEFECT` |
+
+All rows used PatchCore threshold `41.19657897949219` with strict `score > threshold`, YOLO diagnostic confidence
+`0.25`, policy `model_agreement` version `1`, and their POST decision exactly matched detail recovery. Bounded history
+contained every new ID. The dedicated in-process WebSocket delivered one matching `combined_inspection.created`
+event per committed request. Counts after smoke were PatchCore `345`, known-defect parent `16`, instances `20`,
+combined `8` and decisions `8`.
+
+No sample was selected and no threshold or output was altered to manufacture a `REVIEW`. Both `REVIEW` branches are
+verified against the policy contract with isolated unit tests and integration fake runtimes. These four actual
+outcomes are applications of the prior truth table, not calibration evidence used to create it.

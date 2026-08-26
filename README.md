@@ -121,8 +121,9 @@ serves compact known-defect instances at `/v1/known-defects` without changing th
 YOLO parent/child results are stored independently, recoverable through REST history/detail, and notified through the
 separate best-effort `/v1/ws/known-defects` channel after commit.
 The additive `/v1/combined-inspections` orchestrator decodes one upload once, runs both independent runtimes in
-parallel workers, and atomically persists both child results plus a recoverable correlation UUID. It returns model
-observations only; manufacturing `PASS`/`REJECT`/`REVIEW` policy remains outside C3-1.
+parallel workers, and atomically persists both child results, a recoverable correlation UUID and its decision. It
+returns model observations plus a durable Decision Policy v1 `PASS`/`REJECT`/`REVIEW` result. This deterministic
+model-agreement baseline is versioned and explainable, but is not production calibrated or factory certified.
 Successful predictions are persisted with UUID, UTC timestamp, score, threshold, result, device and model/manifest/
 threshold provenance. PostgreSQL migrations run as a separate Alembic lifecycle; application startup does not run
 migrations implicitly.
@@ -139,7 +140,8 @@ analytical dashboard.
 
 See [PatchCore API](docs/serving/PATCHCORE_API.md),
 [YOLO Segmentation API](docs/serving/YOLO_SEGMENTATION_API.md),
-[Combined Inspection API](docs/serving/COMBINED_INSPECTION_API.md), and
+[Combined Inspection API](docs/serving/COMBINED_INSPECTION_API.md),
+[Decision Engine](docs/decision/DECISION_ENGINE.md), and
 [Inspection History](docs/serving/INSPECTION_HISTORY.md).
 
 ## 6. MLOps and operations
@@ -383,7 +385,7 @@ See [Kubernetes/GCP Foundation](docs/deployment/KUBERNETES_GCP.md).
 |---|---|
 | Architecture | [Overview](docs/architecture/overview.md), [Project Scope](docs/PROJECT_SCOPE.md), [ADRs](docs/adr/) |
 | Data / Vision | [MVTec Pipeline](docs/data/MVTEC_AD_PIPELINE.md), [PatchCore](docs/vision/PATCHCORE_BASELINE.md) |
-| Serving / Data | [PatchCore API](docs/serving/PATCHCORE_API.md), [YOLO API](docs/serving/YOLO_SEGMENTATION_API.md), [Combined API](docs/serving/COMBINED_INSPECTION_API.md), [Inspection History](docs/serving/INSPECTION_HISTORY.md) |
+| Serving / Data | [PatchCore API](docs/serving/PATCHCORE_API.md), [YOLO API](docs/serving/YOLO_SEGMENTATION_API.md), [Combined API](docs/serving/COMBINED_INSPECTION_API.md), [Decision Engine](docs/decision/DECISION_ENGINE.md), [Inspection History](docs/serving/INSPECTION_HISTORY.md) |
 | MLOps | [MLflow](docs/mlops/MLFLOW_TRACKING.md), [Artifact Policy](docs/DATA_ARTIFACT_POLICY.md) |
 | Deployment | [Docker](docs/deployment/DOCKER.md), [CI](docs/deployment/CI_CD.md), [Kubernetes/GCP](docs/deployment/KUBERNETES_GCP.md) |
 | Operations | [Monitoring](docs/monitoring/MONITORING.md), [Drift](docs/monitoring/DRIFT.md), [Dashboard](docs/dashboard/DASHBOARD.md) |

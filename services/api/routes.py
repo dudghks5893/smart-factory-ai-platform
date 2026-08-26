@@ -26,14 +26,23 @@ from services.api.images import (
     decode_uploaded_rgb_array,
 )
 from services.api.schemas import (
+    CombinedInspectionCreatedEvent,
+    CombinedInspectionCreatedPayload,
+    CombinedInspectionHistoryItemResponse,
+    CombinedInspectionHistoryResponse,
     CombinedInspectionImageResponse,
     CombinedInspectionResponse,
     CombinedInspectionTimings,
     CombinedPatchCoreResponse,
+    DecisionEvidenceResponse,
+    DecisionKnownDefectEvidenceResponse,
+    DecisionPatchCoreEvidenceResponse,
+    DecisionPolicyResponse,
     HealthResponse,
     InferenceResponse,
     InspectionCreatedEvent,
     InspectionCreatedPayload,
+    InspectionDecisionResponse,
     InspectionHistoryResponse,
     InspectionResponse,
     KnownDefectBoundingBox,
@@ -51,8 +60,16 @@ from services.api.schemas import (
     ReadinessResponse,
 )
 from services.api.websockets import (
+    CombinedInspectionEventBroadcaster,
     InspectionEventBroadcaster,
     KnownDefectEventBroadcaster,
+)
+from services.decision import (
+    DecisionInput,
+    KnownDefectDecisionEvidence,
+    ModelPrediction,
+    PatchCoreDecisionEvidence,
+    decide_manufacturing_inspection,
 )
 from services.inference.combined import run_combined_inference
 from services.inference.runtime import (
@@ -71,6 +88,7 @@ from services.persistence.combined_inspections import (
     CombinedInspection,
     CombinedInspectionCreate,
     CombinedInspectionRepository,
+    CombinedInspectionSummary,
 )
 from services.persistence.database import DatabaseManager, PersistenceError
 from services.persistence.inspections import (
@@ -279,13 +297,14 @@ async def create_known_defect_prediction(
 
 
 # ADD 2026-08-26: One decoded upload에서 PatchCore와 YOLO를 병렬 실행하고 원자적으로 저장한다.
+# MODIFY 2026-08-26: Pure Policy v1 decision을 persistence 전에 계산하고 response/event에 포함한다.
 @router.post("/v1/combined-inspections", response_model=CombinedInspectionResponse)
 async def create_combined_inspection(
     request: Request,
     background_tasks: BackgroundTasks,
     image: Annotated[UploadFile, File(description="JPEG or PNG inspection image")],
 ) -> CombinedInspectionResponse:
-    """Persist two independent model observations without deriving a disposition."""
+    """Persist both model observations and their versioned manufacturing decision."""
     combined_inspection_id = uuid4()
     patchcore_runtime = _runtime_from_request(request)
     yolo_runtime = _yolo_runtime_from_request(request)
@@ -333,7 +352,7 @@ async def create_combined_inspection(
         raise ApiError(500, "inference_failed", "Model inference failed.") from exc
     patchcore_prediction = inference.patchcore
 
-    # 두 provenance와 model output을 검증한 뒤 양쪽 child와 correlation을 한 번에 commit한다.
+    # 두 provenance와 model output을 검증해 atomic persistence용 child 값을 구성한다.
     try:
         patchcore_provenance = require_serving_provenance(patchcore_runtime)
     except TypeError as exc:
@@ -358,6 +377,27 @@ async def create_combined_inspection(
         diagnostic_confidence=settings.yolo_segmentation_diagnostic_confidence,
         image_sha256=image_sha256,
     )
+
+    # Normalized model evidence에 experimental Policy v1을 적용하고 DB transaction 전에 확정한다.
+    try:
+        decision = decide_manufacturing_inspection(
+            DecisionInput(
+                patchcore=PatchCoreDecisionEvidence(
+                    is_anomaly=patchcore_prediction.is_anomaly,
+                    score=patchcore_prediction.anomaly_score,
+                    threshold=patchcore_prediction.threshold,
+                ),
+                known_defects=KnownDefectDecisionEvidence(
+                    instance_count=len(inference.known_defect.instances),
+                    instance_classes=tuple(
+                        instance.class_name for instance in inference.known_defect.instances
+                    ),
+                ),
+            )
+        )
+    except ValueError as exc:
+        LOGGER.exception("Combined inspection decision failed", exc_info=exc)
+        raise ApiError(500, "decision_failed", "Manufacturing decision failed.") from exc
     try:
         with monitoring.track_persistence(operation="insert"):
             persisted = await run_in_threadpool(
@@ -373,13 +413,14 @@ async def create_combined_inspection(
                     orchestration_ms=inference.orchestration_ms,
                     patchcore=patchcore_values,
                     known_defect=known_defect_values,
+                    decision=decision,
                 ),
             )
     except PersistenceError:
         monitoring.record_persistence_error(operation="insert")
         raise
 
-    # Commit 후 기존 독립 WebSocket channel에 각 child event를 그대로 게시한다.
+    # Commit 후 child events를 먼저 예약하고 manufacturing-level decision event를 마지막에 예약한다.
     background_tasks.add_task(
         _broadcaster_from_request(request).broadcast,
         _inspection_created_event(persisted.patchcore),
@@ -388,11 +429,36 @@ async def create_combined_inspection(
         _known_defect_broadcaster_from_request(request).broadcast,
         _known_defect_created_event(persisted.known_defect),
     )
+    background_tasks.add_task(
+        _combined_broadcaster_from_request(request).broadcast,
+        _combined_inspection_created_event(persisted),
+    )
     monitoring.record_prediction(
         category=persisted.patchcore.category,
         is_anomaly=persisted.patchcore.is_anomaly,
     )
     return _combined_inspection_response(persisted)
+
+
+# ADD 2026-08-26: Combined decision snapshot을 child hydration 없이 newest-first 조회한다.
+@router.get(
+    "/v1/combined-inspections",
+    response_model=CombinedInspectionHistoryResponse,
+)
+async def list_combined_inspections(
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> CombinedInspectionHistoryResponse:
+    repository = _combined_repository_from_request(request)
+    page = await run_in_threadpool(repository.list, limit=limit, offset=offset)
+    return CombinedInspectionHistoryResponse(
+        items=[_combined_history_item(item) for item in page.items],
+        limit=page.limit,
+        offset=page.offset,
+        returned_count=len(page.items),
+        has_more=page.has_more,
+    )
 
 
 # ADD 2026-08-26: Combined UUID로 correlation과 두 durable child result를 복구한다.
@@ -475,6 +541,23 @@ async def stream_inspections(websocket: WebSocket) -> None:
 async def stream_known_defects(websocket: WebSocket) -> None:
     """Push committed known_defect.created notifications on a separate channel."""
     broadcaster = _known_defect_broadcaster_from_websocket(websocket)
+    await broadcaster.connect(websocket)
+    try:
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await broadcaster.disconnect(websocket)
+
+
+# ADD 2026-08-26: Committed combined decision summary를 independent channel로 제공한다.
+@router.websocket("/v1/ws/combined-inspections")
+async def stream_combined_inspections(websocket: WebSocket) -> None:
+    """Push manufacturing-level events after the atomic combined commit."""
+    broadcaster = _combined_broadcaster_from_websocket(websocket)
     await broadcaster.connect(websocket)
     try:
         while True:
@@ -676,6 +759,7 @@ def _known_defect_create_values(
 
 
 # ADD 2026-08-26: Durable correlation과 child rows를 recoverable combined response로 변환한다.
+# MODIFY 2026-08-26: Persisted policy decision과 explainability evidence를 response에 포함한다.
 def _combined_inspection_response(
     combined: CombinedInspection,
 ) -> CombinedInspectionResponse:
@@ -699,11 +783,86 @@ def _combined_inspection_response(
             comparison_operator=cast(Literal[">"], patchcore.comparison_operator),
         ),
         known_defects=_known_defect_detail_response(combined.known_defect),
+        decision=_decision_response(combined),
         timings=CombinedInspectionTimings(
             patchcore_inference_ms=combined.patchcore_inference_ms,
             yolo_inference_ms=combined.known_defect.inspection.inference_ms,
             orchestration_ms=combined.orchestration_ms,
         ),
+    )
+
+
+# ADD 2026-08-26: Persisted decision과 child classes를 explainable response로 변환한다.
+def _decision_response(combined: CombinedInspection) -> InspectionDecisionResponse:
+    decision = combined.decision
+    classes = sorted({instance.class_name for instance in combined.known_defect.instances})
+    return InspectionDecisionResponse(
+        disposition=decision.disposition,
+        policy=DecisionPolicyResponse(
+            name=decision.policy_name,
+            version=decision.policy_version,
+        ),
+        reason_code=decision.reason_code,
+        reason=decision.reason,
+        evidence=DecisionEvidenceResponse(
+            patchcore=DecisionPatchCoreEvidenceResponse(
+                prediction=(
+                    ModelPrediction.ANOMALY
+                    if decision.patchcore_is_anomaly
+                    else ModelPrediction.NORMAL
+                ),
+                score=decision.patchcore_score,
+                threshold=decision.patchcore_threshold,
+            ),
+            known_defects=DecisionKnownDefectEvidenceResponse(
+                instance_count=decision.known_defect_instance_count,
+                classes=classes,
+            ),
+        ),
+    )
+
+
+# ADD 2026-08-26: Child-free persistence summary를 bounded combined history response로 변환한다.
+def _combined_history_item(
+    summary: CombinedInspectionSummary,
+) -> CombinedInspectionHistoryItemResponse:
+    return CombinedInspectionHistoryItemResponse(
+        combined_inspection_id=summary.id,
+        created_at=summary.created_at,
+        patchcore_prediction=(
+            ModelPrediction.ANOMALY if summary.patchcore_is_anomaly else ModelPrediction.NORMAL
+        ),
+        known_defect_instance_count=summary.known_defect_instance_count,
+        disposition=summary.disposition,
+        reason_code=summary.reason_code,
+        policy=DecisionPolicyResponse(
+            name=summary.policy_name,
+            version=summary.policy_version,
+        ),
+    )
+
+
+# ADD 2026-08-26: Committed combined aggregate를 compact manufacturing decision event로 변환한다.
+def _combined_inspection_created_event(
+    combined: CombinedInspection,
+) -> CombinedInspectionCreatedEvent:
+    decision = combined.decision
+    return CombinedInspectionCreatedEvent(
+        inspection=CombinedInspectionCreatedPayload(
+            combined_inspection_id=combined.id,
+            created_at=combined.created_at,
+            patchcore_prediction=(
+                ModelPrediction.ANOMALY if decision.patchcore_is_anomaly else ModelPrediction.NORMAL
+            ),
+            known_defect_instance_count=decision.known_defect_instance_count,
+            known_defect_classes=sorted(
+                {instance.class_name for instance in combined.known_defect.instances}
+            ),
+            disposition=decision.disposition,
+            reason_code=decision.reason_code,
+            policy_name=decision.policy_name,
+            policy_version=decision.policy_version,
+        )
     )
 
 
@@ -952,4 +1111,24 @@ def _known_defect_broadcaster_from_websocket(
     broadcaster = getattr(websocket.app.state, "known_defect_event_broadcaster", None)
     if not isinstance(broadcaster, KnownDefectEventBroadcaster):
         raise RuntimeError("Known-defect event broadcaster is unavailable.")
+    return broadcaster
+
+
+# ADD 2026-08-26: Request app에서 dedicated combined decision event channel을 반환한다.
+def _combined_broadcaster_from_request(
+    request: Request,
+) -> CombinedInspectionEventBroadcaster:
+    broadcaster = getattr(request.app.state, "combined_inspection_event_broadcaster", None)
+    if not isinstance(broadcaster, CombinedInspectionEventBroadcaster):
+        raise RuntimeError("Combined inspection event broadcaster is unavailable.")
+    return broadcaster
+
+
+# ADD 2026-08-26: WebSocket app에서 dedicated combined decision event channel을 반환한다.
+def _combined_broadcaster_from_websocket(
+    websocket: WebSocket,
+) -> CombinedInspectionEventBroadcaster:
+    broadcaster = getattr(websocket.app.state, "combined_inspection_event_broadcaster", None)
+    if not isinstance(broadcaster, CombinedInspectionEventBroadcaster):
+        raise RuntimeError("Combined inspection event broadcaster is unavailable.")
     return broadcaster
