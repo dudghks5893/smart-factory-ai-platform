@@ -392,3 +392,7 @@ transport-independent adapter를 optional process-local FastAPI singleton과
 여전히 분리되어 있으며 production confidence 정책은 validation-only calibration 또는 별도 승인 없이는
 정해지지 않는다. HTTP contract와 actual MPS API smoke는
 [`YOLO_SEGMENTATION_API.md`](../serving/YOLO_SEGMENTATION_API.md)에 기록한다.
+
+고정 Baseline v1의 validation-only TP/FP/FN, mask matching, size/component behavior와 confidence sweep은
+[`YOLO_SEGMENTATION_ERROR_ANALYSIS.md`](YOLO_SEGMENTATION_ERROR_ANALYSIS.md)에 기록한다. 이 diagnostics는
+test evaluation, retraining 또는 production confidence 결정이 아니다.
