@@ -110,18 +110,24 @@ Baseline total VRAM, exact end-to-end training wall-clock duration, PyTorch peak
 device-wide VRAM, GPU utilization mean/p50/p95/max와 power는 **not captured**다. Hardware spec이나 새 telemetry
 schema로 과거 값을 추정하지 않는다.
 
-## 4. C4-2A predeclared experiment
+## 4. C4-2A predeclared experiment와 official identity
 
 | Field | Value |
 |---|---|
 | `experiment_id` | `c4_2a_yolo11n_seg_imgsz1024_seed42` |
 | Date | 2026-08-27 |
-| Git SHA | 실행 시 repository HEAD와 `working_tree_dirty`를 자동 기록 |
-| Status / Decision | `PLANNED` / `PENDING` |
+| Official Git SHA | `1353aefed744ad5c67e931b6e7dd4034c903c065` |
+| Status / Decision | `REJECTED` / `REJECT` |
 | Hypothesis | `imgsz=640`이 small defect component 검출·분할에 필요한 spatial information을 잃을 수 있다. |
 | Target failure mode | `small_defect_miss` |
 | 단일 controlled change | `training.imgsz: 640 -> 1024` |
 | Dedicated config | `configs/experiments/yolo_segmentation/c4_2a_yolo11n_seg_imgsz1024_seed42.yaml` |
+| Config SHA-256 | `49be69586f5aecb04665f5a9346c0e6fd5de9e5cf636c4dd6fb785c5e0dc890b` |
+| Fixed model initialization | `yolo11n-seg.pt`, model family `yolo11n-seg` |
+| Fixed training contract | seed 42, batch 16, epochs 100, workers 2, patience 20, optimizer `auto`, deterministic, AMP |
+| Hardware | Single Tesla T4 |
+| Dataset | Manifest `1746338c091c18e96a11399c81ea9be0d7350105c4860cfa6a4162144ddb9905`; train 84 / val 28 |
+| Test boundary | `SEALED`, `NOT USED` |
 
 Candidate는 Baseline fine-tuned `model.pt`에서 이어 학습하지 않고 기존 pipeline과 동일한 pretrained
 `yolo11n-seg.pt` initialization에서 시작한다. Model family, seed 42, batch 16, epochs 100, patience 20,
@@ -137,28 +143,166 @@ optimizer, deterministic/AMP/workers policy, dataset row identity, Manifest, cla
 4. Secondary: Precision/F1, per-class Recall, unmatched/duplicate/fragment, wrong-class, localization behavior
 5. Resource trade-off: peak VRAM, training duration, artifact size
 
-`ACCEPT` recommendation에는 mask mAP50-95와 instance Recall non-regression, Small Recall improvement,
-Multi-component Recall non-regression 및 good-negative FP rate non-increase가 모두 필요하다. Primary 또는
-negative guardrail regression은 `REJECT`, failure-focused improvement만 불충분하면 `PENDING`이다. 어떤
-decision도 runtime artifact를 자동 교체하지 않는다.
+실제 `recommend_experiment` implementation의 check는 다음과 같다. 현재 dedicated config에서는 다섯 check를
+모두 required로 사용한다.
+
+| Check | PASS condition | Role |
+|---|---|---|
+| `mask_map50_95_non_regression` | candidate `>=` baseline | Primary |
+| `instance_recall_non_regression` | candidate `>=` baseline | Primary |
+| `small_recall_improvement` | candidate `>` baseline | Failure-focused; strict improvement |
+| `multi_component_recall_non_regression` | candidate `>=` baseline | Failure-focused |
+| `good_negative_fp_guardrail` | candidate FP image rate `<=` baseline | Negative guardrail |
+
+Required check가 모두 PASS하면 `ACCEPT`다. Mask mAP50-95, instance Recall 또는 good-negative FP guardrail 중
+하나라도 실패하면 `REJECT`다. 이 세 check가 모두 통과했지만 Small Recall이나 Multi-component Recall만 실패하면
+`PENDING`이다. Runner status는 각각 `ACCEPTED`, `REJECTED`, `COMPLETED`로 저장한다. 어떤 decision도 runtime
+artifact를 자동 교체하지 않는다.
 
 ## 5. Experiment overview
 
-| Experiment | Change | Val mask mAP50-95 | Diagnostic Recall | Small Recall | Multi Recall | Good FP | Peak VRAM | Training time | Decision |
+| Experiment | Change | Val mask mAP50-95 | Diagnostic Recall | Small Recall | Multi Recall | Good FP | PyTorch peak reserved | Training time | Decision |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|
 | Baseline v1 / C4-1 | Reference `imgsz=640` | 0.34359 | 0.608696 | 0.250000 | 0.500000 | 0/14 | not captured | not captured¹ | `REFERENCE` |
-| C4-2A | `imgsz 640 -> 1024` | pending | pending | pending | pending | pending | pending | pending | `PENDING` |
+| C4-2A | `imgsz 640 -> 1024` | 0.303871 | 0.521739 | 0.125000 | 0.428571 | 0/14 | 7,551,844,352 bytes | 430.421539 sec | `REJECT` |
 | C4-2B | Future slot; not implemented | — | — | — | — | — | — | — | — |
 | C4-2C | Future slot; not implemented | — | — | — | — | — | — | — | — |
 | C4-2D | Future slot; not implemented | — | — | — | — | — | — | — | — |
 | C4-3 | Future final selection; not implemented | — | — | — | — | — | — | — | — |
 
-¹ Checkpoint에는 cumulative epoch time `222.485`초가 있으나 C4 telemetry의 exact end-to-end wall-clock
-boundary가 아니므로 resource comparison field에는 사용하지 않는다.
+¹ Baseline checkpoint에는 cumulative epoch time `222.485`초가 있으나 C4 telemetry의 exact end-to-end
+wall-clock boundary가 아니므로 candidate의 `430.421539`초와 속도 비율을 계산하지 않는다.
 
-C4-2A actual Kaggle result가 아직 없으므로 quality, resource, environment, model/metadata/package SHA를
-작성하지 않는다. Run output의 `comparison_to_baseline.json`과 `experiment_result.json`을 검토한 뒤 이 table을
-갱신한다.
+### 5.1 Validation-only quality comparison
+
+다음 before/after 값은 official retry package의 validation-only comparison evidence다. Section 3.2의 historical
+C4-1 local diagnostic은 TP / FP / FN 14 / 17 / 9, Precision 0.451613, Recall 0.608696, F1 0.518519다. 반면
+official retry가 생성한 `quality_before` baseline re-evaluation snapshot은 TP / FP / FN 14 / 16 / 9,
+Precision 0.4666666667, Recall 0.6086956522, F1 0.5283018868이다. 두 run은 FP count가 1개 달라 Precision과
+F1이 다르며 원인은 현재 evidence로 확정되지 않았다. Platform numeric behavior를 포함한 원인을 추측하지 않는다.
+
+Candidate decision에는 official retry의 `quality_before` comparison snapshot을 사용한다. Section 3의 selected
+checkpoint metric과 historical C4-1 local diagnostic은 그대로 보존하고 official retry snapshot으로 덮어쓰지
+않는다. Historical derived-test metric도 candidate selection에 사용하지 않았다.
+
+| Protocol | Metric | Baseline 640 | C4-2A 1024 | Result |
+|---|---|---:|---:|---|
+| Diagnostic | Precision | 0.4666666667 | 0.4000000000 | regressed |
+| Diagnostic | Recall | 0.6086956522 | 0.5217391304 | regressed |
+| Diagnostic | F1 | 0.5283018868 | 0.4528301887 | regressed |
+| Ultralytics Mask | Precision | 0.5590870339 | 0.6504205887 | improved |
+| Ultralytics Mask | Recall | 0.5984848485 | 0.4544197496 | regressed |
+| Ultralytics Mask | mAP50 | 0.5971524426 | 0.5178000110 | regressed |
+| Ultralytics Mask | mAP50-95 | 0.3435446786 | 0.3038714418 | regressed |
+| Ultralytics Box | Precision | 0.5590870339 | 0.6090295004 | improved |
+| Ultralytics Box | Recall | 0.5984848485 | 0.5151515152 | regressed |
+| Ultralytics Box | mAP50 | 0.5619806728 | 0.5322743484 | regressed |
+| Ultralytics Box | mAP50-95 | 0.3240964579 | 0.3260775877 | effectively flat / slight increase |
+
+Candidate diagnostic confusion count는 TP 12 / FP 18 / FN 11이다. Mask Precision은 상승했지만 overall
+instance Recall과 mask mAP50-95는 하락했다.
+
+### 5.2 Failure-mode comparison
+
+| Validation diagnostic | Baseline 640 | C4-2A 1024 | Result |
+|---|---:|---:|---|
+| Small Recall | 0.2500000000 | 0.1250000000 | **REGRESSED** |
+| Medium Recall | 0.8571428571 | 1.0000000000 | improved |
+| Large Recall | 0.7500000000 | 0.5000000000 | regressed |
+| Single-component Recall | 0.7777777778 | 0.6666666667 | regressed |
+| Multi-component Recall | 0.5000000000 | 0.4285714286 | **REGRESSED** |
+| Good-negative FP images | 0 / 14 | 0 / 14 | unchanged; candidate rate 0.0 |
+
+Candidate per-class diagnostic Recall은 bent 0.625, color 0.500, scratch 0.4545454545이고 Precision은 각각
+0.4545454545, 0.6666666667, 0.3125다. 이 결과에서 가장 중요한 관찰은 실험의 primary target이던 Small
+Recall이 0.25에서 0.125로 감소했다는 점이다.
+
+### 5.3 Predeclared guardrail과 decision
+
+| Predeclared check | Result |
+|---|---|
+| `good_negative_fp_guardrail` | **PASS** |
+| `instance_recall_non_regression` | **FAIL** |
+| `mask_map50_95_non_regression` | **FAIL** |
+| `small_recall_improvement` | **FAIL** |
+| `multi_component_recall_non_regression` | **FAIL** |
+
+Official decision은 `REJECT`, status는 `REJECTED`다. Machine evidence의 decision reason은
+`Predeclared primary or good-negative guardrail failed: mask_map50_95_non_regression,
+instance_recall_non_regression, small_recall_improvement, multi_component_recall_non_regression`이다.
+Good-negative guardrail 자체는 PASS했지만 나머지 네 required condition이 실패했으므로 candidate를 v2로
+promote하지 않는다.
+
+### 5.4 Training과 resource evidence
+
+| Evidence | C4-2A official retry |
+|---|---|
+| GPU | Tesla T4 |
+| Completed / configured epochs | 87 / 100 |
+| Early stopping / best epoch | true / 67 |
+| End-to-end training wall-clock | 430.421539109 sec |
+| Average per completed epoch | 4.947374013 sec |
+| Model size | 6,094,756 bytes / 5.8124 MiB |
+| Parameters | 2,835,153 |
+| `nvidia-smi` samples | 85 |
+| GPU utilization mean / p50 / p95 / max | 57.0941% / 81% / 99% / 100% |
+| Sampled device VRAM mean / max | 7,104.67 MiB / 7,407 MiB |
+| GPU power mean / max | 55.1385 W / 99.18 W |
+| PyTorch peak allocated | 6,834,240,512 bytes |
+| PyTorch peak reserved | 7,551,844,352 bytes |
+| Total device memory | 15,636,037,632 bytes |
+
+Historical Baseline에는 같은 boundary의 end-to-end wall-clock, GPU utilization, device-wide VRAM, power 및
+PyTorch peak telemetry가 없다. 따라서 정확한 baseline/candidate GPU usage 비교나 wall-clock speed ratio를
+주장하지 않는다. Baseline의 `222.485`초는 checkpoint cumulative epoch time일 뿐 위 wall-clock과 동등하지 않다.
+
+### 5.5 Artifact identity와 package
+
+| Artifact | SHA-256 |
+|---|---|
+| Baseline model | `594003121b0e071c47d68c3e53c10f438dcec18b5b56b4e5d8831d64001192bd` |
+| Baseline metadata | `9f3e3878141e831a6721c5136d67057da906485b9825262bd4e0897b2879fc6b` |
+| Candidate model | `06ab9e64dc177f17bb28bfa6d86d90d02904ab0019cd550185dae2a013f8eec1` |
+| Candidate metadata | `5b9a48fbc19df66f51d832e1c96fbe0bcb83b5bd3c1fba0dda5aebc4677b5bfe` |
+| Official package | `e74b933473fac156c5309f24eb4d072991deeb9610ead5fa89f6e7605e6c9c25` |
+
+Official package 이름은 `c4_2a_yolo11n_seg_imgsz1024_seed42_OFFICIAL_REJECTED.zip`이다. Package는 의도적으로
+Git repository 밖에 보관하며 repository의 portable dependency로 사용하지 않는다. 내부에는 다음 evidence와
+candidate artifact만 포함한다.
+
+```text
+evidence/experiment_metadata.json
+evidence/training_metrics.json
+evidence/validation_metrics.json
+evidence/error_analysis_summary.json
+evidence/resource_telemetry.json
+evidence/comparison_to_baseline.json
+evidence/experiment_result.json
+evidence/environment.json
+evidence/epoch_metrics.jsonl
+evidence/visualization_manifest.json
+model/model.pt
+model/metadata.json
+config/c4_2a_yolo11n_seg_imgsz1024_seed42.yaml
+SHA256SUMS.txt
+```
+
+### 5.6 결론과 다음 hypothesis
+
+C4-1에서 Small Recall 0.25라는 failure mode를 확인한 뒤 `imgsz` 하나만 640에서 1024로 변경하고, sealed
+test를 열지 않은 validation-only controlled experiment를 수행했다. Quality, failure-mode와 GPU resource
+evidence를 수집한 결과 mask Precision은 증가했지만 Small Recall은 0.125로 감소했고 overall instance Recall,
+Multi-component Recall과 mask mAP50-95도 하락했다. 따라서 사전 정의한 guardrail에 따라 candidate를 거부했고
+v2로 promote하지 않았다. 이 결론은 해당 dataset split, model, seed와 training protocol에 한정하며 higher
+resolution이 일반적으로 성능을 악화시킨다는 주장으로 확장하지 않는다.
+
+Commit `edc0bd4`의 첫 시도는 training과 final validation 후 epoch callback lifecycle bug로 종료되었으므로
+`FAILED_AFTER_TRAINING`, `official_result_eligible=false`인 engineering history다. Runtime fix commit
+`1353aefed744ad5c67e931b6e7dd4034c903c065`에서 수행한 retry만 official result이며 첫 시도의 metric이나
+artifact identity를 섞지 않는다.
+
+다음 planned hypothesis는 **C4-2B component-preserving crop / sampling strategy**다. 아직 구현하거나 검증하지
+않았으며 C4-2A의 실패만으로 효과를 가정하지 않는다.
 
 ## 6. Machine-readable evidence contract
 
@@ -183,14 +327,13 @@ candidate_framework_validation/
 candidate_error_analysis/
 ```
 
-Candidate artifact는
-`artifacts/models/yolo_segmentation/experiments/c4_2a_yolo11n_seg_imgsz1024_seed42/`, export ZIP은
-`outputs/packages/c4_2a_yolo11n_seg_imgsz1024_seed42.zip`에 생성된다. ZIP에는 best model/metadata, config,
-validation evidence, resource summary, environment와 `SHA256SUMS.txt`만 포함하며 raw dataset이나 cache를 넣지
-않는다. Machine result는 `split="val"`, `test_split_used=false`, before/after quality, failure-mode/resource
-metrics, Manifest/model/metadata/config SHA와 decision을 명시한다. `experiment_metadata.json`과
+Candidate artifact와 intermediate output은 ignored runtime namespace에 생성됐다. Official rejected package는
+`c4_2a_yolo11n_seg_imgsz1024_seed42_OFFICIAL_REJECTED.zip` 이름으로 Git repository 밖에 보존한다. Machine
+result는 `split="val"`, `test_split_used=false`, before/after quality, failure-mode/resource metrics,
+Manifest/model/metadata/config SHA와 decision을 명시한다. `experiment_metadata.json`과
 `comparison_to_baseline.json`에는 checkpoint-derived historical Baseline reference도 포함하되
-`derived_test_metrics_used_for_selection=false`를 유지한다.
+`derived_test_metrics_used_for_selection=false`를 유지한다. Raw dataset, cache, model binary와 external ZIP은
+Git에 추가하지 않는다.
 
 ## 7. GPU와 compute telemetry 정의
 
@@ -246,10 +389,14 @@ Silicon evidence는 MPS/CPU functional runtime smoke domain이며 측정 boundar
 NVIDIA serving latency는 다시 별도 domain이다. 이 문서는 서로 다른 run으로부터 MPS와 T4의 상대 성능을
 결론 내리지 않는다.
 
-## 10. Kaggle T4 execution
+## 10. Kaggle T4 execution과 reproduction contract
 
-Repository, derived dataset package와 immutable Baseline runtime bundle을 각각 기본 path에 복원한 뒤 다음 cell을
-그대로 실행한다. 이 command는 C2 final test evaluator를 호출하지 않는다.
+Actual official retry의 execution entry point는 Kaggle의
+[YOLO Segmentation Experiment Workbench](../../notebooks/vision/yolo_segmentation_experiment_workbench.ipynb)다.
+Workbench Section 12가 project-owned `run_yolo_segmentation_experiment` function을 호출해 official lifecycle을
+수행했다. 아래 CLI는 같은 repository runner를 직접 호출하는 **equivalent reproduction path**이며 official retry가
+CLI로 직접 실행됐다는 provenance를 뜻하지 않는다. CLI와 Workbench 모두 C2 final test evaluator를 호출하지 않고
+같은 validation-only boundary를 사용한다.
 
 ```bash
 cd /kaggle/working/smart-factory-ai-platform
@@ -282,5 +429,6 @@ candidate training과 telemetry를 시작한다. 이후 best checkpoint로 Ultra
 기록하고 environment, T4 memory, available telemetry, error type/message와 failure point를 보존한 뒤 종료한다.
 Batch를 바꾸거나 새 experiment를 자동 시작하지 않는다.
 
-Actual output을 export한 뒤 `package_metadata.json`의 ZIP/model/metadata/config SHA와 ZIP 내부
-`SHA256SUMS.txt`를 함께 검증한다. 그 전에는 C4-2A result를 완료 또는 개선으로 표현하지 않는다.
+Official retry에서는 output export 후 `package_metadata.json`의 ZIP/model/metadata/config SHA와 ZIP 내부
+`SHA256SUMS.txt`를 함께 검증했다. Section 5의 result와 artifact identity는 이 검증을 통과한 package를 근거로
+하며, 후속 reproduction도 검증 완료 전에는 새 result로 간주하지 않는다.

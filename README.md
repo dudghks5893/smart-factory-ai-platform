@@ -114,12 +114,12 @@ See [MVTec AD Pipeline](docs/data/MVTEC_AD_PIPELINE.md),
 [PatchCore Baseline](docs/vision/PATCHCORE_BASELINE.md), and
 [Evaluation Contract](docs/benchmarks/PATCHCORE_EVALUATION.md).
 
-YOLO11n-seg의 validation error analysis에서 Small Recall `0.25`를 확인했고, `imgsz 640 -> 1024`만 바꾸는
-validation-only C4-2A experiment와 T4 resource telemetry runner를 준비했다. Actual candidate result는 아직
-`PENDING`이며 sealed test와 runtime model은 변경하지 않았다. 자세한 predeclared protocol은
-[YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md)에 있다. Kaggle preflight, train/val EDA,
-actual augmentation/640·1024 representation preview와 post-training evidence review는 reusable
-[YOLO Experiment Workbench](notebooks/vision/yolo_segmentation_experiment_workbench.ipynb)에서 수행한다.
+YOLO11n-seg의 validation error analysis에서 Small Recall `0.25`를 확인한 뒤 `imgsz 640 -> 1024`만 바꾼
+validation-only C4-2A controlled experiment를 Tesla T4에서 수행했다. Mask Precision은 증가했지만 Small Recall은
+`0.125`, mask mAP50-95는 `0.303871`로 하락해 predeclared guardrail에 따라 candidate를 `REJECT`했고 v2로
+promote하지 않았다. Derived test는 sealed 상태를 유지했다. 자세한 quality/resource evidence와 제한된 결론은
+[YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md)에 있으며, reusable interface는
+[YOLO Experiment Workbench](notebooks/vision/yolo_segmentation_experiment_workbench.ipynb)다.
 
 ## 5. Serving and inspection data
 
