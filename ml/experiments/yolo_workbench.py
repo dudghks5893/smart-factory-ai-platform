@@ -305,6 +305,34 @@ def select_representative_samples(
     return selected[:max_count]
 
 
+# ADD 2026-08-27: Full allowed sample set에서 deterministic val-small hypothesis sample을 고른다.
+def select_small_validation_sample(
+    samples: list[WorkbenchSample],
+    *,
+    seed: int,
+) -> WorkbenchSample:
+    if any(sample.split not in ALLOWED_WORKBENCH_SPLITS for sample in samples):
+        raise ValueError("Small validation selection rejects records outside train/validation.")
+    eligible = [
+        sample
+        for sample in samples
+        if sample.split == "val" and not sample.is_negative and "small" in sample.size_buckets
+    ]
+    if not eligible:
+        raise ValueError("No positive validation sample contains a small defect component.")
+    return min(
+        eligible,
+        key=lambda sample: (
+            deterministic_rank(
+                sample.sample_id,
+                seed=seed,
+                namespace="yolo-workbench:val-small-representation",
+            ),
+            sample.sample_id,
+        ),
+    )
+
+
 # ADD 2026-08-27: Dataset/Baseline/config/Git identity를 official training 전에 검증한다.
 def build_official_preflight(
     *,

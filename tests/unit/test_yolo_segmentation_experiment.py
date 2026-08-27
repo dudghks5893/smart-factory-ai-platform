@@ -18,7 +18,39 @@ from ml.experiments.yolo_segmentation import (
 )
 from ml.training.yolo_segmentation import load_yolo_segmentation_config
 
-CONFIG_PATH = Path("configs/experiments/yolo_segmentation/c4_2a_yolo11n_seg_imgsz1024_seed42.yaml")
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+CONFIG_PATH = (
+    REPOSITORY_ROOT
+    / "configs/experiments/yolo_segmentation/c4_2a_yolo11n_seg_imgsz1024_seed42.yaml"
+)
+BASELINE_CONFIG_PATH = REPOSITORY_ROOT / "configs/model/yolo_segmentation_baseline.yaml"
+
+
+# ADD 2026-08-27: Config provenance를 보존하는 portable temporary repository fixture를 만든다.
+def _write_experiment_fixture(
+    tmp_path: Path,
+    *,
+    replacements: dict[str, str] | None = None,
+    include_baseline: bool = True,
+) -> Path:
+    repository_root = tmp_path / "repository"
+    experiment_path = (
+        repository_root
+        / "configs/experiments/yolo_segmentation/c4_2a_yolo11n_seg_imgsz1024_seed42.yaml"
+    )
+    baseline_path = repository_root / "configs/model/yolo_segmentation_baseline.yaml"
+    experiment_path.parent.mkdir(parents=True)
+    baseline_path.parent.mkdir(parents=True)
+    (repository_root / "pyproject.toml").write_text(
+        "[project]\nname = 'fixture'\n", encoding="utf-8"
+    )
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    for before, after in (replacements or {}).items():
+        text = text.replace(before, after)
+    experiment_path.write_text(text, encoding="utf-8")
+    if include_baseline:
+        baseline_path.write_text(BASELINE_CONFIG_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    return experiment_path
 
 
 # ADD 2026-08-27: Minimal derived record로 validation leakage boundary를 검증한다.
@@ -88,36 +120,123 @@ def test_experiment_config_preserves_baseline_constants() -> None:
     assert candidate.training.batch == 16
 
 
-# ADD 2026-08-27: Config parser가 baseline constant drift와 second intervention을 거부한다.
+# ADD 2026-08-27: Drift를 거부한다. → MODIFY 2026-08-28: Provenance fixture에서 검증한다.
 def test_experiment_config_rejects_uncontrolled_change(tmp_path: Path) -> None:
-    text = CONFIG_PATH.read_text(encoding="utf-8").replace("after: 1024", "after: 1280")
-    path = tmp_path / "invalid.yaml"
-    path.write_text(text, encoding="utf-8")
+    path = _write_experiment_fixture(
+        tmp_path,
+        replacements={"after: 1024": "after: 1280"},
+    )
     with pytest.raises(ValueError, match="640 -> 1024"):
         load_yolo_experiment_config(path)
 
 
-# ADD 2026-08-27: YAML 문자열을 boolean decision flag로 허용하지 않는다.
+# ADD 2026-08-27: Boolean을 검증한다. → MODIFY 2026-08-28: Provenance fixture를 쓴다.
 def test_experiment_config_rejects_string_boolean(tmp_path: Path) -> None:
-    text = CONFIG_PATH.read_text(encoding="utf-8").replace(
-        "require_small_recall_improvement: true",
-        'require_small_recall_improvement: "true"',
+    path = _write_experiment_fixture(
+        tmp_path,
+        replacements={
+            "require_small_recall_improvement: true": 'require_small_recall_improvement: "true"'
+        },
     )
-    path = tmp_path / "invalid-boolean.yaml"
-    path.write_text(text, encoding="utf-8")
     with pytest.raises(ValueError, match="must be a boolean"):
         load_yolo_experiment_config(path)
 
 
-# ADD 2026-08-27: Historical Baseline reference가 derived-test selection을 허용하지 않는다.
+# ADD 2026-08-27: Test selection을 막는다. → MODIFY 2026-08-28: Provenance fixture를 쓴다.
 def test_experiment_config_rejects_historical_test_selection(tmp_path: Path) -> None:
-    text = CONFIG_PATH.read_text(encoding="utf-8").replace(
-        "derived_test_metrics_used_for_selection: false",
-        "derived_test_metrics_used_for_selection: true",
+    path = _write_experiment_fixture(
+        tmp_path,
+        replacements={
+            "derived_test_metrics_used_for_selection: false": (
+                "derived_test_metrics_used_for_selection: true"
+            )
+        },
     )
-    path = tmp_path / "invalid-test-selection.yaml"
-    path.write_text(text, encoding="utf-8")
     with pytest.raises(ValueError, match="Derived-test metrics"):
+        load_yolo_experiment_config(path)
+
+
+# ADD 2026-08-27: Absolute experiment config의 non-repository cwd resolution을 검증한다.
+def test_experiment_config_loading_is_cwd_independent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    experiment = load_yolo_experiment_config(CONFIG_PATH)
+
+    assert experiment.config_path == CONFIG_PATH
+    assert experiment.baseline_config_path == BASELINE_CONFIG_PATH
+    assert experiment.output.experiment_root == (
+        REPOSITORY_ROOT / "outputs/experiments/yolo_segmentation"
+    )
+    assert experiment.output.artifact_root == (
+        REPOSITORY_ROOT / "artifacts/models/yolo_segmentation/experiments"
+    )
+    assert load_yolo_segmentation_config(experiment.baseline_config_path).training.imgsz == 640
+
+
+# ADD 2026-08-27: Config provenance에 Baseline이 없으면 resolved path를 포함해 fail-fast한다.
+def test_experiment_config_reports_missing_baseline_from_provenance(tmp_path: Path) -> None:
+    path = _write_experiment_fixture(tmp_path, include_baseline=False)
+    with pytest.raises(FileNotFoundError, match="Baseline config was not found.*resolved="):
+        load_yolo_experiment_config(path)
+
+
+# ADD 2026-08-27: Relative Baseline traversal이 repository boundary를 벗어나지 못하게 한다.
+def test_experiment_config_rejects_relative_baseline_escape(tmp_path: Path) -> None:
+    path = _write_experiment_fixture(
+        tmp_path,
+        replacements={
+            "baseline_config: configs/model/yolo_segmentation_baseline.yaml": (
+                "baseline_config: ../outside-baseline.yaml"
+            )
+        },
+    )
+    with pytest.raises(ValueError, match="Baseline config resolves outside repository root"):
+        load_yolo_experiment_config(path)
+
+
+# ADD 2026-08-27: Absolute Baseline path도 repository 외부이면 거부한다.
+def test_experiment_config_rejects_absolute_baseline_escape(tmp_path: Path) -> None:
+    outside_path = (tmp_path / "outside-baseline.yaml").resolve()
+    path = _write_experiment_fixture(
+        tmp_path,
+        replacements={
+            "baseline_config: configs/model/yolo_segmentation_baseline.yaml": (
+                f"baseline_config: {outside_path}"
+            )
+        },
+    )
+    with pytest.raises(ValueError, match="Baseline config resolves outside repository root"):
+        load_yolo_experiment_config(path)
+
+
+# ADD 2026-08-27: Relative output traversal이 repository boundary를 벗어나지 못하게 한다.
+def test_experiment_config_rejects_relative_output_escape(tmp_path: Path) -> None:
+    path = _write_experiment_fixture(
+        tmp_path,
+        replacements={
+            "experiment_root: outputs/experiments/yolo_segmentation": (
+                "experiment_root: ../outside-output"
+            )
+        },
+    )
+    with pytest.raises(ValueError, match="output path output.experiment_root.*outside"):
+        load_yolo_experiment_config(path)
+
+
+# ADD 2026-08-27: Absolute output path도 repository 외부이면 거부한다.
+def test_experiment_config_rejects_absolute_output_escape(tmp_path: Path) -> None:
+    outside_path = (tmp_path / "outside-output").resolve()
+    path = _write_experiment_fixture(
+        tmp_path,
+        replacements={
+            "experiment_root: outputs/experiments/yolo_segmentation": (
+                f"experiment_root: {outside_path}"
+            )
+        },
+    )
+    with pytest.raises(ValueError, match="output path output.experiment_root.*outside"):
         load_yolo_experiment_config(path)
 
 

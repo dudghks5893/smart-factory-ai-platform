@@ -16,6 +16,7 @@ from ml.experiments.yolo_workbench import (
     build_research_config,
     load_workbench_records,
     select_representative_samples,
+    select_small_validation_sample,
     validate_workbench_controls,
 )
 from ml.training.yolo_segmentation import load_yolo_segmentation_config
@@ -108,6 +109,46 @@ def test_eda_summary_and_representative_selection_are_deterministic() -> None:
     first = select_representative_samples(samples, seed=42)
     second = select_representative_samples(list(reversed(samples)), seed=42)
     assert [item.sample_id for item in first] == [item.sample_id for item in second]
+
+
+# ADD 2026-08-27: Full sample set의 val-small deterministic selection을 검증한다.
+def test_small_validation_selection_uses_full_allowed_sample_set() -> None:
+    samples = [
+        WorkbenchSample(
+            "train-small", "train", "bent", False, 1, (0.01,), ("small",), 32, 32, "a", "a"
+        ),
+        WorkbenchSample(
+            "val-small-b", "val", "bent", False, 1, (0.01,), ("small",), 32, 32, "b", "b"
+        ),
+        WorkbenchSample(
+            "val-small-a", "val", "color", False, 1, (0.01,), ("small",), 32, 32, "c", "c"
+        ),
+        WorkbenchSample("val-good", "val", "good", True, 0, (), (), 32, 32, "d", "d"),
+    ]
+    gallery_subset = [samples[0], samples[3]]
+    assert not any(
+        sample.split == "val" and not sample.is_negative and "small" in sample.size_buckets
+        for sample in gallery_subset
+    )
+
+    first = select_small_validation_sample(samples, seed=42)
+    second = select_small_validation_sample(list(reversed(samples)), seed=42)
+    assert first == second
+    assert first.split == "val"
+    assert not first.is_negative
+    assert "small" in first.size_buckets
+
+
+# ADD 2026-08-27: Missing val-small과 sealed-test input을 명확한 error로 거부한다.
+def test_small_validation_selection_fails_clearly() -> None:
+    good_val = WorkbenchSample("good", "val", "good", True, 0, (), (), 32, 32, "a", "a")
+    with pytest.raises(ValueError, match="No positive validation sample"):
+        select_small_validation_sample([good_val], seed=42)
+    sealed_test = WorkbenchSample(
+        "sealed", "test", "bent", False, 1, (0.01,), ("small",), 32, 32, "b", "b"
+    )
+    with pytest.raises(ValueError, match="outside train/validation"):
+        select_small_validation_sample([sealed_test], seed=42)
 
 
 # ADD 2026-08-27: Research outputs/overrides 격리와 official override 거부를 검증한다.

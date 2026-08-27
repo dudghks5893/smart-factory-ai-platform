@@ -77,7 +77,7 @@ def _optional_scalar(metrics: Mapping[str, object], key: str) -> float | None:
 class EpochMetricsLogger:
     """Lifecycle-aware JSONL and concise console logger with an injectable clock."""
 
-    # ADD 2026-08-27: New output, fake clock와 console sink로 logger state를 초기화한다.
+    # ADD 2026-08-27: Logger를 초기화한다. → MODIFY 2026-08-28: Lifecycle state를 추가한다.
     def __init__(
         self,
         *,
@@ -97,19 +97,23 @@ class EpochMetricsLogger:
         self._console_writer = console_writer
         self._epoch_started_at: float | None = None
         self._active_epoch: int | None = None
+        self._last_completed_epoch: int | None = None
+        self._final_eval_callback_consumed = False
         self._cumulative_seconds = 0.0
         self._closed = False
 
-    # ADD 2026-08-27: Ultralytics epoch start에 monotonic timing boundary를 연다.
+    # ADD 2026-08-27: Timing을 연다. → MODIFY 2026-08-28: Final-eval 후 start를 막는다.
     def start_epoch(self, epoch: int) -> None:
         if self._closed or self._active_epoch is not None:
             raise RuntimeError("Epoch logger is closed or already timing an epoch.")
+        if self._final_eval_callback_consumed:
+            raise RuntimeError("Epoch logger already consumed its post-training callback.")
         if not 1 <= epoch <= self.total_epochs:
             raise ValueError("Epoch number is outside the configured training range.")
         self._active_epoch = epoch
         self._epoch_started_at = self._clock()
 
-    # ADD 2026-08-27: Completed fit-epoch elapsed time/scalars를 JSONL과 console에 기록한다.
+    # ADD 2026-08-27: Epoch evidence를 쓴다. → MODIFY 2026-08-28: 완료 epoch를 추적한다.
     def finish_epoch(
         self,
         *,
@@ -147,6 +151,7 @@ class EpochMetricsLogger:
         )
         self._active_epoch = None
         self._epoch_started_at = None
+        self._last_completed_epoch = epoch
         return record
 
     # ADD 2026-08-27: Training exception에서도 incomplete timing state를 폐기한다.
@@ -159,8 +164,22 @@ class EpochMetricsLogger:
     def on_train_epoch_start(self, trainer: Any) -> None:
         self.start_epoch(int(trainer.epoch) + 1)
 
-    # ADD 2026-08-27: Ultralytics fit-end losses/validation/LR를 compact record로 추출한다.
+    # ADD 2026-08-27: Fit-end를 기록한다. → MODIFY 2026-08-28: Final-eval 1회만 무시한다.
     def on_fit_epoch_end(self, trainer: Any) -> None:
+        if self._closed:
+            raise RuntimeError("Epoch logger received a callback after close.")
+        callback_epoch = int(trainer.epoch) + 1
+        if self._active_epoch is None:
+            expected_final_eval_epoch = (
+                None if self._last_completed_epoch is None else self._last_completed_epoch + 1
+            )
+            if (
+                not self._final_eval_callback_consumed
+                and callback_epoch == expected_final_eval_epoch
+            ):
+                self._final_eval_callback_consumed = True
+                return
+            raise RuntimeError("Fit-end callback does not match an active or final-eval boundary.")
         loss_metrics = trainer.label_loss_items(trainer.tloss, prefix="train")
         metrics = {**loss_metrics, **dict(trainer.metrics), **dict(trainer.lr)}
         reserved: int | None = None
@@ -168,7 +187,7 @@ class EpochMetricsLogger:
         if torch.cuda.is_available() and getattr(device, "type", None) == "cuda":
             reserved = int(torch.cuda.memory_reserved(device))
         self.finish_epoch(
-            epoch=int(trainer.epoch) + 1,
+            epoch=callback_epoch,
             metrics=metrics,
             cuda_memory_reserved_bytes=reserved,
         )

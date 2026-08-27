@@ -56,12 +56,14 @@ def test_workbench_notebook_structure_and_safety() -> None:
     assert len(serialized.encode()) < 100_000
 
 
-# ADD 2026-08-27: Notebook이 duplicate logic 대신 project APIs를 호출하는지 확인한다.
+# ADD 2026-08-27: Project API 사용을 확인한다. → MODIFY 2026-08-28: Full-sample helper를 검증한다.
 def test_workbench_notebook_is_thin_and_validation_safe() -> None:
     source = NOTEBOOK_PATH.read_text(encoding="utf-8")
     assert "run_yolo_segmentation_experiment" in source
     assert "preview_actual_training_augmentations" in source
     assert "load_workbench_records" in source
+    assert "select_small_validation_sample(samples" in source
+    assert "item for item in representatives if item.split" not in source
     assert "YOLO(" not in source
     assert "derived_split == 'test'" not in source
     assert "split='test'" not in source

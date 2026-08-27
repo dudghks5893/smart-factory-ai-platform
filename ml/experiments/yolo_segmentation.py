@@ -289,9 +289,80 @@ def _validate_baseline_evidence(evidence: dict[str, Any]) -> None:
         raise ValueError("Derived-test metrics must be excluded from experiment selection.")
 
 
-# ADD 2026-08-27: Dedicated YAML을 typed controlled-experiment contract로 복원한다.
+# ADD 2026-08-27: Final resolved project path가 repository boundary 안인지 검증한다.
+def _require_repository_path(
+    repository_root: Path,
+    resolved_path: Path,
+    *,
+    field: str,
+) -> Path:
+    resolved = resolved_path.resolve()
+    try:
+        resolved.relative_to(repository_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"{field} resolves outside repository root: "
+            f"repository={repository_root}, resolved={resolved}"
+        ) from exc
+    return resolved
+
+
+# ADD 2026-08-27: Config provenance root 안에서 relative/absolute Baseline config를 결정한다.
+def _resolve_experiment_repository_root(
+    config_path: Path,
+    baseline_config_path: Path,
+) -> tuple[Path, Path]:
+    repository_root: Path | None = None
+    for candidate in config_path.parents:
+        if (candidate / "pyproject.toml").is_file():
+            repository_root = candidate.resolve()
+            break
+    if repository_root is None:
+        raise FileNotFoundError(
+            f"Repository root not found from experiment config provenance: {config_path}"
+        )
+
+    declared_baseline = (
+        baseline_config_path.resolve()
+        if baseline_config_path.is_absolute()
+        else (repository_root / baseline_config_path).resolve()
+    )
+    resolved_baseline = _require_repository_path(
+        repository_root,
+        declared_baseline,
+        field="Experiment Baseline config",
+    )
+    if not resolved_baseline.is_file():
+        raise FileNotFoundError(
+            "Experiment Baseline config was not found from repository provenance: "
+            f"config={config_path}, declared={baseline_config_path}, "
+            f"resolved={resolved_baseline}"
+        )
+    return repository_root, resolved_baseline
+
+
+# ADD 2026-08-27: Relative/absolute experiment output을 repository 안에서 resolve한다.
+def _resolve_experiment_output_path(
+    repository_root: Path,
+    declared_path: object,
+    *,
+    field: str,
+) -> Path:
+    path = Path(str(declared_path))
+    declared_output = path.resolve() if path.is_absolute() else (repository_root / path).resolve()
+    return _require_repository_path(
+        repository_root,
+        declared_output,
+        field=f"Experiment output path {field}",
+    )
+
+
+# ADD 2026-08-27: Typed YAML을 읽는다. → MODIFY 2026-08-28: Repo-bound path를 복원한다.
 def load_yolo_experiment_config(path: Path) -> YoloExperimentConfig:
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    resolved_config_path = path.resolve()
+    if not resolved_config_path.is_file():
+        raise FileNotFoundError(f"YOLO experiment config not found: {resolved_config_path}")
+    raw = yaml.safe_load(resolved_config_path.read_text(encoding="utf-8"))
     root = _mapping(raw, name="root")
     experiment = _mapping(root.get("experiment"), name="experiment")
     baseline = _mapping(root.get("baseline"), name="baseline")
@@ -304,13 +375,21 @@ def load_yolo_experiment_config(path: Path) -> YoloExperimentConfig:
     priorities = _mapping(root.get("evaluation_priorities"), name="evaluation_priorities")
     decision = _mapping(root.get("decision_policy"), name="decision_policy")
     try:
+        declared_baseline_path = Path(str(experiment["baseline_config"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Experiment baseline config path is missing or malformed.") from exc
+    repository_root, baseline_config_path = _resolve_experiment_repository_root(
+        resolved_config_path,
+        declared_baseline_path,
+    )
+    try:
         config = YoloExperimentConfig(
             experiment_id=str(experiment["experiment_id"]),
             experiment_date=str(experiment["date"]),
             status=str(experiment["status"]),
             hypothesis=str(experiment["hypothesis"]),
             target_failure_mode=str(experiment["target_failure_mode"]),
-            baseline_config_path=Path(str(experiment["baseline_config"])),
+            baseline_config_path=baseline_config_path,
             baseline_identity=dict(baseline),
             baseline_evidence=dict(baseline_evidence),
             candidate_identity=dict(candidate),
@@ -336,10 +415,26 @@ def load_yolo_experiment_config(path: Path) -> YoloExperimentConfig:
                 nvidia_smi_timeout_seconds=float(telemetry["nvidia_smi_timeout_seconds"]),
             ),
             output=ExperimentOutputConfig(
-                experiment_root=Path(str(output["experiment_root"])),
-                artifact_root=Path(str(output["artifact_root"])),
-                training_runtime_root=Path(str(output["training_runtime_root"])),
-                package_root=Path(str(output["package_root"])),
+                experiment_root=_resolve_experiment_output_path(
+                    repository_root,
+                    output["experiment_root"],
+                    field="output.experiment_root",
+                ),
+                artifact_root=_resolve_experiment_output_path(
+                    repository_root,
+                    output["artifact_root"],
+                    field="output.artifact_root",
+                ),
+                training_runtime_root=_resolve_experiment_output_path(
+                    repository_root,
+                    output["training_runtime_root"],
+                    field="output.training_runtime_root",
+                ),
+                package_root=_resolve_experiment_output_path(
+                    repository_root,
+                    output["package_root"],
+                    field="output.package_root",
+                ),
             ),
             evaluation_priorities={
                 key: tuple(str(item) for item in cast(list[object], value))
@@ -367,7 +462,7 @@ def load_yolo_experiment_config(path: Path) -> YoloExperimentConfig:
                     name="decision_policy.allow_good_negative_fp_rate_increase",
                 ),
             ),
-            config_path=path,
+            config_path=resolved_config_path,
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"Experiment config is missing or malformed: {exc}") from exc
