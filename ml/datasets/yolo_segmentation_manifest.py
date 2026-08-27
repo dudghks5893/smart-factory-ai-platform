@@ -56,8 +56,7 @@ def write_derived_manifest(records: list[DerivedManifestRecord], path: Path) -> 
             writer.writerow(asdict(record))
 
 
-# ADD 2026-08-25: Derived manifest를 exact schema와 typed boolean로 복원한다.
-# MODIFY 2026-08-27: Workbench가 sealed split row를 object로 만들지 않도록 filter를 추가한다.
+# ADD 2026-08-25: Manifest를 복원한다. → MODIFY 2026-08-28: 제외 split을 객체화 전에 건너뛴다.
 def read_derived_manifest(
     path: Path,
     *,
@@ -74,6 +73,11 @@ def read_derived_manifest(
         if reader.fieldnames != list(DERIVED_MANIFEST_FIELDS):
             raise ValueError("Unexpected C2-1 derived manifest schema.")
         for row in reader:
+            derived_split = row.get("derived_split")
+            if derived_split is None:
+                raise ValueError("Derived manifest row contains a missing split value.")
+            if allowed_splits is not None and derived_split not in allowed_splits:
+                continue
             values = {
                 field: row[field] for field in DERIVED_MANIFEST_FIELDS if row[field] is not None
             }
@@ -81,8 +85,6 @@ def read_derived_manifest(
                 raise ValueError("Derived manifest row contains a missing value.")
             if values["is_negative"] not in {"True", "False"}:
                 raise ValueError("Derived manifest boolean must be True or False.")
-            if allowed_splits is not None and values["derived_split"] not in allowed_splits:
-                continue
             records.append(
                 DerivedManifestRecord(
                     dataset_name=values["dataset_name"],

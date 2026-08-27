@@ -59,22 +59,27 @@ type TrainingRunner = Callable[
 ]
 
 
-# ADD 2026-08-25: Portable package YAML을 Ultralytics가 정확히 해석할 runtime YAML로 변환한다.
+# ADD 2026-08-25: Ultralytics runtime YAML을 쓴다. → MODIFY 2026-08-28: test path 생략을 지원한다.
 def write_runtime_dataset_yaml(
     *,
     dataset_root: Path,
     destination: Path,
     classes: dict[int, str],
+    include_test: bool = True,
 ) -> Path:
     """Write an ignored absolute-root adapter without mutating the portable dataset artifact."""
+    split_paths = {
+        "train": "images/train",
+        "val": "images/val",
+    }
+    if include_test:
+        split_paths["test"] = "images/test"
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
         yaml.safe_dump(
             {
                 "path": str(dataset_root.resolve()),
-                "train": "images/train",
-                "val": "images/val",
-                "test": "images/test",
+                **split_paths,
                 "names": classes,
             },
             sort_keys=False,

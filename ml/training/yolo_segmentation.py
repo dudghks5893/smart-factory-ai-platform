@@ -13,7 +13,7 @@ import yaml
 from PIL import Image
 
 from ml.datasets.segmentation_annotations import parse_yolo_segmentation_label
-from ml.datasets.yolo_segmentation_manifest import read_derived_manifest
+from ml.datasets.yolo_segmentation_manifest import DerivedManifestRecord, read_derived_manifest
 from shared.hashing import is_sha256_digest, sha256_file
 
 MODEL_FILENAME = "model.pt"
@@ -21,6 +21,7 @@ METADATA_FILENAME = "metadata.json"
 ARTIFACT_SCHEMA_VERSION = 1
 EXPECTED_PROTOCOL_NAME = "MVTec AD-derived supervised segmentation feasibility split"
 ARTIFACT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+EXPERIMENT_CONTENT_SPLITS = frozenset({"train", "val"})
 
 
 @dataclass(frozen=True)
@@ -380,12 +381,11 @@ def validate_artifact_id(artifact_id: str) -> None:
         )
 
 
-# ADD 2026-08-25: Self-contained C2-1 package의 fixed lineage와 label contract를 검증한다.
-def validate_training_dataset(
+# ADD 2026-08-28: Dataset-level provenance와 portable descriptor를 content 접근 전에 검증한다.
+def _validate_dataset_package_metadata(
     dataset_root: Path,
     contract: YoloDatasetContract,
-) -> dict[str, int]:
-    """Validate package integrity without requiring unavailable raw source masks on Kaggle."""
+) -> Path:
     dataset_yaml_path = dataset_root / "dataset.yaml"
     manifest_path = dataset_root / "manifest.csv"
     metadata_path = dataset_root / "metadata.json"
@@ -409,9 +409,26 @@ def validate_training_dataset(
         raise ValueError("Training dataset semantic fingerprint mismatch.")
     if metadata.get("derived_manifest_sha256") != contract.manifest_sha256:
         raise ValueError("Training dataset metadata manifest lineage mismatch.")
+    return manifest_path
 
-    records = read_derived_manifest(manifest_path)
-    observed = {key: 0 for key in contract.sample_counts}
+
+# ADD 2026-08-28: 선택된 split record만 image/label content와 count contract로 검증한다.
+def _validate_dataset_record_content(
+    dataset_root: Path,
+    contract: YoloDatasetContract,
+    records: list[DerivedManifestRecord],
+    *,
+    expected_splits: frozenset[str],
+    count_context: str,
+) -> dict[str, int]:
+    expected_counts: dict[str, int] = {}
+    for split in sorted(expected_splits):
+        expected_counts[split] = contract.sample_counts[split]
+        for kind in ("positive", "negative"):
+            key = f"{split}_{kind}"
+            expected_counts[key] = contract.sample_counts[key]
+    observed = {key: 0 for key in expected_counts}
+
     source_images: set[str] = set()
     valid_class_ids = set(contract.classes)
     for record in records:
@@ -423,7 +440,7 @@ def validate_training_dataset(
         if (
             record.derived_task != contract.task
             or record.category != contract.category
-            or record.derived_split not in {"train", "val", "test"}
+            or record.derived_split not in expected_splits
         ):
             raise ValueError(f"Derived record task/category/split mismatch: {record.sample_id}")
         image_path = dataset_root / record.image_path
@@ -466,12 +483,50 @@ def validate_training_dataset(
                 raise ValueError(f"Positive polygon count mismatch: {record.sample_id}")
         observed[record.derived_split] += 1
         observed[f"{record.derived_split}_{'negative' if record.is_negative else 'positive'}"] += 1
-    if observed != contract.sample_counts:
+    if observed != expected_counts:
         raise ValueError(
-            "Training dataset counts mismatch: "
-            f"expected={contract.sample_counts}, actual={observed}"
+            f"{count_context} counts mismatch: expected={expected_counts}, actual={observed}"
         )
     return observed
+
+
+# ADD 2026-08-25: Dataset을 검증한다. → MODIFY 2026-08-28: 검증을 분리해 seal과 공유한다.
+def validate_training_dataset(
+    dataset_root: Path,
+    contract: YoloDatasetContract,
+) -> dict[str, int]:
+    """Validate package integrity without requiring unavailable raw source masks on Kaggle."""
+    manifest_path = _validate_dataset_package_metadata(dataset_root, contract)
+    records = read_derived_manifest(manifest_path)
+    return _validate_dataset_record_content(
+        dataset_root,
+        contract,
+        records,
+        expected_splits=frozenset({"train", "val", "test"}),
+        count_context="Training dataset",
+    )
+
+
+# ADD 2026-08-28: C4 experiment가 sealed test content를 열지 않고 train/val만 검증한다.
+def validate_experiment_dataset(
+    dataset_root: Path,
+    contract: YoloDatasetContract,
+    *,
+    content_splits: frozenset[str] = EXPERIMENT_CONTENT_SPLITS,
+) -> tuple[DerivedManifestRecord, ...]:
+    """Validate selected content; excluded CSV rows stop after lexical split gating."""
+    if not content_splits or not content_splits.issubset(EXPERIMENT_CONTENT_SPLITS):
+        raise ValueError("C4 experiment content splits must be a non-empty train/val subset.")
+    manifest_path = _validate_dataset_package_metadata(dataset_root, contract)
+    records = read_derived_manifest(manifest_path, allowed_splits=set(content_splits))
+    _validate_dataset_record_content(
+        dataset_root,
+        contract,
+        records,
+        expected_splits=content_splits,
+        count_context="C4 experiment dataset",
+    )
+    return tuple(records)
 
 
 # ADD 2026-08-25: Project-owned checkpoint와 metadata를 overwrite 없이 저장한다.
