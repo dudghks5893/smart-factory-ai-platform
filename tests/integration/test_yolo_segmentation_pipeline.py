@@ -243,6 +243,9 @@ def test_training_and_evaluation_pipeline_contract(tmp_path: Path) -> None:
     ) -> BackendTrainingResult:
         runtime_dataset = yaml.safe_load(dataset_yaml.read_text(encoding="utf-8"))
         assert Path(runtime_dataset["path"]).is_absolute()
+        assert runtime_dataset["train"] == "images/train"
+        assert runtime_dataset["val"] == "images/val"
+        assert runtime_dataset["test"] == "images/test"
         assert runner_config.evaluation.split == "test"
         assert requested_device == "cuda"
         checkpoint = runtime_root / artifact_id / "weights" / "best.pt"

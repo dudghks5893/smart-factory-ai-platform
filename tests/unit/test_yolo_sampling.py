@@ -21,15 +21,18 @@ from ml.datasets.yolo_segmentation_manifest import (
 from ml.experiments.yolo_sampling import (
     TrainSampleProfile,
     build_component_aware_train_view,
+    build_runtime_train_view_adapter,
     expand_component_aware_train_entries,
     profile_train_samples,
     select_component_aware_eligibility,
 )
+from ml.experiments.yolo_segmentation import load_yolo_experiment_config
 from ml.training.yolo_segmentation import (
     YoloDatasetContract,
     load_yolo_segmentation_config,
     validate_experiment_dataset,
 )
+from pipelines.run_yolo_segmentation_experiment import prepare_experiment_training_dataset
 from pipelines.train_yolo_segmentation import write_runtime_dataset_yaml
 from shared.hashing import sha256_file
 
@@ -268,6 +271,43 @@ def test_train_view_is_portable_deterministic_and_preserves_canonical_order(tmp_
     }
 
 
+# ADD 2026-08-28: Portable entries의 runtime order, multiplicity, containment를 검증한다.
+def test_runtime_train_view_adapter_preserves_entries_and_dataset_containment(
+    tmp_path: Path,
+) -> None:
+    repository_root = tmp_path / "repository"
+    dataset_root, contract, records = _write_sampling_package(repository_root)
+    portable = build_component_aware_train_view(
+        repository_root=repository_root,
+        dataset_root=dataset_root,
+        train_records=records,
+        contract=contract,
+        experiment_id=EXPERIMENT_ID,
+    )
+    runtime = build_runtime_train_view_adapter(
+        repository_root=repository_root,
+        dataset_root=dataset_root,
+        portable_train_view=portable,
+        destination=repository_root / "outputs/runtime/train.runtime.txt",
+    )
+
+    portable_lines = portable.train_list_path.read_text(encoding="utf-8").splitlines()
+    runtime_lines = runtime.train_list_path.read_text(encoding="utf-8").splitlines()
+    assert len(runtime_lines) == len(portable_lines) == 6
+    assert runtime.entry_count == portable.evidence.expanded_entry_count
+    assert runtime.source_train_list_sha256 == portable.evidence.train_list_sha256
+    assert runtime_lines == [str((dataset_root / line).resolve()) for line in portable_lines]
+    assert all(Path(line).is_relative_to(dataset_root.resolve()) for line in runtime_lines)
+
+    with pytest.raises(ValueError, match="ignored outputs namespace"):
+        build_runtime_train_view_adapter(
+            repository_root=repository_root,
+            dataset_root=dataset_root,
+            portable_train_view=portable,
+            destination=repository_root / "artifacts/train.runtime.txt",
+        )
+
+
 # ADD 2026-08-28: Val/test record와 non-train path가 sampling boundary를 통과하지 못하게 한다.
 def test_sampling_rejects_non_train_records_and_paths(tmp_path: Path) -> None:
     repository_root = tmp_path / "repository"
@@ -367,20 +407,53 @@ def test_experiment_validation_does_not_open_sealed_test_content(tmp_path: Path)
     assert not (dataset_root / sealed.image_path).exists()
     assert not (dataset_root / sealed.label_path).exists()
 
+    # Future non-sampling controlled replay도 missing sealed test content로 preflight에 성공한다.
+    experiment = load_yolo_experiment_config(
+        Path("configs/experiments/yolo_segmentation/c4_2a_yolo11n_seg_imgsz1024_seed42.yaml")
+    )
+    baseline = replace(
+        load_yolo_segmentation_config(BASELINE_CONFIG_PATH),
+        dataset_contract=contract,
+    )
+    prepared = prepare_experiment_training_dataset(
+        experiment_config=experiment,
+        baseline_config=baseline,
+        dataset_root=dataset_root,
+        repository_root=tmp_path,
+        experiment_dir=tmp_path / "outputs/experiments" / experiment.experiment_id,
+    )
+    assert [record.derived_split for record in prepared.validated_records] == ["train", "val"]
+    assert prepared.runtime_dataset_yaml is not None
+    assert "test" not in yaml.safe_load(prepared.runtime_dataset_yaml.read_text(encoding="utf-8"))
+
 
 # ADD 2026-08-28: Experiment runtime YAML이 test key를 선택적으로 생략하는지 검증한다.
 def test_runtime_dataset_yaml_can_omit_sealed_test_path(tmp_path: Path) -> None:
+    runtime_train_list = tmp_path / "runtime" / "train.runtime.txt"
+    runtime_train_list.parent.mkdir(parents=True)
+    runtime_train_list.write_text("/tmp/fixture.png\n", encoding="utf-8")
     path = write_runtime_dataset_yaml(
         dataset_root=tmp_path / "dataset",
         destination=tmp_path / "runtime" / "dataset.yaml",
         classes={0: "bent", 1: "color", 2: "scratch"},
         include_test=False,
+        train_source=runtime_train_list,
     )
 
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    assert payload["train"] == "images/train"
+    assert payload["train"] == str(runtime_train_list.resolve())
     assert payload["val"] == "images/val"
     assert "test" not in payload
+
+    default_path = write_runtime_dataset_yaml(
+        dataset_root=tmp_path / "dataset",
+        destination=tmp_path / "runtime" / "dataset.default.yaml",
+        classes={0: "bent", 1: "color", 2: "scratch"},
+    )
+    default_payload = yaml.safe_load(default_path.read_text(encoding="utf-8"))
+    assert default_payload["train"] == "images/train"
+    assert default_payload["val"] == "images/val"
+    assert default_payload["test"] == "images/test"
 
 
 # ADD 2026-08-28: Pinned Ultralytics의 duplicate path와 cache multiplicity를 검증한다.

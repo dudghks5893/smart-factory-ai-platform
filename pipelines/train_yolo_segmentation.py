@@ -59,17 +59,18 @@ type TrainingRunner = Callable[
 ]
 
 
-# ADD 2026-08-25: Ultralytics runtime YAML을 쓴다. → MODIFY 2026-08-28: test path 생략을 지원한다.
+# ADD 2026-08-25: Runtime YAML을 쓴다. → MODIFY 2026-08-28: train source/test omission을 지원한다.
 def write_runtime_dataset_yaml(
     *,
     dataset_root: Path,
     destination: Path,
     classes: dict[int, str],
     include_test: bool = True,
+    train_source: Path | None = None,
 ) -> Path:
     """Write an ignored absolute-root adapter without mutating the portable dataset artifact."""
     split_paths = {
-        "train": "images/train",
+        "train": "images/train" if train_source is None else str(train_source.resolve()),
         "val": "images/val",
     }
     if include_test:
@@ -154,7 +155,7 @@ def run_ultralytics_training(
     )
 
 
-# ADD 2026-08-25: Dataset validation부터 best checkpoint artifact 저장까지 training flow를 조율한다.
+# ADD 2026-08-25: Training을 조율한다. → MODIFY 2026-08-28: Prepared YAML을 허용한다.
 def train_yolo_segmentation(
     *,
     config: YoloSegmentationBaselineConfig,
@@ -163,6 +164,7 @@ def train_yolo_segmentation(
     requested_device: str | None = None,
     training_runner: TrainingRunner = run_ultralytics_training,
     created_at: str | None = None,
+    prepared_dataset_yaml: Path | None = None,
 ) -> YoloTrainingResult:
     """Train from train/val only and persist the selected checkpoint with exact lineage."""
     validate_artifact_id(artifact_id)
@@ -171,13 +173,22 @@ def train_yolo_segmentation(
     if artifact_dir.exists() or runtime_dir.exists():
         raise FileExistsError("YOLO artifact or training runtime directory already exists.")
 
-    # 비용이 큰 pretrained download/training 전에 self-contained dataset contract를 검증한다.
-    validate_training_dataset(dataset_root, config.dataset_contract)
+    # 일반 training은 전체 package를 검증하고, experiment는 사전 검증된 runtime YAML만 받는다.
+    if prepared_dataset_yaml is None:
+        validate_training_dataset(dataset_root, config.dataset_contract)
+    elif not prepared_dataset_yaml.is_file():
+        raise FileNotFoundError(
+            f"Prepared runtime dataset YAML is missing: {prepared_dataset_yaml}"
+        )
     runtime_dir.mkdir(parents=True, exist_ok=False)
-    dataset_yaml = write_runtime_dataset_yaml(
-        dataset_root=dataset_root,
-        destination=runtime_dir / "dataset.runtime.yaml",
-        classes=config.dataset_contract.classes,
+    dataset_yaml = (
+        write_runtime_dataset_yaml(
+            dataset_root=dataset_root,
+            destination=runtime_dir / "dataset.runtime.yaml",
+            classes=config.dataset_contract.classes,
+        )
+        if prepared_dataset_yaml is None
+        else prepared_dataset_yaml.resolve()
     )
     device = requested_device or config.training.device
     seed_training(config.training.seed)

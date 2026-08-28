@@ -168,6 +168,25 @@ class TrainViewArtifact:
     evidence: TrainViewEvidence
 
 
+@dataclass(frozen=True)
+class PlannedTrainView:
+    """Pure deterministic entries and evidence before ignored artifact persistence."""
+
+    entries: tuple[str, ...]
+    profiles: tuple[TrainSampleProfile, ...]
+    eligibility: SamplingEligibility
+    evidence: TrainViewEvidence
+
+
+@dataclass(frozen=True)
+class RuntimeTrainViewArtifact:
+    """Machine-local absolute-path adapter derived from one portable train view."""
+
+    train_list_path: Path
+    source_train_list_sha256: str
+    entry_count: int
+
+
 # ADD 2026-08-28: Canonical dataset-root relative train path만 sampling input으로 허용한다.
 def _validate_relative_train_path(value: str, *, kind: str, sample_id: str) -> PurePosixPath:
     path = PurePosixPath(value)
@@ -330,15 +349,14 @@ def expand_component_aware_train_entries(
     return tuple([*canonical_entries, *duplicate_entries]), multiplicity
 
 
-# ADD 2026-08-28: Component-aware train list와 provenance를 ignored experiment output에 쓴다.
-def build_component_aware_train_view(
+# ADD 2026-08-28: Persist 전 component-aware entries와 evidence를 pure하게 계산한다.
+def plan_component_aware_train_view(
     *,
-    repository_root: Path,
     dataset_root: Path,
     train_records: Sequence[DerivedManifestRecord],
     contract: YoloDatasetContract,
     experiment_id: str,
-) -> TrainViewArtifact:
+) -> PlannedTrainView:
     contract.validate()
     validate_artifact_id(experiment_id)
     manifest_path = dataset_root / "manifest.csv"
@@ -402,6 +420,30 @@ def build_component_aware_train_view(
     evidence.validate()
     if any(profile_by_id[sample_id].is_negative for sample_id in eligible_set):
         raise RuntimeError("Good-negative multiplicity changed during train-view construction.")
+    return PlannedTrainView(
+        entries=entries,
+        profiles=profiles,
+        eligibility=eligibility,
+        evidence=evidence,
+    )
+
+
+# ADD 2026-08-28: Train view를 쓴다. → MODIFY 2026-08-28: Pure plan을 저장한다.
+def build_component_aware_train_view(
+    *,
+    repository_root: Path,
+    dataset_root: Path,
+    train_records: Sequence[DerivedManifestRecord],
+    contract: YoloDatasetContract,
+    experiment_id: str,
+) -> TrainViewArtifact:
+    plan = plan_component_aware_train_view(
+        dataset_root=dataset_root,
+        train_records=train_records,
+        contract=contract,
+        experiment_id=experiment_id,
+    )
+    train_list_bytes = ("\n".join(plan.entries) + "\n").encode()
 
     # Absolute host paths를 evidence에 넣지 않고 Git-ignored experiment output만 생성한다.
     output_dir = repository_root.resolve() / TRAIN_VIEW_RELATIVE_ROOT / experiment_id / "train_view"
@@ -412,12 +454,69 @@ def build_component_aware_train_view(
     metadata_path = output_dir / "metadata.json"
     train_list_path.write_bytes(train_list_bytes)
     metadata_path.write_text(
-        json.dumps(evidence.to_json_dict(), indent=2, sort_keys=True, allow_nan=False) + "\n",
+        json.dumps(plan.evidence.to_json_dict(), indent=2, sort_keys=True, allow_nan=False) + "\n",
         encoding="utf-8",
     )
     return TrainViewArtifact(
         output_dir=output_dir,
         train_list_path=train_list_path,
         metadata_path=metadata_path,
-        evidence=evidence,
+        evidence=plan.evidence,
+    )
+
+
+# ADD 2026-08-28: Portable train entries를 dataset-root 절대 경로 runtime list로 변환한다.
+def build_runtime_train_view_adapter(
+    *,
+    repository_root: Path,
+    dataset_root: Path,
+    portable_train_view: TrainViewArtifact,
+    destination: Path,
+) -> RuntimeTrainViewArtifact:
+    portable_train_view.evidence.validate()
+    if sha256_file(portable_train_view.train_list_path) != (
+        portable_train_view.evidence.train_list_sha256
+    ):
+        raise ValueError("Portable train-view list SHA does not match its evidence.")
+    resolved_repository = repository_root.resolve()
+    resolved_destination = destination.resolve()
+    try:
+        destination_relative = resolved_destination.relative_to(resolved_repository)
+    except ValueError as exc:
+        raise ValueError("Runtime train-view adapter must remain inside the repository.") from exc
+    if not destination_relative.parts or destination_relative.parts[0] != "outputs":
+        raise ValueError("Runtime train-view adapter must use the ignored outputs namespace.")
+    if resolved_destination.exists():
+        raise FileExistsError(f"Runtime train-view list already exists: {resolved_destination}")
+
+    resolved_dataset = dataset_root.resolve()
+    portable_entries = portable_train_view.train_list_path.read_text(encoding="utf-8").splitlines()
+    if len(portable_entries) != portable_train_view.evidence.expanded_entry_count:
+        raise ValueError("Portable train-view entry count does not match its evidence.")
+    runtime_entries: list[str] = []
+    for index, entry in enumerate(portable_entries):
+        relative = _validate_relative_train_path(
+            entry,
+            kind="image",
+            sample_id=f"runtime-entry-{index}",
+        )
+        resolved_image = dataset_root.joinpath(*relative.parts).resolve()
+        try:
+            resolved_image.relative_to(resolved_dataset)
+        except ValueError as exc:
+            raise ValueError(
+                "Runtime train-view image escapes the canonical dataset root."
+            ) from exc
+        if not resolved_image.is_file():
+            raise FileNotFoundError(f"Runtime train-view image is missing: {entry}")
+        runtime_entries.append(resolved_image.as_posix())
+
+    resolved_destination.parent.mkdir(parents=True, exist_ok=True)
+    resolved_destination.write_text("\n".join(runtime_entries) + "\n", encoding="utf-8")
+    if len(runtime_entries) != len(portable_entries):
+        raise RuntimeError("Runtime train-view adapter changed entry multiplicity.")
+    return RuntimeTrainViewArtifact(
+        train_list_path=resolved_destination,
+        source_train_list_sha256=portable_train_view.evidence.train_list_sha256,
+        entry_count=len(runtime_entries),
     )

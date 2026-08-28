@@ -18,6 +18,7 @@ from typing import Any
 import torch
 import torchvision  # type: ignore[import-untyped]
 
+from ml.datasets.yolo_segmentation_manifest import DerivedManifestRecord
 from ml.evaluation.final_benchmark import RepositoryProvenance, resolve_repository_provenance
 from ml.evaluation.yolo_segmentation import serialize_ultralytics_metrics
 from ml.evaluation.yolo_segmentation_visualization import (
@@ -29,6 +30,12 @@ from ml.experiments.gpu_telemetry import (
     query_nvidia_driver_version,
     reset_torch_cuda_peaks,
     sample_nvidia_smi,
+)
+from ml.experiments.yolo_sampling import (
+    RuntimeTrainViewArtifact,
+    TrainViewArtifact,
+    build_component_aware_train_view,
+    build_runtime_train_view_adapter,
 )
 from ml.experiments.yolo_segmentation import (
     BASELINE_METADATA_SHA256,
@@ -51,7 +58,7 @@ from ml.training.yolo_segmentation import (
     MODEL_FILENAME,
     YoloSegmentationBaselineConfig,
     load_yolo_segmentation_config,
-    validate_training_dataset,
+    validate_experiment_dataset,
     validate_yolo_artifact,
 )
 from pipelines.analyze_yolo_segmentation_errors import (
@@ -101,6 +108,16 @@ class ExperimentRunArtifacts:
     package_metadata_path: Path
 
 
+@dataclass(frozen=True)
+class PreparedExperimentDataset:
+    """Validated split records and optional C4-2B runtime training adapters."""
+
+    validated_records: tuple[DerivedManifestRecord, ...]
+    train_view: TrainViewArtifact | None
+    runtime_train_view: RuntimeTrainViewArtifact | None
+    runtime_dataset_yaml: Path
+
+
 type ValidationRunner = Callable[
     [YoloSegmentationBaselineConfig, Path, Path, Path, str], ValidationMetricsResult
 ]
@@ -126,7 +143,7 @@ def _framework_device(requested_device: str) -> str | int | None:
     return None
 
 
-# ADD 2026-08-27: Fixed artifact의 val box/mask metric을 test evaluator와 분리해 계산한다.
+# ADD 2026-08-27: Val metrics를 계산한다. → MODIFY 2026-08-28: Runtime YAML에서 test를 제외한다.
 def run_ultralytics_validation_metrics(
     config: YoloSegmentationBaselineConfig,
     model_artifact_dir: Path,
@@ -143,6 +160,7 @@ def run_ultralytics_validation_metrics(
         dataset_root=dataset_root,
         destination=output_dir / "dataset.runtime.yaml",
         classes=config.dataset_contract.classes,
+        include_test=False,
     )
     from ultralytics import YOLO
     from ultralytics import __version__ as ultralytics_version
@@ -308,13 +326,81 @@ def collect_software_environment(
     }
 
 
-# ADD 2026-08-27: Technical evidence와 candidate artifact만 포함한 ZIP과 SHA sidecar를 생성한다.
+# ADD 2026-08-28: Dataset을 준비한다. → MODIFY 2026-08-28: 모든 C4에 strict seal을 적용한다.
+def prepare_experiment_training_dataset(
+    *,
+    experiment_config: YoloExperimentConfig,
+    baseline_config: YoloSegmentationBaselineConfig,
+    dataset_root: Path,
+    repository_root: Path,
+    experiment_dir: Path,
+) -> PreparedExperimentDataset:
+    # Sealed test row는 split gating 이후 materialize하지 않고 train/val content만 검증한다.
+    validated_records = validate_experiment_dataset(
+        dataset_root,
+        baseline_config.dataset_contract,
+    )
+    if experiment_config.sampling_policy is None:
+        runtime_dataset_yaml = write_runtime_dataset_yaml(
+            dataset_root=dataset_root,
+            destination=experiment_dir / "runtime" / "dataset.runtime.yaml",
+            classes=baseline_config.dataset_contract.classes,
+            include_test=False,
+        )
+        return PreparedExperimentDataset(
+            validated_records,
+            None,
+            None,
+            runtime_dataset_yaml,
+        )
+
+    train_records = tuple(record for record in validated_records if record.derived_split == "train")
+    if len(train_records) != baseline_config.dataset_contract.sample_counts["train"]:
+        raise ValueError("C4-2B validated train record count changed.")
+
+    # Validated train records로 portable evidence를 만든 뒤 machine-local absolute list로 변환한다.
+    train_view = build_component_aware_train_view(
+        repository_root=repository_root,
+        dataset_root=dataset_root,
+        train_records=train_records,
+        contract=baseline_config.dataset_contract,
+        experiment_id=experiment_config.experiment_id,
+    )
+    if train_view.output_dir != experiment_dir / "train_view":
+        raise ValueError("C4-2B train-view output does not match the experiment namespace.")
+    expected = experiment_config.expected_train_view
+    if expected is None:
+        raise ValueError("C4-2B expected train-view snapshot is missing.")
+    expected.validate_evidence(train_view.evidence)
+    runtime_adapter = build_runtime_train_view_adapter(
+        repository_root=repository_root,
+        dataset_root=dataset_root,
+        portable_train_view=train_view,
+        destination=experiment_dir / "runtime" / "train.runtime.txt",
+    )
+    runtime_dataset_yaml = write_runtime_dataset_yaml(
+        dataset_root=dataset_root,
+        destination=experiment_dir / "runtime" / "dataset.runtime.yaml",
+        classes=baseline_config.dataset_contract.classes,
+        include_test=False,
+        train_source=runtime_adapter.train_list_path,
+    )
+    return PreparedExperimentDataset(
+        validated_records=validated_records,
+        train_view=train_view,
+        runtime_train_view=runtime_adapter,
+        runtime_dataset_yaml=runtime_dataset_yaml,
+    )
+
+
+# ADD 2026-08-27: Evidence ZIP을 만든다. → MODIFY 2026-08-28: Train-view를 포함한다.
 def build_experiment_package(
     *,
     experiment_dir: Path,
     candidate_artifact_dir: Path,
     experiment_config_path: Path,
     package_path: Path,
+    train_view: TrainViewArtifact | None = None,
 ) -> Path:
     if package_path.exists():
         raise FileExistsError(f"Experiment package already exists: {package_path}")
@@ -334,6 +420,16 @@ def build_experiment_package(
     files: list[tuple[Path, str]] = [
         (experiment_dir / name, f"evidence/{name}") for name in evidence_names
     ]
+    if train_view is not None:
+        train_view.evidence.validate()
+        if sha256_file(train_view.train_list_path) != train_view.evidence.train_list_sha256:
+            raise ValueError("Packaged train-view list SHA does not match its evidence.")
+        files.extend(
+            (
+                (train_view.metadata_path, "evidence/train_view_metadata.json"),
+                (train_view.train_list_path, "evidence/train_view.txt"),
+            )
+        )
     files.extend(
         (
             (candidate_artifact_dir / MODEL_FILENAME, f"model/{MODEL_FILENAME}"),
@@ -366,8 +462,7 @@ def _assert_baseline_immutable(
         raise RuntimeError("Baseline runtime artifact changed during the experiment.")
 
 
-# ADD 2026-08-27: Training telemetry와 validation-only before/after evidence lifecycle을 조율한다.
-# MODIFY 2026-08-27: Epoch log와 validation-only visual evidence를 official package에 연결한다.
+# ADD 2026-08-27: Lifecycle을 조율한다. → MODIFY 2026-08-28: Common seal과 sampling view를 연결한다.
 def run_yolo_segmentation_experiment(
     *,
     experiment_config: YoloExperimentConfig,
@@ -382,13 +477,20 @@ def run_yolo_segmentation_experiment(
 ) -> ExperimentRunArtifacts:
     baseline_config = load_yolo_segmentation_config(experiment_config.baseline_config_path)
     candidate_config = experiment_config.training_config(baseline_config)
-    validate_training_dataset(dataset_root, baseline_config.dataset_contract)
     if requested_device != "cuda" or str(resolve_device(requested_device)) != "cuda":
-        raise ValueError("C4-2A actual experiment requires explicit available CUDA.")
+        raise ValueError("Controlled YOLO experiment requires explicit available CUDA.")
     experiment_dir = experiment_config.output.experiment_root / experiment_config.experiment_id
     if experiment_dir.exists():
         raise FileExistsError(f"Experiment output already exists: {experiment_dir}")
     experiment_dir.mkdir(parents=True)
+    prepared_dataset = prepare_experiment_training_dataset(
+        experiment_config=experiment_config,
+        baseline_config=baseline_config,
+        dataset_root=dataset_root,
+        repository_root=repository_root,
+        experiment_dir=experiment_dir,
+    )
+    validated_analysis_records = prepared_dataset.validated_records
 
     baseline_model_path = baseline_artifact_dir / "model" / MODEL_FILENAME
     baseline_metadata_path = baseline_artifact_dir / "model" / METADATA_FILENAME
@@ -408,6 +510,18 @@ def run_yolo_segmentation_experiment(
     )
     metadata_payload["working_tree_dirty"] = provenance.working_tree_dirty
     metadata_payload["status"] = "RUNNING"
+    if prepared_dataset.train_view is not None:
+        metadata_payload["train_view"] = prepared_dataset.train_view.evidence.to_json_dict()
+        runtime_view = prepared_dataset.runtime_train_view
+        if runtime_view is None:
+            raise RuntimeError("C4-2B runtime train-view adapter is missing.")
+        metadata_payload["runtime_train_view_adapter"] = {
+            "source_train_list_sha256": runtime_view.source_train_list_sha256,
+            "entry_count": runtime_view.entry_count,
+            "order_and_multiplicity_verified": True,
+            "dataset_root_containment_verified": True,
+            "portable_package_evidence": False,
+        }
     _write_json(experiment_dir / "experiment_metadata.json", metadata_payload)
 
     # Candidate 결과를 보기 전에 동일 val protocol로 baseline quality reference를 복원한다.
@@ -425,6 +539,7 @@ def run_yolo_segmentation_experiment(
         output_dir=experiment_dir / "baseline_error_analysis",
         requested_device=requested_device,
         size_policy_override=experiment_config.validation_protocol.size_policy(),
+        validated_records=validated_analysis_records,
     )
     quality_before = build_quality_payload(baseline_validation, baseline_analysis)
     environment = collect_software_environment(
@@ -452,6 +567,7 @@ def run_yolo_segmentation_experiment(
                 artifact_id=experiment_config.experiment_id,
                 requested_device=requested_device,
                 training_runner=training_runner,
+                prepared_dataset_yaml=prepared_dataset.runtime_dataset_yaml,
             )
     except Exception as exc:
         training_error = exc
@@ -465,6 +581,19 @@ def run_yolo_segmentation_experiment(
         "pytorch_cuda": collect_torch_cuda_metrics(),
         "nvidia_smi": sampler.summary(),
     }
+    if prepared_dataset.train_view is not None:
+        evidence = prepared_dataset.train_view.evidence
+        batch = candidate_config.training.batch
+        resource_metrics["train_view_exposure"] = {
+            "canonical_train_entries": evidence.unique_train_count,
+            "expanded_train_entries": evidence.expanded_entry_count,
+            "canonical_positive_exposure": evidence.unique_positive_count,
+            "expanded_positive_exposure": evidence.expanded_positive_count,
+            "canonical_good_negative_exposure": evidence.unique_good_negative_count,
+            "expanded_good_negative_exposure": evidence.expanded_good_negative_count,
+            "nominal_batches_per_epoch_before": (evidence.unique_train_count + batch - 1) // batch,
+            "nominal_batches_per_epoch_after": (evidence.expanded_entry_count + batch - 1) // batch,
+        }
     _write_json(experiment_dir / "resource_telemetry.json", resource_metrics)
     epoch_log_source = (
         candidate_config.output.training_runtime_root
@@ -560,6 +689,7 @@ def run_yolo_segmentation_experiment(
         output_dir=experiment_dir / "candidate_error_analysis",
         requested_device=requested_device,
         size_policy_override=experiment_config.validation_protocol.size_policy(),
+        validated_records=validated_analysis_records,
     )
     quality_after = build_quality_payload(candidate_validation, candidate_analysis)
     validation_metrics_payload = {
@@ -633,6 +763,7 @@ def run_yolo_segmentation_experiment(
         "experiment_id": experiment_config.experiment_id,
         "hypothesis": experiment_config.hypothesis,
         "controlled_change": asdict(experiment_config.controlled_change),
+        "intervention_type": experiment_config.intervention_type,
         "constants": experiment_config.baseline_identity,
         "split": "val",
         "test_split_used": False,
@@ -654,6 +785,8 @@ def run_yolo_segmentation_experiment(
         else ("REJECTED" if recommendation.decision == "REJECT" else "COMPLETED"),
         "repository": provenance.to_json_dict(),
     }
+    if prepared_dataset.train_view is not None:
+        result_payload["train_view"] = prepared_dataset.train_view.evidence.to_json_dict()
     validate_experiment_result(result_payload)
     result_path = experiment_dir / "experiment_result.json"
     _write_json(result_path, result_payload)
@@ -667,6 +800,7 @@ def run_yolo_segmentation_experiment(
         candidate_artifact_dir=training_result.artifact_dir,
         experiment_config_path=experiment_config.config_path,
         package_path=package_path,
+        train_view=prepared_dataset.train_view,
     )
     package_metadata_path = experiment_dir / "package_metadata.json"
     _write_json(
@@ -721,7 +855,7 @@ def main() -> int:
         requested_device=args.device,
         repository_root=args.repository_root,
     )
-    print("C4-2A YOLO controlled experiment: PASS")
+    print("YOLO controlled experiment: PASS")
     print(f"Experiment result: {artifacts.experiment_result_path}")
     print(f"Candidate artifact: {artifacts.candidate_artifact_dir}")
     print(f"Package: {artifacts.package_path}")

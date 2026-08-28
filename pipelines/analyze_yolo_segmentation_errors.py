@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -177,8 +177,7 @@ def select_visualization_samples(
     return selected[:max_count]
 
 
-# ADD 2026-08-26: Artifact 검증부터 validation diagnostics 저장까지 조율한다.
-# MODIFY 2026-08-27: Fixed size policy와 deterministic validation gallery evidence를 확장한다.
+# ADD 2026-08-26: Val diagnostics를 조율한다. → MODIFY 2026-08-28: Prevalidated val을 허용한다.
 def analyze_yolo_segmentation_errors(
     *,
     config: YoloSegmentationBaselineConfig,
@@ -187,16 +186,20 @@ def analyze_yolo_segmentation_errors(
     output_dir: Path,
     requested_device: str,
     size_policy_override: SizeBucketPolicy | None = None,
+    validated_records: Sequence[DerivedManifestRecord] | None = None,
     runtime_loader: RuntimeLoader = load_yolo_segmentation_runtime,
     created_at: str | None = None,
 ) -> ErrorAnalysisArtifacts:
     if output_dir.exists():
         raise FileExistsError(f"Validation error-analysis output already exists: {output_dir}")
 
-    # 비용이 큰 model load 전에 dataset lineage와 validation-only analysis boundary를 검증한다.
-    validate_training_dataset(dataset_root, config.dataset_contract)
+    # 일반 분석은 전체 package를 검증하고, experiment는 sealed val record만 재사용한다.
     manifest_path = dataset_root / "manifest.csv"
-    records = read_derived_manifest(manifest_path)
+    if validated_records is None:
+        validate_training_dataset(dataset_root, config.dataset_contract)
+        records = read_derived_manifest(manifest_path)
+    else:
+        records = list(validated_records)
     validation_records = require_validation_records(
         [record for record in records if record.derived_split == "val"]
     )

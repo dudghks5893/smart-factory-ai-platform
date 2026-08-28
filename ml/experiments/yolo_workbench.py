@@ -18,12 +18,13 @@ from ml.datasets.yolo_segmentation_manifest import (
 )
 from ml.evaluation.final_benchmark import RepositoryProvenance, resolve_repository_provenance
 from ml.evaluation.yolo_segmentation_error_analysis import SizeBucketPolicy
+from ml.experiments.yolo_sampling import plan_component_aware_train_view
 from ml.experiments.yolo_segmentation import YoloExperimentConfig
 from ml.training.device import resolve_device
 from ml.training.yolo_segmentation import (
     YoloOutputConfig,
     YoloSegmentationBaselineConfig,
-    validate_training_dataset,
+    validate_experiment_dataset,
 )
 from shared.hashing import sha256_file
 
@@ -64,6 +65,7 @@ class OfficialPreflight:
     """Identity evidence rendered immediately before an explicit official run."""
 
     experiment_id: str
+    intervention_type: str
     git_commit: str | None
     working_tree_dirty: bool
     config_path: str
@@ -84,6 +86,7 @@ class OfficialPreflight:
     test_split_used: bool
     telemetry_enabled: bool
     telemetry_interval_seconds: float
+    sampling_summary: dict[str, Any] | None
 
     # ADD 2026-08-27: Notebook display와 audit용 strict mapping을 반환한다.
     def to_json_dict(self) -> dict[str, Any]:
@@ -333,7 +336,69 @@ def select_small_validation_sample(
     )
 
 
-# ADD 2026-08-27: Dataset/Baseline/config/Git identity를 official training 전에 검증한다.
+# ADD 2026-08-28: Validated train records에서 compact C4-2B sampling audit를 만든다.
+def build_sampling_workbench_summary(
+    *,
+    experiment: YoloExperimentConfig,
+    baseline: YoloSegmentationBaselineConfig,
+    dataset_root: Path,
+    records: list[DerivedManifestRecord],
+) -> dict[str, Any] | None:
+    if experiment.sampling_policy is None:
+        return None
+    train_records = [record for record in records if record.derived_split == "train"]
+    plan = plan_component_aware_train_view(
+        dataset_root=dataset_root,
+        train_records=train_records,
+        contract=baseline.dataset_contract,
+        experiment_id=experiment.experiment_id,
+    )
+    expected = experiment.expected_train_view
+    if expected is None:
+        raise ValueError("Sampling workbench requires expected train-view evidence.")
+    expected.validate_evidence(plan.evidence)
+    small_ids = set(plan.eligibility.small_aware_sample_ids)
+    multi_ids = set(plan.eligibility.multi_component_sample_ids)
+    eligible_rows = [
+        {
+            "sample_id": sample_id,
+            "small_aware": sample_id in small_ids,
+            "multi_component": sample_id in multi_ids,
+            "overlap": sample_id in small_ids and sample_id in multi_ids,
+            "multiplicity": plan.evidence.sample_multiplicity[sample_id],
+        }
+        for sample_id in plan.eligibility.eligible_sample_ids
+    ]
+    return {
+        "sampling_rule_version": plan.evidence.sampling_rule_version,
+        "sampling_validation_source": "TRAIN_ONLY",
+        "test_split": "SEALED_NOT_USED",
+        "train_list_sha256": plan.evidence.train_list_sha256,
+        "canonical_train_entries": plan.evidence.unique_train_count,
+        "expanded_train_entries": plan.evidence.expanded_entry_count,
+        "positive_exposure": [
+            plan.evidence.unique_positive_count,
+            plan.evidence.expanded_positive_count,
+        ],
+        "good_negative_exposure": [
+            plan.evidence.unique_good_negative_count,
+            plan.evidence.expanded_good_negative_count,
+        ],
+        "canonical_good_negative_ratio": (
+            plan.evidence.unique_good_negative_count / plan.evidence.unique_train_count
+        ),
+        "expanded_good_negative_ratio": plan.evidence.expanded_good_negative_ratio,
+        "small_aware_count": plan.evidence.small_aware_count,
+        "multi_component_count": plan.evidence.multi_component_count,
+        "eligible_overlap_count": plan.evidence.eligible_overlap_count,
+        "eligible_union_count": plan.evidence.eligible_union_count,
+        "eligible_multiplicity": plan.evidence.eligible_multiplicity,
+        "observed_train_small_cutoff": plan.evidence.observed_train_small_cutoff,
+        "eligible_samples": eligible_rows,
+    }
+
+
+# ADD 2026-08-27: Official identity를 검증한다. → MODIFY 2026-08-28: Sampling preflight를 추가한다.
 def build_official_preflight(
     *,
     experiment: YoloExperimentConfig,
@@ -345,10 +410,9 @@ def build_official_preflight(
 ) -> OfficialPreflight:
     validate_workbench_controls("official", overrides=overrides)
     if requested_device != "cuda" or str(resolve_device(requested_device)) != "cuda":
-        raise ValueError("Official C4-2A preflight requires explicit available CUDA.")
+        raise ValueError("Official controlled experiment preflight requires available CUDA.")
     candidate = experiment.training_config(baseline)
-    validate_training_dataset(paths.dataset_root, baseline.dataset_contract)
-    records = load_workbench_records(paths.dataset_root)
+    records = list(validate_experiment_dataset(paths.dataset_root, baseline.dataset_contract))
     counts = Counter(record.derived_split for record in records)
     expected_counts = {
         split: baseline.dataset_contract.sample_counts[split] for split in ("train", "val")
@@ -363,8 +427,15 @@ def build_official_preflight(
     if sha256_file(metadata_path) != source["metadata_sha256"]:
         raise ValueError("Official preflight Baseline metadata SHA mismatch.")
     provenance = repository_provenance or resolve_repository_provenance(paths.repository_root)
+    sampling_summary = build_sampling_workbench_summary(
+        experiment=experiment,
+        baseline=baseline,
+        dataset_root=paths.dataset_root,
+        records=records,
+    )
     return OfficialPreflight(
         experiment_id=experiment.experiment_id,
+        intervention_type=experiment.intervention_type,
         git_commit=provenance.git_commit,
         working_tree_dirty=provenance.working_tree_dirty,
         config_path=experiment.config_path.as_posix(),
@@ -385,6 +456,7 @@ def build_official_preflight(
         test_split_used=False,
         telemetry_enabled=True,
         telemetry_interval_seconds=experiment.telemetry.sample_interval_seconds,
+        sampling_summary=sampling_summary,
     )
 
 

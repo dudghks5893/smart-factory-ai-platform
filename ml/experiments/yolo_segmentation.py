@@ -15,6 +15,12 @@ from ml.evaluation.yolo_segmentation_error_analysis import (
     MATCH_IOU_THRESHOLD,
     SizeBucketPolicy,
 )
+from ml.experiments.yolo_sampling import (
+    ELIGIBLE_MULTIPLICITY,
+    SAMPLING_RULE_VERSION,
+    SMALL_FRACTION_RULE,
+    TrainViewEvidence,
+)
 from ml.training.yolo_segmentation import (
     YoloOutputConfig,
     YoloSegmentationBaselineConfig,
@@ -37,6 +43,11 @@ EXPECTED_PRIORITIES = {
     "failure_focused": ("small_defect_recall", "multi_component_recall"),
     "guardrail": ("good_negative_fp_image_rate",),
 }
+RESOLUTION_INTERVENTION = "resolution"
+TRAIN_SAMPLING_INTERVENTION = "train_sampling_multiplicity"
+SAMPLING_CONTROLLED_FIELD = "training.dataset_index_multiplicity"
+SAMPLING_CONTROLLED_BEFORE = "canonical_x1"
+SAMPLING_CONTROLLED_AFTER = "component_aware_eligible_x2"
 
 
 @dataclass(frozen=True)
@@ -44,8 +55,61 @@ class ControlledChange:
     """One intentionally varied model-quality field."""
 
     field: str
-    before: int
-    after: int
+    before: int | str
+    after: int | str
+
+
+@dataclass(frozen=True)
+class SamplingPolicy:
+    """Train-only component-aware multiplicity policy for C4-2B."""
+
+    policy_type: str
+    sampling_rule_version: str
+    small_fraction_rule: str
+    multi_component: bool
+    eligible_multiplicity: int
+    validation_used_for_sampling: bool
+    test_split_used: bool
+
+    # ADD 2026-08-28: C4-2B sampling policy가 predeclared train-only x2 규칙인지 검증한다.
+    def validate(self) -> None:
+        if (
+            self.policy_type != "component_aware_train_multiplicity"
+            or self.sampling_rule_version != SAMPLING_RULE_VERSION
+            or self.small_fraction_rule != SMALL_FRACTION_RULE
+            or self.multi_component is not True
+            or self.eligible_multiplicity != ELIGIBLE_MULTIPLICITY
+            or self.validation_used_for_sampling is not False
+            or self.test_split_used is not False
+        ):
+            raise ValueError("C4-2B sampling policy changed from the predeclared train-only rule.")
+
+
+@dataclass(frozen=True)
+class ExpectedTrainView:
+    """Official dataset snapshot asserted without defining the sampling behavior."""
+
+    unique_train_count: int
+    unique_positive_count: int
+    unique_good_negative_count: int
+    small_aware_count: int
+    multi_component_count: int
+    eligible_overlap_count: int
+    eligible_union_count: int
+    expanded_entry_count: int
+    expanded_positive_count: int
+    expanded_good_negative_count: int
+    expanded_good_negative_ratio: float
+    observed_train_small_cutoff: float
+
+    # ADD 2026-08-28: Generated train-view가 approved canonical snapshot과 일치하는지 검증한다.
+    def validate_evidence(self, evidence: TrainViewEvidence) -> None:
+        expected = asdict(self)
+        actual = {key: getattr(evidence, key) for key in expected}
+        if actual != expected:
+            raise ValueError(
+                f"C4-2B train-view snapshot mismatch: expected={expected}, actual={actual}"
+            )
 
 
 @dataclass(frozen=True)
@@ -143,7 +207,10 @@ class YoloExperimentConfig:
     baseline_identity: dict[str, Any]
     baseline_evidence: dict[str, Any]
     candidate_identity: dict[str, Any]
+    intervention_type: str
     controlled_change: ControlledChange
+    sampling_policy: SamplingPolicy | None
+    expected_train_view: ExpectedTrainView | None
     validation_protocol: ValidationProtocol
     telemetry: TelemetryConfig
     output: ExperimentOutputConfig
@@ -151,7 +218,7 @@ class YoloExperimentConfig:
     decision_policy: DecisionPolicy
     config_path: Path
 
-    # ADD 2026-08-27: C4-2A가 imgsz 외 model-quality 변수를 바꾸지 않는지 검증한다.
+    # ADD 2026-08-27: Imgsz를 검증한다. → MODIFY 2026-08-28: Sampling 변경도 검증한다.
     def validate(self, baseline: YoloSegmentationBaselineConfig) -> None:
         validate_artifact_id(self.experiment_id)
         try:
@@ -160,7 +227,7 @@ class YoloExperimentConfig:
             raise ValueError("Experiment date must be ISO YYYY-MM-DD.") from exc
         if self.status not in EXPERIMENT_STATUSES or not self.hypothesis:
             raise ValueError("Experiment status/hypothesis is invalid.")
-        expected_identity = {
+        legacy_identity = {
             "model": baseline.model.architecture,
             "pretrained_checkpoint": baseline.model.weights,
             "imgsz": baseline.training.imgsz,
@@ -169,21 +236,48 @@ class YoloExperimentConfig:
             "epochs": baseline.training.epochs,
             "patience": baseline.training.patience,
         }
+        fixed_training_identity = {
+            **legacy_identity,
+            "workers": baseline.training.workers,
+            "optimizer": baseline.training.optimizer,
+            "deterministic": baseline.training.deterministic,
+            "amp": baseline.training.amp,
+        }
+        expected_identity = (
+            legacy_identity
+            if self.intervention_type == RESOLUTION_INTERVENTION
+            else fixed_training_identity
+        )
         if self.baseline_identity != expected_identity:
             raise ValueError("Experiment baseline identity does not match the baseline config.")
         _validate_baseline_evidence(self.baseline_evidence)
-        if self.controlled_change != ControlledChange("training.imgsz", 640, 1024):
-            raise ValueError("C4-2A must contain only the imgsz 640 -> 1024 controlled change.")
-        expected_candidate_identity = {
-            **expected_identity,
-            "imgsz": self.controlled_change.after,
-        }
+        if self.intervention_type == RESOLUTION_INTERVENTION:
+            if self.controlled_change != ControlledChange("training.imgsz", 640, 1024):
+                raise ValueError("C4-2A must contain only the imgsz 640 -> 1024 change.")
+            expected_candidate_identity = {
+                **expected_identity,
+                "imgsz": self.controlled_change.after,
+            }
+            if self.sampling_policy is not None or self.expected_train_view is not None:
+                raise ValueError("C4-2A must not declare a train sampling policy.")
+        elif self.intervention_type == TRAIN_SAMPLING_INTERVENTION:
+            expected_change = ControlledChange(
+                SAMPLING_CONTROLLED_FIELD,
+                SAMPLING_CONTROLLED_BEFORE,
+                SAMPLING_CONTROLLED_AFTER,
+            )
+            if self.controlled_change != expected_change:
+                raise ValueError("C4-2B must contain only the train multiplicity policy change.")
+            if self.sampling_policy is None or self.expected_train_view is None:
+                raise ValueError("C4-2B requires sampling policy and expected train-view evidence.")
+            self.sampling_policy.validate()
+            expected_candidate_identity = expected_identity
+        else:
+            raise ValueError("Unsupported YOLO experiment intervention type.")
         if self.candidate_identity != expected_candidate_identity:
-            raise ValueError("Experiment candidate identity must change only imgsz.")
-        if self.controlled_change.before != baseline.training.imgsz:
-            raise ValueError("Controlled-change before value must match the baseline.")
+            raise ValueError("Experiment candidate identity changed outside its intervention.")
         if baseline.training.batch != 16:
-            raise ValueError("C4-2A first attempt requires the baseline batch size 16.")
+            raise ValueError("Controlled YOLO experiments require the baseline batch size 16.")
         self.validation_protocol.validate()
         self.telemetry.validate()
         self.decision_policy.validate()
@@ -191,15 +285,17 @@ class YoloExperimentConfig:
             if self.evaluation_priorities.get(key) != expected:
                 raise ValueError(f"Experiment priority changed or is incomplete: {key}")
 
-    # ADD 2026-08-27: Baseline에서 imgsz와 isolated output root만 바꾼 config를 만든다.
+    # ADD 2026-08-27: Training config를 만든다. → MODIFY 2026-08-28: Intervention을 분기한다.
     def training_config(
         self, baseline: YoloSegmentationBaselineConfig
     ) -> YoloSegmentationBaselineConfig:
         self.validate(baseline)
-        controlled_training = replace(
-            baseline.training,
-            imgsz=self.controlled_change.after,
-        )
+        controlled_training = baseline.training
+        if self.intervention_type == RESOLUTION_INTERVENTION:
+            controlled_training = replace(
+                baseline.training,
+                imgsz=cast(int, self.controlled_change.after),
+            )
         controlled_output = YoloOutputConfig(
             artifact_root=self.output.artifact_root,
             training_runtime_root=self.output.training_runtime_root,
@@ -235,6 +331,13 @@ def _boolean(raw: object, *, name: str) -> bool:
     if type(raw) is not bool:
         raise ValueError(f"Experiment config field must be a boolean: {name}")
     return cast(bool, raw)
+
+
+# ADD 2026-08-28: Controlled change scalar를 integer 또는 non-empty string으로 제한한다.
+def _controlled_value(raw: object, *, name: str) -> int | str:
+    if isinstance(raw, bool) or not isinstance(raw, int | str) or raw == "":
+        raise ValueError(f"Experiment controlled-change value is invalid: {name}")
+    return raw
 
 
 # ADD 2026-08-27: Trusted Baseline checkpoint evidence와 sealed-test exclusion을 검증한다.
@@ -357,7 +460,53 @@ def _resolve_experiment_output_path(
     )
 
 
-# ADD 2026-08-27: Typed YAML을 읽는다. → MODIFY 2026-08-28: Repo-bound path를 복원한다.
+# ADD 2026-08-28: Optional C4-2B train-only sampling policy를 typed contract로 복원한다.
+def _load_sampling_policy(raw: object) -> SamplingPolicy | None:
+    if raw is None:
+        return None
+    section = _mapping(raw, name="sampling_policy")
+    return SamplingPolicy(
+        policy_type=str(section["type"]),
+        sampling_rule_version=str(section["sampling_rule_version"]),
+        small_fraction_rule=str(section["small_fraction_rule"]),
+        multi_component=_boolean(
+            section["multi_component"],
+            name="sampling_policy.multi_component",
+        ),
+        eligible_multiplicity=int(section["eligible_multiplicity"]),
+        validation_used_for_sampling=_boolean(
+            section["validation_used_for_sampling"],
+            name="sampling_policy.validation_used_for_sampling",
+        ),
+        test_split_used=_boolean(
+            section["test_split_used"],
+            name="sampling_policy.test_split_used",
+        ),
+    )
+
+
+# ADD 2026-08-28: Optional official train-view snapshot을 behavior rule과 분리해 복원한다.
+def _load_expected_train_view(raw: object) -> ExpectedTrainView | None:
+    if raw is None:
+        return None
+    section = _mapping(raw, name="expected_train_view")
+    return ExpectedTrainView(
+        unique_train_count=int(section["unique_train_count"]),
+        unique_positive_count=int(section["unique_positive_count"]),
+        unique_good_negative_count=int(section["unique_good_negative_count"]),
+        small_aware_count=int(section["small_aware_count"]),
+        multi_component_count=int(section["multi_component_count"]),
+        eligible_overlap_count=int(section["eligible_overlap_count"]),
+        eligible_union_count=int(section["eligible_union_count"]),
+        expanded_entry_count=int(section["expanded_entry_count"]),
+        expanded_positive_count=int(section["expanded_positive_count"]),
+        expanded_good_negative_count=int(section["expanded_good_negative_count"]),
+        expanded_good_negative_ratio=float(section["expanded_good_negative_ratio"]),
+        observed_train_small_cutoff=float(section["observed_train_small_cutoff"]),
+    )
+
+
+# ADD 2026-08-27: Typed YAML을 읽는다. → MODIFY 2026-08-28: Intervention별 config를 복원한다.
 def load_yolo_experiment_config(path: Path) -> YoloExperimentConfig:
     resolved_config_path = path.resolve()
     if not resolved_config_path.is_file():
@@ -374,6 +523,8 @@ def load_yolo_experiment_config(path: Path) -> YoloExperimentConfig:
     output = _mapping(root.get("output"), name="output")
     priorities = _mapping(root.get("evaluation_priorities"), name="evaluation_priorities")
     decision = _mapping(root.get("decision_policy"), name="decision_policy")
+    sampling_raw = root.get("sampling_policy")
+    expected_train_view_raw = root.get("expected_train_view")
     try:
         declared_baseline_path = Path(str(experiment["baseline_config"]))
     except (KeyError, TypeError, ValueError) as exc:
@@ -393,11 +544,14 @@ def load_yolo_experiment_config(path: Path) -> YoloExperimentConfig:
             baseline_identity=dict(baseline),
             baseline_evidence=dict(baseline_evidence),
             candidate_identity=dict(candidate),
+            intervention_type=str(experiment.get("intervention_type", RESOLUTION_INTERVENTION)),
             controlled_change=ControlledChange(
                 field=str(controlled["field"]),
-                before=int(controlled["before"]),
-                after=int(controlled["after"]),
+                before=_controlled_value(controlled["before"], name="controlled_change.before"),
+                after=_controlled_value(controlled["after"], name="controlled_change.after"),
             ),
+            sampling_policy=_load_sampling_policy(sampling_raw),
+            expected_train_view=_load_expected_train_view(expected_train_view_raw),
             validation_protocol=ValidationProtocol(
                 split=str(validation["split"]),
                 test_split_used=_boolean(
@@ -547,7 +701,7 @@ def recommend_experiment(
     )
 
 
-# ADD 2026-08-27: Pre-run identity, priorities와 lineage를 deterministic metadata로 만든다.
+# ADD 2026-08-27: Pre-run metadata를 만든다. → MODIFY 2026-08-28: Intervention을 포함한다.
 def build_experiment_metadata(
     config: YoloExperimentConfig,
     *,
@@ -561,7 +715,14 @@ def build_experiment_metadata(
         "status": config.status,
         "hypothesis": config.hypothesis,
         "target_failure_mode": config.target_failure_mode,
+        "intervention_type": config.intervention_type,
         "controlled_change": asdict(config.controlled_change),
+        "sampling_policy": (
+            None if config.sampling_policy is None else asdict(config.sampling_policy)
+        ),
+        "expected_train_view": (
+            None if config.expected_train_view is None else asdict(config.expected_train_view)
+        ),
         "constants": config.baseline_identity,
         "historical_baseline_evidence": config.baseline_evidence,
         "validation_protocol": asdict(config.validation_protocol),

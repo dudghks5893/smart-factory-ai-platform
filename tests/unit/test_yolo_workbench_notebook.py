@@ -30,7 +30,7 @@ def test_workbench_notebook_structure_and_safety() -> None:
         "## 7. Dataset EDA",
         "## 8. Ground Truth Visualization",
         "## 9. Actual Training Augmentation Preview",
-        "## 10. 640 vs 1024 Representation Preview",
+        "## 10. Controlled Intervention Preview",
         "## 11. Training Preflight",
         "## 12. Training Execution",
         "## 13. Epoch Progress / Timing",
@@ -39,10 +39,11 @@ def test_workbench_notebook_structure_and_safety() -> None:
         "## 16. Validation Failure Analysis",
         "## 17. Baseline vs Candidate Comparison",
         "## 18. Artifact / Evidence Review",
-        "## 19. Final Test Review — LOCKED FOR C4-2A",
+        "## 19. Final Test Review — LOCKED FOR C4 EXPERIMENTS",
         "## 20. Export Summary",
     ]
     assert headings == expected
+    assert len(headings) == 20
     assert all(
         cell.get("execution_count") is None and cell.get("outputs") == []
         for cell in cells
@@ -51,8 +52,10 @@ def test_workbench_notebook_structure_and_safety() -> None:
     serialized = NOTEBOOK_PATH.read_text(encoding="utf-8")
     assert "RUN_OFFICIAL_TRAINING = False" in serialized
     assert "OFFICIAL_OVERRIDES = {}" in serialized
+    assert 'MODE = \\"research\\"' in serialized
     assert "FINAL TEST REVIEW: LOCKED" in serialized
     assert "base64" not in serialized.lower()
+    assert "os.chdir" not in serialized
     assert len(serialized.encode()) < 100_000
 
 
@@ -61,8 +64,13 @@ def test_workbench_notebook_is_thin_and_validation_safe() -> None:
     source = NOTEBOOK_PATH.read_text(encoding="utf-8")
     assert "run_yolo_segmentation_experiment" in source
     assert "preview_actual_training_augmentations" in source
-    assert "load_workbench_records" in source
+    assert "validate_experiment_dataset" in source
+    assert "validate_training_dataset" not in source
     assert "select_small_validation_sample(samples" in source
+    assert 'experiment.intervention_type == \\"resolution\\"' in source
+    assert 'experiment.intervention_type == \\"train_sampling_multiplicity\\"' in source
+    assert "build_sampling_workbench_summary" in source
+    assert "sampling_validation_source" not in source
     assert "item for item in representatives if item.split" not in source
     assert "YOLO(" not in source
     assert "derived_split == 'test'" not in source

@@ -17,13 +17,19 @@ from ml.experiments.yolo_segmentation import (
     validate_experiment_result,
 )
 from ml.training.yolo_segmentation import load_yolo_segmentation_config
+from shared.hashing import sha256_file
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = (
     REPOSITORY_ROOT
     / "configs/experiments/yolo_segmentation/c4_2a_yolo11n_seg_imgsz1024_seed42.yaml"
 )
+C4_2B_CONFIG_PATH = (
+    REPOSITORY_ROOT / "configs/experiments/yolo_segmentation/"
+    "c4_2b_yolo11n_seg_component_aware_sampling_x2_seed42.yaml"
+)
 BASELINE_CONFIG_PATH = REPOSITORY_ROOT / "configs/model/yolo_segmentation_baseline.yaml"
+C4_2A_CONFIG_SHA256 = "49be69586f5aecb04665f5a9346c0e6fd5de9e5cf636c4dd6fb785c5e0dc890b"
 
 
 # ADD 2026-08-27: Config provenance를 보존하는 portable temporary repository fixture를 만든다.
@@ -50,6 +56,27 @@ def _write_experiment_fixture(
     experiment_path.write_text(text, encoding="utf-8")
     if include_baseline:
         baseline_path.write_text(BASELINE_CONFIG_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    return experiment_path
+
+
+# ADD 2026-08-28: C4-2B policy mutation을 격리하는 portable repository fixture를 만든다.
+def _write_c4_2b_fixture(tmp_path: Path, *, before: str, after: str) -> Path:
+    repository_root = tmp_path / "repository"
+    experiment_path = (
+        repository_root / "configs/experiments/yolo_segmentation/"
+        "c4_2b_yolo11n_seg_component_aware_sampling_x2_seed42.yaml"
+    )
+    baseline_path = repository_root / "configs/model/yolo_segmentation_baseline.yaml"
+    experiment_path.parent.mkdir(parents=True)
+    baseline_path.parent.mkdir(parents=True)
+    (repository_root / "pyproject.toml").write_text(
+        "[project]\nname = 'fixture'\n", encoding="utf-8"
+    )
+    experiment_path.write_text(
+        C4_2B_CONFIG_PATH.read_text(encoding="utf-8").replace(before, after),
+        encoding="utf-8",
+    )
+    baseline_path.write_text(BASELINE_CONFIG_PATH.read_text(encoding="utf-8"), encoding="utf-8")
     return experiment_path
 
 
@@ -118,6 +145,70 @@ def test_experiment_config_preserves_baseline_constants() -> None:
     assert candidate.model == baseline.model
     assert candidate.dataset_contract == baseline.dataset_contract
     assert candidate.training.batch == 16
+    assert sha256_file(CONFIG_PATH) == C4_2A_CONFIG_SHA256
+
+
+# ADD 2026-08-28: C4-2B config가 sampling-only change와 fixed training을 선언하는지 검증한다.
+def test_c4_2b_config_preserves_training_and_declares_sampling_only() -> None:
+    experiment = load_yolo_experiment_config(C4_2B_CONFIG_PATH)
+    baseline = load_yolo_segmentation_config(experiment.baseline_config_path)
+    candidate = experiment.training_config(baseline)
+
+    assert experiment.experiment_id == ("c4_2b_yolo11n_seg_component_aware_sampling_x2_seed42")
+    assert experiment.intervention_type == "train_sampling_multiplicity"
+    assert asdict(experiment.controlled_change) == {
+        "field": "training.dataset_index_multiplicity",
+        "before": "canonical_x1",
+        "after": "component_aware_eligible_x2",
+    }
+    assert experiment.sampling_policy is not None
+    assert asdict(experiment.sampling_policy) == {
+        "policy_type": "component_aware_train_multiplicity",
+        "sampling_rule_version": "component_aware_bottom_third_union_multi_x2_v1",
+        "small_fraction_rule": "bottom_third",
+        "multi_component": True,
+        "eligible_multiplicity": 2,
+        "validation_used_for_sampling": False,
+        "test_split_used": False,
+    }
+    assert experiment.expected_train_view is not None
+    assert asdict(experiment.expected_train_view) == {
+        "unique_train_count": 84,
+        "unique_positive_count": 42,
+        "unique_good_negative_count": 42,
+        "small_aware_count": 14,
+        "multi_component_count": 14,
+        "eligible_overlap_count": 9,
+        "eligible_union_count": 19,
+        "expanded_entry_count": 103,
+        "expanded_positive_count": 61,
+        "expanded_good_negative_count": 42,
+        "expanded_good_negative_ratio": 0.4077669902912621,
+        "observed_train_small_cutoff": 0.011273469387755102,
+    }
+    assert asdict(candidate.training) == asdict(baseline.training)
+    assert candidate.model == baseline.model
+    assert candidate.model.weights == "yolo11n-seg.pt"
+    assert candidate.training.imgsz == 640
+    assert candidate.training.batch == 16
+    assert candidate.training.epochs == 100
+    assert candidate.training.workers == 2
+    assert candidate.training.patience == 20
+    assert candidate.training.seed == 42
+    assert candidate.training.optimizer == "auto"
+    assert candidate.training.deterministic is True
+    assert candidate.training.amp is True
+
+
+# ADD 2026-08-28: C4-2B multiplicity policy drift가 config validation을 통과하지 못하게 한다.
+def test_c4_2b_config_rejects_sampling_policy_drift(tmp_path: Path) -> None:
+    path = _write_c4_2b_fixture(
+        tmp_path,
+        before="eligible_multiplicity: 2",
+        after="eligible_multiplicity: 3",
+    )
+    with pytest.raises(ValueError, match="sampling policy changed"):
+        load_yolo_experiment_config(path)
 
 
 # ADD 2026-08-27: Drift를 거부한다. → MODIFY 2026-08-28: Provenance fixture에서 검증한다.

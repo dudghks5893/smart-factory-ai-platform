@@ -10,10 +10,17 @@ from ml.datasets.yolo_segmentation_manifest import (
     DerivedManifestRecord,
     write_derived_manifest,
 )
+from ml.experiments.yolo_sampling import (
+    PlannedTrainView,
+    SamplingEligibility,
+    TrainViewEvidence,
+)
+from ml.experiments.yolo_segmentation import load_yolo_experiment_config
 from ml.experiments.yolo_workbench import (
     WorkbenchSample,
     build_eda_summary,
     build_research_config,
+    build_sampling_workbench_summary,
     load_workbench_records,
     select_representative_samples,
     select_small_validation_sample,
@@ -164,3 +171,79 @@ def test_research_overrides_do_not_mutate_official_config(tmp_path: Path) -> Non
     assert baseline.training.imgsz == 640
     with pytest.raises(ValueError, match="rejects"):
         validate_workbench_controls("official", overrides={"imgsz": 768})
+
+
+# ADD 2026-08-28: C4-2B Workbench summary가 approved exposure와 eligibility groups를 표시한다.
+def test_c4_2b_sampling_workbench_summary_is_compact_and_train_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment = load_yolo_experiment_config(
+        Path(
+            "configs/experiments/yolo_segmentation/"
+            "c4_2b_yolo11n_seg_component_aware_sampling_x2_seed42.yaml"
+        )
+    )
+    baseline = load_yolo_segmentation_config(experiment.baseline_config_path)
+    small_ids = tuple(f"train-{index:03d}" for index in range(14))
+    multi_ids = tuple(f"train-{index:03d}" for index in range(5, 19))
+    eligible_ids = tuple(f"train-{index:03d}" for index in range(19))
+    evidence = TrainViewEvidence(
+        schema_version=1,
+        experiment_id=experiment.experiment_id,
+        sampling_rule_version="component_aware_bottom_third_union_multi_x2_v1",
+        canonical_manifest_sha256="a" * 64,
+        unique_train_count=84,
+        unique_positive_count=42,
+        unique_good_negative_count=42,
+        small_aware_count=14,
+        multi_component_count=14,
+        eligible_overlap_count=9,
+        eligible_union_count=19,
+        expanded_entry_count=103,
+        expanded_positive_count=61,
+        expanded_good_negative_count=42,
+        expanded_good_negative_ratio=0.4077669902912621,
+        small_fraction_rule="bottom_third",
+        eligible_multiplicity=2,
+        observed_train_small_cutoff=0.011273469387755102,
+        eligible_sample_ids=eligible_ids,
+        sample_multiplicity={f"train-{index:03d}": 2 if index < 19 else 1 for index in range(84)},
+        train_list_sha256="b" * 64,
+        train_list_path_base="canonical_dataset_root",
+        ordering_policy=("canonical_sample_id_order_then_eligible_second_copy_in_sample_id_order"),
+        validation_used_for_sampling=False,
+        test_split_used=False,
+    )
+    plan = PlannedTrainView(
+        entries=(),
+        profiles=(),
+        eligibility=SamplingEligibility(
+            small_aware_sample_ids=small_ids,
+            multi_component_sample_ids=multi_ids,
+            eligible_sample_ids=eligible_ids,
+            observed_train_small_cutoff=0.011273469387755102,
+        ),
+        evidence=evidence,
+    )
+    monkeypatch.setattr(
+        "ml.experiments.yolo_workbench.plan_component_aware_train_view",
+        lambda **kwargs: plan,
+    )
+    records = [_record(f"train-{index:03d}", "train") for index in range(84)]
+
+    summary = build_sampling_workbench_summary(
+        experiment=experiment,
+        baseline=baseline,
+        dataset_root=Path("dataset"),
+        records=records,
+    )
+
+    assert summary is not None
+    assert summary["sampling_validation_source"] == "TRAIN_ONLY"
+    assert summary["test_split"] == "SEALED_NOT_USED"
+    assert summary["canonical_train_entries"] == 84
+    assert summary["expanded_train_entries"] == 103
+    assert summary["positive_exposure"] == [42, 61]
+    assert summary["good_negative_exposure"] == [42, 42]
+    assert len(summary["eligible_samples"]) == 19
+    assert sum(row["overlap"] for row in summary["eligible_samples"]) == 9
