@@ -59,11 +59,15 @@ def test_workbench_notebook_structure_and_safety() -> None:
     assert len(serialized.encode()) < 100_000
 
 
-# ADD 2026-08-27: Project API 사용을 확인한다. → MODIFY 2026-08-28: Full-sample helper를 검증한다.
+# ADD 2026-08-27: Project API 사용을 확인한다. → MODIFY 2026-08-28: Locked subprocess를 검증한다.
 def test_workbench_notebook_is_thin_and_validation_safe() -> None:
     source = NOTEBOOK_PATH.read_text(encoding="utf-8")
-    assert "run_yolo_segmentation_experiment" in source
-    assert "preview_actual_training_augmentations" in source
+    assert "run_official_training_subprocess" in source
+    assert "run_locked_preview_subprocess" in source
+    assert "from pipelines.run_yolo_segmentation_experiment import" not in source
+    assert "preview_actual_training_augmentations" not in source
+    assert "uv run --locked python -m pipelines.run_yolo_segmentation_experiment" in source
+    assert "DISPLAY_CONTROLLER_ONLY" in source
     assert "validate_experiment_dataset" in source
     assert "validate_training_dataset" not in source
     assert "select_small_validation_sample(samples" in source

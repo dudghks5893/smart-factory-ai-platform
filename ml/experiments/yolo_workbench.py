@@ -20,7 +20,7 @@ from ml.evaluation.final_benchmark import RepositoryProvenance, resolve_reposito
 from ml.evaluation.yolo_segmentation_error_analysis import SizeBucketPolicy
 from ml.experiments.yolo_sampling import plan_component_aware_train_view
 from ml.experiments.yolo_segmentation import YoloExperimentConfig
-from ml.training.device import resolve_device
+from ml.experiments.yolo_workbench_runtime import LockedEnvironmentProvenance
 from ml.training.yolo_segmentation import (
     YoloOutputConfig,
     YoloSegmentationBaselineConfig,
@@ -87,6 +87,7 @@ class OfficialPreflight:
     telemetry_enabled: bool
     telemetry_interval_seconds: float
     sampling_summary: dict[str, Any] | None
+    execution_environment: dict[str, Any]
 
     # ADD 2026-08-27: Notebook display와 audit용 strict mapping을 반환한다.
     def to_json_dict(self) -> dict[str, Any]:
@@ -398,7 +399,7 @@ def build_sampling_workbench_summary(
     }
 
 
-# ADD 2026-08-27: Official identity를 검증한다. → MODIFY 2026-08-28: Sampling preflight를 추가한다.
+# ADD 2026-08-27: Official identity를 검증한다. → MODIFY 2026-08-28: Locked runtime을 검증한다.
 def build_official_preflight(
     *,
     experiment: YoloExperimentConfig,
@@ -406,11 +407,13 @@ def build_official_preflight(
     paths: WorkbenchPaths,
     requested_device: str,
     overrides: dict[str, object],
+    execution_environment: LockedEnvironmentProvenance,
     repository_provenance: RepositoryProvenance | None = None,
 ) -> OfficialPreflight:
     validate_workbench_controls("official", overrides=overrides)
-    if requested_device != "cuda" or str(resolve_device(requested_device)) != "cuda":
-        raise ValueError("Official controlled experiment preflight requires available CUDA.")
+    if requested_device != "cuda":
+        raise ValueError("Official controlled experiment preflight requires explicit CUDA.")
+    execution_environment.validate(paths.repository_root, require_cuda=True)
     candidate = experiment.training_config(baseline)
     records = list(validate_experiment_dataset(paths.dataset_root, baseline.dataset_contract))
     counts = Counter(record.derived_split for record in records)
@@ -457,6 +460,7 @@ def build_official_preflight(
         telemetry_enabled=True,
         telemetry_interval_seconds=experiment.telemetry.sample_interval_seconds,
         sampling_summary=sampling_summary,
+        execution_environment=execution_environment.to_json_dict(),
     )
 
 

@@ -12,8 +12,11 @@ Tracked notebook은 output을 비운 상태로 유지한다. 생성된 PNG, JSON
 - `research`: 임시 `imgsz`, `batch`, `epochs`, `patience`를 별도 research namespace에서 탐색한다. 이 결과는
   official experiment나 Experiment Log를 갱신하지 않는다.
 - `official`: committed experiment config만 사용하며 notebook override를 거부한다. Manifest, Baseline artifact,
-  Git provenance와 validation-only policy를 preflight에서 확인한다. `RUN_OFFICIAL_TRAINING=True`를 명시하기
-  전에는 학습을 시작하지 않는다.
+  Git provenance와 validation-only policy를 preflight에서 확인한다. Notebook kernel은 display/controller로만
+  사용하며 actual augmentation/representation preview와 training은 `uv run --locked python` subprocess에서
+  실행해 lock refresh와 repository `.venv` 밖의 system package 개입을 허용하지 않는다.
+  `RUN_OFFICIAL_TRAINING=True`를 명시하기 전에는 학습을 시작하지 않는다.
 
-현재 C4-2A에서는 train/validation만 EDA·preview·selection에 사용한다. Derived test는 C4-3에서 validation으로
-최종 후보를 선택하고 artifact v2를 freeze한 뒤 한 번 평가하기 전까지 `SEALED / NOT USED`다.
+현재 C4-2A/C4-2B에서는 train/validation만 EDA·preview·selection에 사용한다. Derived test는 C4-3에서
+validation으로 최종 후보를 선택하고 artifact v2를 freeze한 뒤 한 번 평가하기 전까지
+`SEALED / NOT USED`다.

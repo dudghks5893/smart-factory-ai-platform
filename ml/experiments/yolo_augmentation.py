@@ -36,6 +36,7 @@ class TransformPreview:
     component_masks: tuple[NDArray[np.bool_], ...]
     class_ids: tuple[int, ...]
     transform_names: tuple[str, ...]
+    albumentations_active: bool
 
     # ADD 2026-08-27: Preview image/mask/class alignment과 finite geometry를 검증한다.
     def validate(self) -> None:
@@ -173,6 +174,14 @@ def _transform_names(transform: object) -> tuple[str, ...]:
     return tuple(names)
 
 
+# ADD 2026-08-28: Actual transform tree에서 optional Albumentations 활성 상태를 확인한다.
+def _albumentations_active(transform: object) -> bool:
+    if type(transform).__name__ == "Albumentations":
+        return getattr(transform, "transform", None) is not None
+    children = getattr(transform, "transforms", None)
+    return isinstance(children, list) and any(_albumentations_active(child) for child in children)
+
+
 # ADD 2026-08-27: Formatted overlap/non-overlap mask tensor를 aligned component masks로 복원한다.
 def _component_masks(
     raw_masks: object,
@@ -204,7 +213,7 @@ def _component_masks(
     return tuple(masks)
 
 
-# ADD 2026-08-27: One actual dataset sample을 immutable RGB/mask/class preview contract로 변환한다.
+# ADD 2026-08-27: Actual sample을 변환한다. → MODIFY 2026-08-28: Optional 상태를 보존한다.
 def _normalize_preview_sample(
     sample: dict[str, Any],
     *,
@@ -213,6 +222,7 @@ def _normalize_preview_sample(
     variant: int,
     imgsz: int,
     transform_names: tuple[str, ...],
+    albumentations_active: bool,
     valid_class_ids: set[int],
 ) -> TransformPreview:
     raw_image = torch.as_tensor(sample["img"]).detach().cpu().numpy()
@@ -247,6 +257,7 @@ def _normalize_preview_sample(
         component_masks=masks,
         class_ids=class_ids,
         transform_names=transform_names,
+        albumentations_active=albumentations_active,
     )
     preview.validate()
     if split == "train" and image.shape[:2] != (imgsz, imgsz):
@@ -254,7 +265,7 @@ def _normalize_preview_sample(
     return preview
 
 
-# ADD 2026-08-27: Stable train sample에 actual stochastic augmentation variants를 생성한다.
+# ADD 2026-08-27: Actual augmentation을 만든다. → MODIFY 2026-08-28: Optional 상태를 반환한다.
 def preview_actual_training_augmentations(
     *,
     config: YoloSegmentationBaselineConfig,
@@ -269,6 +280,7 @@ def preview_actual_training_augmentations(
     paths = [Path(path) for path in cast(list[str], dataset.im_files)]
     index_by_sample = {path.stem: index for index, path in enumerate(paths)}
     transforms = _transform_names(dataset.transforms)
+    albumentations_active = _albumentations_active(dataset.transforms)
     if not transforms or "Format" not in transforms:
         raise RuntimeError("Pinned Ultralytics actual transform path could not be verified.")
     previews: list[TransformPreview] = []
@@ -286,6 +298,7 @@ def preview_actual_training_augmentations(
                     variant=variant,
                     imgsz=config.training.imgsz,
                     transform_names=transforms,
+                    albumentations_active=albumentations_active,
                     valid_class_ids=set(config.dataset_contract.classes),
                 )
             )
@@ -315,6 +328,7 @@ def preview_actual_representations(
             variant=0,
             imgsz=config.training.imgsz,
             transform_names=_transform_names(dataset.transforms),
+            albumentations_active=_albumentations_active(dataset.transforms),
             valid_class_ids=set(config.dataset_contract.classes),
         )
         raw_masks = torch.as_tensor(sample["masks"]).detach().cpu().numpy()
