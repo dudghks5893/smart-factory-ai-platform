@@ -554,6 +554,24 @@ def validate_experiment_dataset(
     return tuple(records)
 
 
+# ADD 2026-09-01: Explicit C4-4 unlock 뒤 derived test content만 strict contract로 검증한다.
+def validate_final_test_dataset(
+    dataset_root: Path,
+    contract: YoloDatasetContract,
+) -> tuple[DerivedManifestRecord, ...]:
+    """Validate only test rows after the guarded final-test boundary has opened."""
+    manifest_path = _validate_dataset_package_metadata(dataset_root, contract)
+    records = read_derived_manifest(manifest_path, allowed_splits={"test"})
+    _validate_dataset_record_content(
+        dataset_root,
+        contract,
+        records,
+        expected_splits=frozenset({"test"}),
+        count_context="C4-4 final-test dataset",
+    )
+    return tuple(records)
+
+
 # ADD 2026-08-25: Project-owned checkpoint와 metadata를 overwrite 없이 저장한다.
 def write_yolo_artifact(
     *,

@@ -171,7 +171,7 @@ artifact를 자동 교체하지 않는다.
 | C4-2C | crop350 + no-Mosaic + mask ratio 2; Official run completed | 0.4623876120 | 0.7391304348 | 0.375000 | 0.571429 | 0/14 | 6,796,869,632 bytes | 542.329836 sec | `CONFIRMED_CANDIDATE` |
 | C4-2D | Future slot; not implemented | — | — | — | — | — | — | — | — |
 | C4-3 | Validation-only final-candidate freeze; no new metric | — | — | — | — | — | — | — | `FINAL_CANDIDATE_FROZEN` |
-| C4-4 | Future one-time derived-test evaluation; not implemented | — | — | — | — | — | — | — | `SEALED_NOT_USED` |
+| C4-4 | Guarded one-time derived-test evaluation implemented; not run | — | — | — | — | — | — | — | `SEALED_NOT_USED` |
 
 ¹ Baseline checkpoint에는 cumulative epoch time `222.485`초가 있으나 C4 telemetry의 exact end-to-end
 wall-clock boundary가 아니므로 candidate의 `430.421539`초와 속도 비율을 계산하지 않는다.
@@ -599,3 +599,63 @@ FINAL TEST = SEALED_NOT_USED
 state를 검증한 뒤에만 derived test를 한 번 열 수 있다. Candidate selection은 C4-4에서 변경하지 않고 final-test
 evidence는 별도 namespace에 기록해야 한다. 해당 unlock/evaluation lifecycle은 C4-3에서 구현하거나 실행하지
 않았다.
+
+## 13. C4-4 guarded one-time final-test evaluation
+
+C4-4는 candidate selection experiment가 아니라 C4-3에서 validation-only로 고정한 exact candidate의 report-only
+final-test execution boundary다. Infrastructure는 구현했지만 actual Official final test는 아직 실행하지 않았으므로
+현재 state는 `IMPLEMENTED / READY_FOR_EXECUTION`, `FINAL TEST = SEALED_NOT_USED`다. C4-2A `REJECTED`, C4-2B
+`COMPLETED / PENDING`, C4-2C `COMPLETED / CONFIRMED_CANDIDATE`, C4-3
+`FINAL_CANDIDATE_FROZEN / VALIDATION_ONLY` 기록은 변경하지 않는다.
+
+Preflight는 derived-test row나 image/label을 열기 전에 다음 순서로 fail closed한다.
+
+1. C4-3 manifest strict schema, lifecycle과 repository-owned SHA-256을 검증한다.
+2. Official package 전체 SHA, exact model/metadata/config/result bytes와 validation-only seal을 C4-3 verifier로
+   재검증하고 frozen manifest와 field-by-field 대조한다.
+3. Repository experiment config/model/checkpoint/protocol identity를 검증한다.
+4. Dataset Manifest 전체 bytes의 SHA만 확인한다. 이 단계에서는 CSV row를 materialize하지 않는다.
+5. Clean committed C4-4 Git HEAD와 unused dedicated output namespace를 확인한다.
+
+Preflight-only reproduction path는 다음과 같다. 이 명령은 성공해도 test resolver를 호출하지 않고
+`READY_FOR_FINAL_TEST`와 `SEALED_NOT_USED`를 출력한다.
+
+```bash
+uv run --locked python -m pipelines.evaluate_yolo_final_test \
+  --repository-root . \
+  --official-package <official-c4-2c-package.zip> \
+  --dataset <derived-dataset-root> \
+  --device cuda
+```
+
+Actual access는 committed/pushed immutable C4-4 revision에서 operator가 같은 명령에
+`--confirm-final-test`를 명시한 경우에만 열린다. Unlock 뒤 test-only typed records와 image/label content를
+검증하고, framework default confidence policy의 standard Ultralytics `split=test` metrics와 별도의
+confidence `0.25`, class-aware greedy mask IoU `0.5` strict diagnostics를 계산한다. Size bucket,
+prediction normalization, Region Coverage 기준도 C4-2C validation
+protocol에서 고정된 값을 그대로 사용하며 test 결과로 threshold, hyperparameter, checkpoint, augmentation 또는
+candidate를 다시 선택하지 않는다.
+
+Completed evidence는
+`outputs/final_test/yolo_segmentation/<experiment-id>-<frozen-manifest-sha-prefix>/`에만 기록한다. Namespace가
+이미 존재하면 state와 관계없이 overwrite나 자동 rerun 없이 실패한다. `run_state.json`은 `READY`, `RUNNING`,
+`PREPARATION_FAILED`, `FINAL_TEST_FAILED`, `FINAL_TEST_COMPLETED`를 구분한다. `READY`와
+`PREPARATION_FAILED`는 evaluator가 호출되지 않아 `test_access_started=false`, `cleanup_permitted=true`다. Operator는
+`completed/`가 없고 이 두 state 중 하나임을 확인한 경우에만 namespace를 수동 제거할 수 있다. `RUNNING` 또는
+`FINAL_TEST_FAILED`는 test access가 발생했을 수 있으므로 cleanup과 재실행을 허용하지 않는다.
+Atomic reservation 중 process가 중단되어 canonical namespace 대신 hidden `.starting` directory만 남은 경우도
+evaluator 호출 전 `READY` state이므로 operator가 state를 확인한 뒤 수동 제거할 수 있다.
+
+Result JSON과 evidence ZIP은 private completion staging에서 모두 생성한 뒤 `completed/` directory로 atomic
+rename하고, 마지막으로 `FINAL_TEST_COMPLETED` state를 기록한다. 따라서 evaluator failure는 completed evidence를
+만들지 않으며, published `completed/`가 존재하는 namespace는 state marker recovery 여부와 관계없이 다시 실행하지
+않는다. Result에는 C4-3 freeze commit, clean C4-4 execution commit,
+frozen manifest/package/model/metadata/config/result/dataset SHA, protocol, framework/per-class metrics, strict/failure/
+Region Coverage diagnostics, environment와 runtime resource evidence가 포함된다. Original C4-3 manifest는 수정하지
+않으며 `candidate_selection_changed=false`, `threshold_tuned_on_test=false`를 명시한다.
+
+이 one-time 보호는 explicit unlock, immutable identity, dedicated namespace와 fail-if-existing를 결합한 practical
+workflow protection이다. Test bytes를 기술적으로 영원히 다시 읽을 수 없다는 cryptographic claim은 아니다.
+Kaggle 실행 surface는 training Workbench와 분리된
+[`yolo_final_test_evaluation.ipynb`](../../notebooks/vision/yolo_final_test_evaluation.ipynb)이며, preflight cell과
+기본값 `RUN_FINAL_TEST=False`인 operator-controlled execution cell을 분리한다.

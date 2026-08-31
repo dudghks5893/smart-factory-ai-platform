@@ -31,6 +31,7 @@ from ml.training.yolo_segmentation import (
     YoloDatasetContract,
     load_yolo_segmentation_config,
     validate_experiment_dataset,
+    validate_final_test_dataset,
 )
 from pipelines.run_yolo_segmentation_experiment import prepare_experiment_training_dataset
 from pipelines.train_yolo_segmentation import write_runtime_dataset_yaml
@@ -425,6 +426,87 @@ def test_experiment_validation_does_not_open_sealed_test_content(tmp_path: Path)
     assert [record.derived_split for record in prepared.validated_records] == ["train", "val"]
     assert prepared.runtime_dataset_yaml is not None
     assert "test" not in yaml.safe_load(prepared.runtime_dataset_yaml.read_text(encoding="utf-8"))
+
+
+# ADD 2026-09-01: C4-4 validator가 synthetic test content만 열고 non-test content는 건너뛴다.
+def test_final_test_validator_materializes_only_test_records(tmp_path: Path) -> None:
+    dataset_root = tmp_path / "dataset"
+    sealed_train = _record(
+        "sealed-train",
+        split="train",
+        is_negative=False,
+        component_count=1,
+    )
+    test_positive = _record(
+        "test-positive",
+        split="test",
+        is_negative=False,
+        component_count=1,
+    )
+    test_negative = _record(
+        "test-negative",
+        split="test",
+        is_negative=True,
+        component_count=0,
+    )
+    records = [sealed_train, test_positive, test_negative]
+    for record, label in (
+        (test_positive, "0 0.1 0.1 0.8 0.1 0.8 0.8 0.1 0.8\n"),
+        (test_negative, ""),
+    ):
+        image_path = dataset_root / record.image_path
+        label_path = dataset_root / record.label_path
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        label_path.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (32, 32), color=(0, 0, 0)).save(image_path)
+        label_path.write_text(label, encoding="utf-8")
+    records[1] = replace(
+        test_positive,
+        image_sha256=sha256_file(dataset_root / test_positive.image_path),
+    )
+    records[2] = replace(
+        test_negative,
+        image_sha256=sha256_file(dataset_root / test_negative.image_path),
+    )
+    (dataset_root / "dataset.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "path": ".",
+                "train": "images/train",
+                "val": "images/val",
+                "test": "images/test",
+                "names": {0: "bent", 1: "color", 2: "scratch"},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    manifest_path = dataset_root / "manifest.csv"
+    write_derived_manifest(records, manifest_path)
+    contract = _contract(
+        manifest_path,
+        _counts(
+            train_positive=1,
+            train_negative=0,
+            test_positive=1,
+            test_negative=1,
+        ),
+    )
+    (dataset_root / "metadata.json").write_text(
+        json.dumps(
+            {
+                "derived_manifest_sha256": contract.manifest_sha256,
+                "semantic_fingerprint_sha256": contract.semantic_fingerprint_sha256,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    validated = validate_final_test_dataset(dataset_root, contract)
+
+    assert [record.sample_id for record in validated] == ["test-positive", "test-negative"]
+    assert not (dataset_root / sealed_train.image_path).exists()
+    assert not (dataset_root / sealed_train.label_path).exists()
 
 
 # ADD 2026-08-28: Experiment runtime YAML이 test key를 선택적으로 생략하는지 검증한다.

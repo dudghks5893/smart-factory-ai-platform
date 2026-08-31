@@ -193,6 +193,33 @@ def test_sample_taxonomy_covers_detection_and_class_errors() -> None:
     assert negative.false_positive_count == 1
 
 
+# ADD 2026-09-01: Analyzer는 validation default를 유지하며 final-test split은 명시적으로만 허용한다.
+def test_sample_analysis_requires_explicit_final_test_split() -> None:
+    record = _record("final-test", split="test")
+    ground_truth = (_gt(0, _mask(1, 5, 1, 5)),)
+    prediction = (_prediction(0, ground_truth[0].mask),)
+
+    with pytest.raises(ValueError, match="derived val"):
+        analyze_sample(
+            record=record,
+            ground_truth=ground_truth,
+            predictions=prediction,
+            classes=CLASSES,
+            size_policy=SIZE_POLICY,
+        )
+
+    analysis = analyze_sample(
+        record=record,
+        ground_truth=ground_truth,
+        predictions=prediction,
+        classes=CLASSES,
+        size_policy=SIZE_POLICY,
+        expected_split="test",
+    )
+    assert analysis.sample_id == "final-test"
+    assert analysis.true_positive_count == 1
+
+
 # ADD 2026-08-26: Low IoU와 directional under/over segmentation tag를 검증한다.
 def test_localization_under_and_over_segmentation_tags() -> None:
     ground_truth_mask = _mask(1, 6, 1, 6)

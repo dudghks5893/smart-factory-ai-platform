@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import asdict, dataclass
 from statistics import fmean
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -278,7 +278,7 @@ def _wrong_class_pairs(
     return tuple(selected)
 
 
-# ADD 2026-08-26: One validation image의 detection, localization과 segmentation errors를 분류한다.
+# ADD 2026-08-26: Validation error를 분류한다. → MODIFY 2026-09-01: Test split을 opt-in 허용한다.
 def analyze_sample(
     *,
     record: DerivedManifestRecord,
@@ -286,9 +286,10 @@ def analyze_sample(
     predictions: tuple[PredictedInstance, ...],
     classes: dict[int, str],
     size_policy: SizeBucketPolicy,
+    expected_split: Literal["val", "test"] = "val",
 ) -> SampleAnalysis:
-    if record.derived_split != "val":
-        raise ValueError("Sample analysis accepts only derived validation rows.")
+    if record.derived_split != expected_split:
+        raise ValueError(f"Sample analysis accepts only derived {expected_split} rows.")
     matches = match_instances(ground_truth, predictions)
     matched_gt = {match.ground_truth_index for match in matches}
     matched_predictions = {match.prediction_index for match in matches}
