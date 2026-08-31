@@ -5,12 +5,13 @@
 이 문서는 YOLO segmentation model-quality evolution의 기술 source of truth다. 각 candidate는 한 번에 하나의
 명시적 변수를 바꾸고, sealed `test` split이 아니라 `val` evidence로만 비교한다. `ACCEPT`는 다음 candidate로
 보존할 가치가 있다는 뜻이며 runtime model 교체, production calibration 또는 factory certification을 뜻하지
-않는다. 최종 candidate 선택과 derived-test 1회 평가는 C4-3의 별도 경계다.
+않는다. Validation-only final candidate freeze는 C4-3, derived-test 1회 평가는 후속 C4-4의 분리된 경계다.
 
 현재 순서는 Baseline v1 → C4-1 validation error analysis → C4-2A higher resolution → C4-2B
-component-aware x2 Official experiment까지 진행됐다. C4-2B는 `COMPLETED` / `PENDING`이며 final candidate로
-확정되지 않았다. C4-2C crop confirmation은 구현만 준비됐고 Official run은 실행하지 않았다. C4-2D와 C4-3
-final candidate selection도 아직 구현하거나 실행하지 않았다.
+component-aware x2 → C4-2C crop confirmation Official experiment → C4-3 validation-only final-candidate freeze까지
+진행됐다. C4-2A는 `REJECTED`, C4-2B는 `COMPLETED` / `PENDING`, C4-2C는
+`CONFIRMED_CANDIDATE`다. C4-3에서 C4-2C를 `FINAL_CANDIDATE_FROZEN`으로 고정했지만 production model이나
+test-validated model로 승격한 것은 아니다. Derived-test 1회 평가는 후속 C4-4 경계이며 아직 실행하지 않았다.
 
 ## 2. 공통 dataset과 validation protocol
 
@@ -167,9 +168,10 @@ artifact를 자동 교체하지 않는다.
 | Baseline v1 / C4-1 | Reference `imgsz=640` | 0.34359 | 0.608696 | 0.250000 | 0.500000 | 0/14 | not captured | not captured¹ | `REFERENCE` |
 | C4-2A | `imgsz 640 -> 1024` | 0.303871 | 0.521739 | 0.125000 | 0.428571 | 0/14 | 7,551,844,352 bytes | 430.421539 sec | `REJECT` |
 | C4-2B | component-aware eligible x2; Official run completed | 0.4236909445 | 0.6521739 | 0.250000 | 0.500000 | 0/14 | approximately 2.875 GB | 281.608 sec | `PENDING` |
-| C4-2C | crop350 + no-Mosaic + mask ratio 2; implementation ready, Official run not run | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
+| C4-2C | crop350 + no-Mosaic + mask ratio 2; Official run completed | 0.4623876120 | 0.7391304348 | 0.375000 | 0.571429 | 0/14 | 6,796,869,632 bytes | 542.329836 sec | `CONFIRMED_CANDIDATE` |
 | C4-2D | Future slot; not implemented | — | — | — | — | — | — | — | — |
-| C4-3 | Future final selection; not implemented | — | — | — | — | — | — | — | — |
+| C4-3 | Validation-only final-candidate freeze; no new metric | — | — | — | — | — | — | — | `FINAL_CANDIDATE_FROZEN` |
+| C4-4 | Future one-time derived-test evaluation; not implemented | — | — | — | — | — | — | — | `SEALED_NOT_USED` |
 
 ¹ Baseline checkpoint에는 cumulative epoch time `222.485`초가 있으나 C4 telemetry의 exact end-to-end
 wall-clock boundary가 아니므로 candidate의 `430.421539`초와 속도 비율을 계산하지 않는다.
@@ -451,8 +453,8 @@ Pre-training view는 train/validation Manifest EDA, deterministic GT gallery, pi
 transform preview와 actual non-augmented letterbox를 사용한 640/1024 representation 비교를 제공한다. Post-training
 view는 existing telemetry/result JSON과 C4-1-compatible validation diagnostics를 읽고 training curves, resource
 summary, taxonomy별 deterministic failure gallery 및 동일 validation sample의 Baseline/Candidate 비교를 표시한다.
-Generated PNG/JSONL은 ignored output에만 저장한다. Final Test Review는 C4-3 전까지 locked이며 test row를 load하지
-않는다.
+Generated PNG/JSONL은 ignored output에만 저장한다. Final Test Review는 후속 C4-4 전까지 locked이며 test row를
+load하지 않는다.
 
 ## 9. Hardware benchmark domain
 
@@ -505,23 +507,95 @@ Official retry에서는 output export 후 `package_metadata.json`의 ZIP/model/m
 `SHA256SUMS.txt`를 함께 검증했다. Section 5의 result와 artifact identity는 이 검증을 통과한 package를 근거로
 하며, 후속 reproduction도 검증 완료 전에는 새 result로 간주하지 않는다.
 
-## 11. C4-2C Official confirmation 준비 상태
+## 11. C4-2C Official confirmation result
 
 `c4_2c_yolo11n_seg_crop350_nomosaic_maskratio2_seed42`의 repository-owned typed recipe, deterministic
 component-aware duplicate/crop train view, explicit augmentation override, Fast-compatible validation prediction,
 Region Coverage secondary audit와 absolute Primary confirmation gate가 구현됐다. Workbench는 같은 20-section
 lifecycle에서 이 config를 preflight하고 repository runner를 호출한다.
 
-현재 상태는 **IMPLEMENTATION READY / OFFICIAL CONFIRMATION NOT RUN**이다. 이 문서에는 Fast Research 결과를
-Official 결과로 옮기지 않았으며 실제 C4-2C metric, decision 또는 model promotion을 기록하지 않는다. Derived test
-split은 계속 `SEALED_NOT_USED`이고, runtime dataset YAML은 `train`, `val`, `names`만 포함한다. Primary gate를 모두
-통과하더라도 `CONFIRMED_CANDIDATE`는 final model selection을 의미하지 않는다.
+Kaggle Tesla T4 Official run은 commit `4a5c9721214e48f9d25ab0fcc51d212b3bee0eb9`에서 완료됐다. Fast Research
+reference를 Official result로 전용하지 않았으며 Official package 자체의 validation evidence와 artifact identity를
+사용한다. Derived test split은 `SEALED_NOT_USED`이고 `test_used=false`, `test_split_used=false`다. 따라서 이
+confirmation은 final-test result가 아니다.
 
 | C4-2C state | Value |
 |---|---|
-| Implementation | `READY` |
-| Official run | `NOT RUN` |
-| Decision | `NOT AVAILABLE` |
+| Implementation | `COMPLETED` |
+| Official run | `COMPLETED` |
+| Decision | `CONFIRMED_CANDIDATE` |
 | Test | `SEALED_NOT_USED` |
-| Official metric | none |
-| Final promotion | none |
+| Selection basis | validation only |
+| Production promotion | none |
+
+| Official identity | SHA-256 / value |
+|---|---|
+| Official code commit | `4a5c9721214e48f9d25ab0fcc51d212b3bee0eb9` |
+| Experiment config | `258bf33955c06c5dbbbbeb4d162d5a50d125ae594135ccefbbce9b7d324572a3` |
+| Dataset Manifest | `1746338c091c18e96a11399c81ea9be0d7350105c4860cfa6a4162144ddb9905` |
+| Downloaded Official package | `81c721ab6d34e5563e9f8907fe4c9914d50e48ef35aacfabb6f4ca745420cd76` |
+| Candidate model | `e3fd10cdd708d31421feacfc5d694cb638e0ea60672e08796391b33aecf67155` |
+| Candidate metadata | `2d301687f1ee025f367b536d052b55eeba507c40bc95d265821337489ddeca2b` |
+| Packaged `experiment_result.json` | `17e9abb231f2eee8f08831e99e8d963b2ab190151d91e0ab7f146e2d62f3fdcb` |
+
+| Official validation metric | Value |
+|---|---:|
+| Mask Precision / Recall | 0.8272056911 / 0.7537878788 |
+| Mask mAP50 / mAP50-95 | 0.7894567774 / 0.4623876120 |
+| Strict TP / FP / FN | 17 / 2 / 6 |
+| Strict Precision / Recall / F1 | 0.8947368421 / 0.7391304348 / 0.8095238095 |
+| Small / Medium / Large Recall | 0.375 / 1.0 / 0.875 |
+| Multi / Single-component Recall | 0.5714285714 / 1.0 |
+| Good-negative FP images | 0 / 14 |
+| Complete-miss / wrong-class samples | 0 / 0 |
+
+| Required Primary confirmation check | Result |
+|---|---|
+| `small_recall_above_floor` | **PASS** |
+| `mask_map50_95_floor` | **PASS** |
+| `multi_recall_floor` | **PASS** |
+| `good_negative_fp_guardrail` | **PASS** |
+
+| Secondary Region coverage evidence | Value |
+|---|---:|
+| GT component coverage Recall@0.5 | 0.8260869565 |
+| Small GT coverage Recall@0.5 | 0.625 |
+| Class-aware union IoU | 0.7646175341 |
+| Class-aware union GT coverage | 0.8391536014 |
+| Class-aware union prediction Precision | 0.8959237129 |
+
+Training은 100 / 100 epoch를 완료했고 early stopping은 발생하지 않았다. Validation-selected best epoch는 88,
+wall-clock은 542.329836074초, model size는 6,015,588 bytes다. PyTorch peak allocated/reserved는 각각
+4,179,269,120 / 6,796,869,632 bytes이고 sampled `nvidia-smi` maximum memory는 6,687 MiB다. GPU utilization
+mean/p50/p95는 69.4299065421% / 92% / 100%다.
+
+## 12. C4-3 validation-only final-candidate freeze
+
+C4-3는 새 training, threshold tuning 또는 test evaluation 없이 C4-2A/C4-2B/C4-2C의 recorded Official state를
+적용한다. `REJECTED`인 C4-2A, `PENDING`인 C4-2B와 research-only run은 eligibility가 없고, 모든 required Primary
+check가 PASS한 Official `CONFIRMED_CANDIDATE` C4-2C만 freeze 조건을 만족한다. 이는 experiment ID를 직접
+우승자로 hard-code한 결과가 아니라 status, checks, sealed-test flags와 exact provenance 검증의 결과다.
+
+Repository-owned freeze pointer는
+[`configs/model/yolo_segmentation_final_candidate.json`](../../configs/model/yolo_segmentation_final_candidate.json)이다.
+Manifest SHA-256은 `2a26b1bc03a1876f828e12a625c69c76af5e8c5713e3f64be699feffe2e8aa09`다. Model binary와
+Official package는 Git에 추가하지 않으며 manifest에도 machine-specific absolute path를 기록하지 않는다.
+
+Freeze pipeline은 expected package SHA를 trust anchor로 사용하고 ZIP의 고정된 `experiment_result.json`, config,
+model, metadata와 validation provenance entry만 읽는다. Required member 중복을 거부하고 `SHA256SUMS.txt`와
+실제 entry bytes를 대조한다. Package/model/metadata/config/result bytes SHA, clean Official Git commit,
+`CONFIRMED_CANDIDATE`, 모든 Primary PASS, root·before/after·Region·train-view·experiment metadata의 명시적
+validation/test seal을 교차 검증한 뒤에만 다음 상태를 기록한다. `selected_at`은 재생성 때 임의 현재시간으로
+바꾸지 않도록 explicit evidence argument로 요구하며, 동일 package와 timestamp는 byte-identical manifest를 만든다.
+
+```text
+selection_state = FINAL_CANDIDATE_FROZEN
+selection_basis = VALIDATION_ONLY
+FINAL TEST = SEALED_NOT_USED
+```
+
+`FINAL_CANDIDATE_FROZEN`은 production model, test-validated model 또는 final benchmark result를 뜻하지 않는다.
+후속 C4-4는 이 manifest를 strict schema로 읽고 exact model, metadata와 Dataset Manifest SHA를 확인하며 frozen
+state를 검증한 뒤에만 derived test를 한 번 열 수 있다. Candidate selection은 C4-4에서 변경하지 않고 final-test
+evidence는 별도 namespace에 기록해야 한다. 해당 unlock/evaluation lifecycle은 C4-3에서 구현하거나 실행하지
+않았다.
