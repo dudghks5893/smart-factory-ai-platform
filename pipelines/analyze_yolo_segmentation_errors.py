@@ -16,6 +16,8 @@ from PIL import Image
 
 from ml.datasets.segmentation_annotations import rasterize_segmentation_label_instances
 from ml.datasets.yolo_segmentation_manifest import DerivedManifestRecord, read_derived_manifest
+from ml.evaluation.yolo_confirmation_prediction import predict_c4_2c_instances
+from ml.evaluation.yolo_region_coverage import calculate_region_coverage
 from ml.evaluation.yolo_segmentation_error_analysis import (
     CONFIDENCE_LEVELS,
     MATCH_IOU_THRESHOLD,
@@ -86,6 +88,7 @@ class ErrorAnalysisArtifacts:
     error_taxonomy_path: Path
     hypotheses_path: Path
     visualization_paths: tuple[Path, ...]
+    region_coverage_path: Path | None = None
 
 
 # ADD 2026-08-26: One GT polygon/component를 source-resolution mask instance로 복원한다.
@@ -177,7 +180,7 @@ def select_visualization_samples(
     return selected[:max_count]
 
 
-# ADD 2026-08-26: Val diagnostics를 조율한다. → MODIFY 2026-08-28: Prevalidated val을 허용한다.
+# ADD 2026-08-26: Val diagnostics를 조율한다. → MODIFY 2026-08-31: C4-2C audit를 지원한다.
 def analyze_yolo_segmentation_errors(
     *,
     config: YoloSegmentationBaselineConfig,
@@ -189,6 +192,7 @@ def analyze_yolo_segmentation_errors(
     validated_records: Sequence[DerivedManifestRecord] | None = None,
     runtime_loader: RuntimeLoader = load_yolo_segmentation_runtime,
     created_at: str | None = None,
+    c4_2c_confirmation_protocol: bool = False,
 ) -> ErrorAnalysisArtifacts:
     if output_dir.exists():
         raise FileExistsError(f"Validation error-analysis output already exists: {output_dir}")
@@ -236,12 +240,23 @@ def analyze_yolo_segmentation_errors(
         ground_truth_by_sample[record.sample_id] = ground_truth
         all_ground_truth.extend(ground_truth)
 
-        # 최저 confidence에서 한 번 추론해 모든 sweep point를 같은 prediction pool로 비교한다.
-        with Image.open(dataset_root / record.image_path) as source:
-            image_rgb = np.asarray(source.convert("RGB"), dtype=np.uint8)
-        predictions_by_sample[record.sample_id] = normalize_predictions(
-            runtime.predict(image_rgb, diagnostic_confidence=CONFIDENCE_LEVELS[0])
-        )
+        # C4-2C는 Fast source-path protocol을, legacy analysis는 기존 RGB runtime을 사용한다.
+        if c4_2c_confirmation_protocol:
+            predictions_by_sample[record.sample_id] = predict_c4_2c_instances(
+                model=runtime.model,
+                source_image_path=dataset_root / record.image_path,
+                image_width=record.image_width,
+                image_height=record.image_height,
+                imgsz=runtime.imgsz,
+                device=runtime.device,
+                valid_class_ids=set(classes),
+            )
+        else:
+            with Image.open(dataset_root / record.image_path) as source:
+                image_rgb = np.asarray(source.convert("RGB"), dtype=np.uint8)
+            predictions_by_sample[record.sample_id] = normalize_predictions(
+                runtime.predict(image_rgb, diagnostic_confidence=CONFIDENCE_LEVELS[0])
+            )
 
     size_policy = size_policy_override or derive_size_bucket_policy(all_ground_truth)
     baseline_predictions = filter_predictions(predictions_by_sample, BASELINE_CONFIDENCE)
@@ -264,6 +279,17 @@ def analyze_yolo_segmentation_errors(
         size_policy=size_policy,
     )
     hypotheses = derive_improvement_hypotheses(aggregate, confidence_sweep)
+    region_coverage = (
+        calculate_region_coverage(
+            records=validation_records,
+            ground_truth_by_sample=ground_truth_by_sample,
+            predictions_by_sample=baseline_predictions,
+            classes=classes,
+            size_policy=size_policy,
+        )
+        if c4_2c_confirmation_protocol
+        else None
+    )
 
     if (
         sha256_file(model_path) != model_sha_before
@@ -279,6 +305,7 @@ def analyze_yolo_segmentation_errors(
     confidence_sweep_path = output_dir / "confidence_sweep.json"
     error_taxonomy_path = output_dir / "error_taxonomy.json"
     hypotheses_path = output_dir / "improvement_hypotheses.json"
+    region_coverage_path = output_dir / "region_coverage.json"
     summary = {
         "schema_version": 1,
         "analysis_name": "YOLO Segmentation Validation Error Analysis",
@@ -288,8 +315,26 @@ def analyze_yolo_segmentation_errors(
         "matching": {
             "method": "class_aware_greedy_max_mask_iou",
             "mask_iou_threshold": MATCH_IOU_THRESHOLD,
-            "tie_break": "ground_truth_index_then_prediction_index",
+            "tie_break": (
+                "stable_iou_descending_equivalent"
+                if c4_2c_confirmation_protocol
+                else "ground_truth_index_then_prediction_index"
+            ),
         },
+        "prediction_protocol": (
+            {
+                "initial_confidence": 0.001,
+                "final_confidence": BASELINE_CONFIDENCE,
+                "iou": 0.7,
+                "max_det": 300,
+                "retina_masks": False,
+                "mask_threshold_operator": ">",
+                "mask_threshold": 0.5,
+                "source_resize": "opencv_inter_nearest",
+            }
+            if c4_2c_confirmation_protocol
+            else {"name": "legacy_official_diagnostic"}
+        ),
         "size_bucket_policy": asdict(size_policy),
         "aggregate": aggregate,
         "environment": {
@@ -318,6 +363,8 @@ def analyze_yolo_segmentation_errors(
         },
     )
     _write_json(hypotheses_path, hypotheses)
+    if region_coverage is not None:
+        _write_json(region_coverage_path, region_coverage.to_json_dict())
 
     visualization_paths: list[Path] = []
     analyses_by_sample = {analysis.sample_id: analysis for analysis in analyses}
@@ -357,6 +404,7 @@ def analyze_yolo_segmentation_errors(
         error_taxonomy_path=error_taxonomy_path,
         hypotheses_path=hypotheses_path,
         visualization_paths=tuple(visualization_paths),
+        region_coverage_path=(region_coverage_path if region_coverage is not None else None),
     )
 
 

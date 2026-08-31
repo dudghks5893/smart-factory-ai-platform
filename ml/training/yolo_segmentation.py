@@ -174,12 +174,33 @@ class YoloSegmentationBaselineConfig:
         self.dataset_contract.validate()
 
 
-# ADD 2026-08-27: Trainer와 preview가 공유할 Ultralytics optimization/transform overrides를 만든다.
+@dataclass(frozen=True)
+class YoloTrainerOverrides:
+    """Optional experiment-owned Ultralytics arguments with no global defaults."""
+
+    mosaic: float
+    mask_ratio: int
+    overlap_mask: bool
+    scale: float
+
+    # ADD 2026-08-31: Explicit experiment arguments를 safe Ultralytics scalar로 검증한다.
+    def validate(self) -> None:
+        if (
+            not 0.0 <= self.mosaic <= 1.0
+            or self.mask_ratio <= 0
+            or type(self.overlap_mask) is not bool
+            or self.scale < 0.0
+        ):
+            raise ValueError("YOLO experiment trainer overrides are invalid.")
+
+
+# ADD 2026-08-27: Shared trainer args를 만든다. → MODIFY 2026-08-31: C4-2C args를 opt-in 병합한다.
 def build_ultralytics_training_overrides(
     config: YoloSegmentationBaselineConfig,
+    experiment_overrides: YoloTrainerOverrides | None = None,
 ) -> dict[str, Any]:
     config.validate()
-    return {
+    result: dict[str, Any] = {
         "task": config.model.task,
         "mode": "train",
         "epochs": config.training.epochs,
@@ -196,6 +217,10 @@ def build_ultralytics_training_overrides(
         "save": True,
         "verbose": True,
     }
+    if experiment_overrides is not None:
+        experiment_overrides.validate()
+        result.update(asdict(experiment_overrides))
+    return result
 
 
 @dataclass(frozen=True)

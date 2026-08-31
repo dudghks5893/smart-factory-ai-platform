@@ -19,6 +19,7 @@ from numpy.typing import NDArray
 from ml.datasets.yolo_segmentation_manifest import DerivedManifestRecord
 from ml.training.yolo_segmentation import (
     YoloSegmentationBaselineConfig,
+    YoloTrainerOverrides,
     build_ultralytics_training_overrides,
 )
 from shared.hashing import sha256_file
@@ -69,7 +70,7 @@ class RepresentationPreview:
     transform_names: tuple[str, ...]
 
 
-type DatasetBuilder = Callable[[YoloSegmentationBaselineConfig, Path, str], Any]
+type DatasetBuilder = Callable[..., Any]
 
 
 # ADD 2026-08-27: Preview RNG를 deterministic하게 격리하고 caller state를 복원한다.
@@ -128,11 +129,12 @@ def prepare_preview_dataset(
     return preview_root
 
 
-# ADD 2026-08-27: Pinned trainer와 같은 build_yolo_dataset/build_transforms path를 구성한다.
+# ADD 2026-08-27: Actual transform을 구성한다. → MODIFY 2026-08-31: C4-2C args를 적용한다.
 def build_actual_ultralytics_dataset(
     config: YoloSegmentationBaselineConfig,
     preview_root: Path,
     split: str,
+    experiment_overrides: YoloTrainerOverrides | None = None,
 ) -> Any:
     if split not in {"train", "val"}:
         raise ValueError("Actual transform preview rejects sealed test data.")
@@ -144,7 +146,7 @@ def build_actual_ultralytics_dataset(
     from ultralytics.data.build import build_yolo_dataset
     from ultralytics.utils import DEFAULT_CFG
 
-    overrides = build_ultralytics_training_overrides(config)
+    overrides = build_ultralytics_training_overrides(config, experiment_overrides)
     overrides["mode"] = "train" if split == "train" else "val"
     cfg = get_cfg(DEFAULT_CFG, overrides=overrides)
     data = {
@@ -265,7 +267,7 @@ def _normalize_preview_sample(
     return preview
 
 
-# ADD 2026-08-27: Actual augmentation을 만든다. → MODIFY 2026-08-28: Optional 상태를 반환한다.
+# ADD 2026-08-27: Actual augmentation을 만든다. → MODIFY 2026-08-31: C4-2C args를 전달한다.
 def preview_actual_training_augmentations(
     *,
     config: YoloSegmentationBaselineConfig,
@@ -273,10 +275,15 @@ def preview_actual_training_augmentations(
     sample_ids: list[str],
     variants: int = 3,
     dataset_builder: DatasetBuilder = build_actual_ultralytics_dataset,
+    experiment_overrides: YoloTrainerOverrides | None = None,
 ) -> list[TransformPreview]:
     if variants <= 0 or not sample_ids:
         raise ValueError("Augmentation preview requires samples and positive variant count.")
-    dataset = dataset_builder(config, preview_root, "train")
+    dataset = (
+        dataset_builder(config, preview_root, "train")
+        if experiment_overrides is None
+        else dataset_builder(config, preview_root, "train", experiment_overrides)
+    )
     paths = [Path(path) for path in cast(list[str], dataset.im_files)]
     index_by_sample = {path.stem: index for index, path in enumerate(paths)}
     transforms = _transform_names(dataset.transforms)

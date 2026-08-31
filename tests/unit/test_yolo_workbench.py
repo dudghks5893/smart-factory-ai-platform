@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -247,3 +248,95 @@ def test_c4_2b_sampling_workbench_summary_is_compact_and_train_only(
     assert summary["good_negative_exposure"] == [42, 42]
     assert len(summary["eligible_samples"]) == 19
     assert sum(row["overlap"] for row in summary["eligible_samples"]) == 9
+
+
+# ADD 2026-09-01: C4-2C Workbench가 actual planner snapshot만 PASS로 표시하는지 검증한다.
+def test_c4_2c_sampling_workbench_validates_actual_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experiment = load_yolo_experiment_config(
+        Path(
+            "configs/experiments/yolo_segmentation/"
+            "c4_2c_yolo11n_seg_crop350_nomosaic_maskratio2_seed42.yaml"
+        )
+    )
+    baseline = load_yolo_segmentation_config(experiment.baseline_config_path)
+    small_ids = tuple(f"train-{index:03d}" for index in range(14))
+    multi_ids = tuple(f"train-{index:03d}" for index in range(5, 19))
+    eligible_ids = tuple(f"train-{index:03d}" for index in range(19))
+    evidence = TrainViewEvidence(
+        schema_version=1,
+        experiment_id=experiment.experiment_id,
+        sampling_rule_version="component_aware_bottom_third_union_multi_x2_v1",
+        canonical_manifest_sha256="a" * 64,
+        unique_train_count=84,
+        unique_positive_count=42,
+        unique_good_negative_count=42,
+        small_aware_count=14,
+        multi_component_count=14,
+        eligible_overlap_count=9,
+        eligible_union_count=19,
+        expanded_entry_count=103,
+        expanded_positive_count=61,
+        expanded_good_negative_count=42,
+        expanded_good_negative_ratio=0.4077669902912621,
+        small_fraction_rule="bottom_third",
+        eligible_multiplicity=2,
+        observed_train_small_cutoff=0.011273469387755102,
+        eligible_sample_ids=eligible_ids,
+        sample_multiplicity={f"train-{index:03d}": 2 if index < 19 else 1 for index in range(84)},
+        train_list_sha256="b" * 64,
+        train_list_path_base="canonical_dataset_root",
+        ordering_policy=("canonical_sample_id_order_then_eligible_second_copy_in_sample_id_order"),
+        validation_used_for_sampling=False,
+        test_split_used=False,
+    )
+    eligibility = SamplingEligibility(
+        small_aware_sample_ids=small_ids,
+        multi_component_sample_ids=multi_ids,
+        eligible_sample_ids=eligible_ids,
+        observed_train_small_cutoff=0.011273469387755102,
+    )
+
+    def install_plan(plan_evidence: TrainViewEvidence) -> None:
+        plan = PlannedTrainView((), (), eligibility, plan_evidence)
+        monkeypatch.setattr(
+            "ml.experiments.yolo_workbench.plan_component_aware_train_view",
+            lambda **kwargs: plan,
+        )
+
+    install_plan(evidence)
+    records = [_record(f"train-{index:03d}", "train") for index in range(84)]
+    summary = build_sampling_workbench_summary(
+        experiment=experiment,
+        baseline=baseline,
+        dataset_root=Path("dataset"),
+        records=records,
+    )
+
+    assert summary is not None
+    assert summary["train_view_validation"] == "PASS"
+    assert summary["actual_train_view"] == summary["expected_train_view"]
+    assert (
+        summary["canonical_train_entries"],
+        summary["component_duplicate_entries"],
+        summary["crop_entries"],
+        summary["expanded_train_entries"],
+        summary["positive_exposure"],
+        summary["good_negative_exposure"],
+    ) == (84, 19, 14, 117, 75, 42)
+
+    install_plan(
+        replace(
+            evidence,
+            multi_component_count=13,
+            eligible_overlap_count=8,
+        )
+    )
+    with pytest.raises(ValueError, match="snapshot mismatch"):
+        build_sampling_workbench_summary(
+            experiment=experiment,
+            baseline=baseline,
+            dataset_root=Path("dataset"),
+            records=records,
+        )

@@ -59,7 +59,7 @@ def test_workbench_notebook_structure_and_safety() -> None:
     assert len(serialized.encode()) < 100_000
 
 
-# ADD 2026-08-27: Project API 사용을 확인한다. → MODIFY 2026-08-28: Locked subprocess를 검증한다.
+# ADD 2026-08-27: Project API를 확인한다. → MODIFY 2026-08-31: C4-2C branch를 검증한다.
 def test_workbench_notebook_is_thin_and_validation_safe() -> None:
     source = NOTEBOOK_PATH.read_text(encoding="utf-8")
     assert "run_official_training_subprocess" in source
@@ -72,7 +72,9 @@ def test_workbench_notebook_is_thin_and_validation_safe() -> None:
     assert "validate_training_dataset" not in source
     assert "select_small_validation_sample(samples" in source
     assert 'experiment.intervention_type == \\"resolution\\"' in source
-    assert 'experiment.intervention_type == \\"train_sampling_multiplicity\\"' in source
+    assert '\\"train_sampling_multiplicity\\"' in source
+    assert '\\"component_aware_crop_confirmation\\"' in source
+    assert "experiment.intervention_type in" in source
     assert "build_sampling_workbench_summary" in source
     assert "sampling_validation_source" not in source
     assert "item for item in representatives if item.split" not in source

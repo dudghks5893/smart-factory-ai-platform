@@ -31,6 +31,12 @@ from ml.experiments.gpu_telemetry import (
     reset_torch_cuda_peaks,
     sample_nvidia_smi,
 )
+from ml.experiments.yolo_crop_sampling import (
+    CropTrainViewArtifact,
+    RuntimeCropTrainViewArtifact,
+    build_component_aware_crop_train_view,
+    build_runtime_crop_train_view_adapter,
+)
 from ml.experiments.yolo_sampling import (
     RuntimeTrainViewArtifact,
     TrainViewArtifact,
@@ -40,9 +46,11 @@ from ml.experiments.yolo_sampling import (
 from ml.experiments.yolo_segmentation import (
     BASELINE_METADATA_SHA256,
     BASELINE_MODEL_SHA256,
+    CROP_CONFIRMATION_INTERVENTION,
     ExperimentRecommendation,
     YoloExperimentConfig,
     build_experiment_metadata,
+    confirm_c4_2c_candidate,
     load_yolo_experiment_config,
     recommend_experiment,
     validate_experiment_result,
@@ -57,6 +65,7 @@ from ml.training.yolo_segmentation import (
     METADATA_FILENAME,
     MODEL_FILENAME,
     YoloSegmentationBaselineConfig,
+    YoloTrainerOverrides,
     load_yolo_segmentation_config,
     validate_experiment_dataset,
     validate_yolo_artifact,
@@ -116,6 +125,8 @@ class PreparedExperimentDataset:
     train_view: TrainViewArtifact | None
     runtime_train_view: RuntimeTrainViewArtifact | None
     runtime_dataset_yaml: Path
+    crop_train_view: CropTrainViewArtifact | None = None
+    runtime_crop_train_view: RuntimeCropTrainViewArtifact | None = None
 
 
 type ValidationRunner = Callable[
@@ -257,7 +268,7 @@ def _load_analysis_payload(
     return summary, samples
 
 
-# ADD 2026-08-27: Framework metric과 C4-1 diagnostics를 protocol-labeled quality payload로 결합한다.
+# ADD 2026-08-27: Quality payload를 만든다. → MODIFY 2026-08-31: Region evidence를 보존한다.
 def build_quality_payload(
     validation: ValidationMetricsResult,
     analysis_artifacts: ErrorAnalysisArtifacts,
@@ -286,7 +297,7 @@ def build_quality_payload(
             for sample in samples
         ),
     }
-    return {
+    result = {
         "split": "val",
         "test_split_used": False,
         "ultralytics": validation.overall,
@@ -304,14 +315,21 @@ def build_quality_payload(
         "failure_modes": failure_modes,
         "error_taxonomy": aggregate["error_taxonomy"],
     }
+    if analysis_artifacts.region_coverage_path is not None:
+        result["secondary_region_coverage"] = json.loads(
+            analysis_artifacts.region_coverage_path.read_text(encoding="utf-8")
+        )
+    return result
 
 
-# ADD 2026-08-27: Python/ML framework/CUDA environment를 benchmark domain과 함께 기록한다.
+# ADD 2026-08-27: Runtime environment를 기록한다. → MODIFY 2026-08-31: GPU name을 포함한다.
 def collect_software_environment(
     *,
     framework_version: str,
     requested_device: str,
 ) -> dict[str, Any]:
+    resolved = resolve_device(requested_device)
+    gpu_name = torch.cuda.get_device_name(0) if resolved.type == "cuda" else None
     return {
         "benchmark_domain": "kaggle_nvidia_cuda_training",
         "python_version": platform.python_version(),
@@ -322,11 +340,12 @@ def collect_software_environment(
         "nvidia_driver_version": query_nvidia_driver_version(),
         "ultralytics_version": framework_version,
         "requested_device": requested_device,
-        "actual_device": str(resolve_device(requested_device)),
+        "actual_device": str(resolved),
+        "gpu_name": gpu_name,
     }
 
 
-# ADD 2026-08-28: Dataset을 준비한다. → MODIFY 2026-08-28: 모든 C4에 strict seal을 적용한다.
+# ADD 2026-08-28: Dataset을 준비한다. → MODIFY 2026-08-31: Sealed C4-2C crop view를 연결한다.
 def prepare_experiment_training_dataset(
     *,
     experiment_config: YoloExperimentConfig,
@@ -340,6 +359,44 @@ def prepare_experiment_training_dataset(
         dataset_root,
         baseline_config.dataset_contract,
     )
+    train_records = tuple(record for record in validated_records if record.derived_split == "train")
+    if len(train_records) != baseline_config.dataset_contract.sample_counts["train"]:
+        raise ValueError("Controlled experiment validated train record count changed.")
+
+    if experiment_config.intervention_type == CROP_CONFIRMATION_INTERVENTION:
+        policy = experiment_config.crop_sampling_policy
+        expected_crop = experiment_config.expected_crop_train_view
+        if policy is None or expected_crop is None:
+            raise ValueError("C4-2C crop train-view config is incomplete.")
+        crop_view = build_component_aware_crop_train_view(
+            dataset_root=dataset_root,
+            train_records=train_records,
+            contract=baseline_config.dataset_contract,
+            experiment_id=experiment_config.experiment_id,
+            crop_size=policy.crop_size,
+            output_dir=experiment_dir / "train_view",
+        )
+        expected_crop.validate_evidence(crop_view.evidence)
+        crop_runtime = build_runtime_crop_train_view_adapter(
+            dataset_root=dataset_root,
+            crop_train_view=crop_view,
+            destination=experiment_dir / "runtime" / "train.runtime.txt",
+        )
+        runtime_yaml = write_runtime_dataset_yaml(
+            dataset_root=dataset_root,
+            destination=experiment_dir / "runtime" / "dataset.runtime.yaml",
+            classes=baseline_config.dataset_contract.classes,
+            include_test=False,
+            train_source=crop_runtime.train_list_path,
+        )
+        return PreparedExperimentDataset(
+            validated_records=validated_records,
+            train_view=None,
+            runtime_train_view=None,
+            runtime_dataset_yaml=runtime_yaml,
+            crop_train_view=crop_view,
+            runtime_crop_train_view=crop_runtime,
+        )
     if experiment_config.sampling_policy is None:
         runtime_dataset_yaml = write_runtime_dataset_yaml(
             dataset_root=dataset_root,
@@ -353,10 +410,6 @@ def prepare_experiment_training_dataset(
             None,
             runtime_dataset_yaml,
         )
-
-    train_records = tuple(record for record in validated_records if record.derived_split == "train")
-    if len(train_records) != baseline_config.dataset_contract.sample_counts["train"]:
-        raise ValueError("C4-2B validated train record count changed.")
 
     # Validated train records로 portable evidence를 만든 뒤 machine-local absolute list로 변환한다.
     train_view = build_component_aware_train_view(
@@ -393,7 +446,7 @@ def prepare_experiment_training_dataset(
     )
 
 
-# ADD 2026-08-27: Evidence ZIP을 만든다. → MODIFY 2026-08-28: Train-view를 포함한다.
+# ADD 2026-08-27: Evidence ZIP을 만든다. → MODIFY 2026-08-31: Portable crop provenance도 포함한다.
 def build_experiment_package(
     *,
     experiment_dir: Path,
@@ -401,11 +454,12 @@ def build_experiment_package(
     experiment_config_path: Path,
     package_path: Path,
     train_view: TrainViewArtifact | None = None,
+    crop_train_view: CropTrainViewArtifact | None = None,
 ) -> Path:
     if package_path.exists():
         raise FileExistsError(f"Experiment package already exists: {package_path}")
     package_path.parent.mkdir(parents=True, exist_ok=True)
-    evidence_names = (
+    evidence_names: tuple[str, ...] = (
         "experiment_metadata.json",
         "training_metrics.json",
         "validation_metrics.json",
@@ -416,7 +470,10 @@ def build_experiment_package(
         "environment.json",
         "epoch_metrics.jsonl",
         "visualization_manifest.json",
+        "region_coverage.json",
     )
+    if not (experiment_dir / "region_coverage.json").is_file():
+        evidence_names = tuple(name for name in evidence_names if name != "region_coverage.json")
     files: list[tuple[Path, str]] = [
         (experiment_dir / name, f"evidence/{name}") for name in evidence_names
     ]
@@ -430,6 +487,31 @@ def build_experiment_package(
                 (train_view.train_list_path, "evidence/train_view.txt"),
             )
         )
+    if crop_train_view is not None:
+        crop_train_view.evidence.validate()
+        if sha256_file(crop_train_view.train_list_path) != (
+            crop_train_view.evidence.portable_train_list_sha256
+        ):
+            raise ValueError("Packaged C4-2C train-view SHA does not match its evidence.")
+        files.extend(
+            (
+                (crop_train_view.metadata_path, "evidence/train_view_metadata.json"),
+                (crop_train_view.train_list_path, "evidence/train_view.txt"),
+            )
+        )
+        for crop in crop_train_view.evidence.crops:
+            files.extend(
+                (
+                    (
+                        crop_train_view.output_dir / crop.generated_image_path,
+                        f"evidence/train_view/{crop.generated_image_path}",
+                    ),
+                    (
+                        crop_train_view.output_dir / crop.generated_label_path,
+                        f"evidence/train_view/{crop.generated_label_path}",
+                    ),
+                )
+            )
     files.extend(
         (
             (candidate_artifact_dir / MODEL_FILENAME, f"model/{MODEL_FILENAME}"),
@@ -462,7 +544,7 @@ def _assert_baseline_immutable(
         raise RuntimeError("Baseline runtime artifact changed during the experiment.")
 
 
-# ADD 2026-08-27: Lifecycle을 조율한다. → MODIFY 2026-08-28: Common seal과 sampling view를 연결한다.
+# ADD 2026-08-27: Lifecycle을 조율한다. → MODIFY 2026-08-31: C4-2C confirmation을 연결한다.
 def run_yolo_segmentation_experiment(
     *,
     experiment_config: YoloExperimentConfig,
@@ -477,6 +559,7 @@ def run_yolo_segmentation_experiment(
 ) -> ExperimentRunArtifacts:
     baseline_config = load_yolo_segmentation_config(experiment_config.baseline_config_path)
     candidate_config = experiment_config.training_config(baseline_config)
+    is_c4_2c = experiment_config.intervention_type == CROP_CONFIRMATION_INTERVENTION
     if requested_device != "cuda" or str(resolve_device(requested_device)) != "cuda":
         raise ValueError("Controlled YOLO experiment requires explicit available CUDA.")
     experiment_dir = experiment_config.output.experiment_root / experiment_config.experiment_id
@@ -510,6 +593,13 @@ def run_yolo_segmentation_experiment(
     )
     metadata_payload["working_tree_dirty"] = provenance.working_tree_dirty
     metadata_payload["status"] = "RUNNING"
+    metadata_payload["dataset"] = {
+        "manifest_sha256": manifest_sha,
+        "semantic_fingerprint_sha256": baseline_config.dataset_contract.semantic_fingerprint_sha256,
+        "category": baseline_config.dataset_contract.category,
+        "classes": baseline_config.dataset_contract.classes,
+        "test_used": False,
+    }
     if prepared_dataset.train_view is not None:
         metadata_payload["train_view"] = prepared_dataset.train_view.evidence.to_json_dict()
         runtime_view = prepared_dataset.runtime_train_view
@@ -520,6 +610,18 @@ def run_yolo_segmentation_experiment(
             "entry_count": runtime_view.entry_count,
             "order_and_multiplicity_verified": True,
             "dataset_root_containment_verified": True,
+            "portable_package_evidence": False,
+        }
+    if prepared_dataset.crop_train_view is not None:
+        metadata_payload["train_view"] = prepared_dataset.crop_train_view.evidence.to_json_dict()
+        crop_runtime = prepared_dataset.runtime_crop_train_view
+        if crop_runtime is None:
+            raise RuntimeError("C4-2C runtime crop train-view adapter is missing.")
+        metadata_payload["runtime_train_view_adapter"] = {
+            "source_train_list_sha256": crop_runtime.source_train_list_sha256,
+            "entry_count": crop_runtime.entry_count,
+            "order_and_multiplicity_verified": True,
+            "dataset_and_generated_root_containment_verified": True,
             "portable_package_evidence": False,
         }
     _write_json(experiment_dir / "experiment_metadata.json", metadata_payload)
@@ -540,6 +642,7 @@ def run_yolo_segmentation_experiment(
         requested_device=requested_device,
         size_policy_override=experiment_config.validation_protocol.size_policy(),
         validated_records=validated_analysis_records,
+        c4_2c_confirmation_protocol=is_c4_2c,
     )
     quality_before = build_quality_payload(baseline_validation, baseline_analysis)
     environment = collect_software_environment(
@@ -561,6 +664,11 @@ def run_yolo_segmentation_experiment(
     training_error: Exception | None = None
     try:
         with sampler:
+            experiment_overrides = (
+                YoloTrainerOverrides(**asdict(experiment_config.trainer_overrides))
+                if experiment_config.trainer_overrides is not None
+                else None
+            )
             training_result = train_yolo_segmentation(
                 config=candidate_config,
                 dataset_root=dataset_root,
@@ -568,6 +676,7 @@ def run_yolo_segmentation_experiment(
                 requested_device=requested_device,
                 training_runner=training_runner,
                 prepared_dataset_yaml=prepared_dataset.runtime_dataset_yaml,
+                experiment_overrides=experiment_overrides,
             )
     except Exception as exc:
         training_error = exc
@@ -581,18 +690,35 @@ def run_yolo_segmentation_experiment(
         "pytorch_cuda": collect_torch_cuda_metrics(),
         "nvidia_smi": sampler.summary(),
     }
-    if prepared_dataset.train_view is not None:
-        evidence = prepared_dataset.train_view.evidence
+    if prepared_dataset.train_view is not None or prepared_dataset.crop_train_view is not None:
         batch = candidate_config.training.batch
+        if prepared_dataset.train_view is not None:
+            sampling_evidence = prepared_dataset.train_view.evidence
+            canonical_count = sampling_evidence.unique_train_count
+            expanded_count = sampling_evidence.expanded_entry_count
+            canonical_positive = sampling_evidence.unique_positive_count
+            expanded_positive = sampling_evidence.expanded_positive_count
+            canonical_negative = sampling_evidence.unique_good_negative_count
+            expanded_negative = sampling_evidence.expanded_good_negative_count
+        else:
+            if prepared_dataset.crop_train_view is None:
+                raise RuntimeError("Prepared train-view evidence is missing.")
+            crop_evidence = prepared_dataset.crop_train_view.evidence
+            canonical_count = crop_evidence.canonical_entry_count
+            expanded_count = crop_evidence.total_entry_count
+            canonical_positive = crop_evidence.canonical_positive_count
+            expanded_positive = crop_evidence.positive_exposure
+            canonical_negative = crop_evidence.canonical_negative_count
+            expanded_negative = crop_evidence.negative_exposure
         resource_metrics["train_view_exposure"] = {
-            "canonical_train_entries": evidence.unique_train_count,
-            "expanded_train_entries": evidence.expanded_entry_count,
-            "canonical_positive_exposure": evidence.unique_positive_count,
-            "expanded_positive_exposure": evidence.expanded_positive_count,
-            "canonical_good_negative_exposure": evidence.unique_good_negative_count,
-            "expanded_good_negative_exposure": evidence.expanded_good_negative_count,
-            "nominal_batches_per_epoch_before": (evidence.unique_train_count + batch - 1) // batch,
-            "nominal_batches_per_epoch_after": (evidence.expanded_entry_count + batch - 1) // batch,
+            "canonical_train_entries": canonical_count,
+            "expanded_train_entries": expanded_count,
+            "canonical_positive_exposure": canonical_positive,
+            "expanded_positive_exposure": expanded_positive,
+            "canonical_good_negative_exposure": canonical_negative,
+            "expanded_good_negative_exposure": expanded_negative,
+            "nominal_batches_per_epoch_before": (canonical_count + batch - 1) // batch,
+            "nominal_batches_per_epoch_after": (expanded_count + batch - 1) // batch,
         }
     _write_json(experiment_dir / "resource_telemetry.json", resource_metrics)
     epoch_log_source = (
@@ -690,7 +816,13 @@ def run_yolo_segmentation_experiment(
         requested_device=requested_device,
         size_policy_override=experiment_config.validation_protocol.size_policy(),
         validated_records=validated_analysis_records,
+        c4_2c_confirmation_protocol=is_c4_2c,
     )
+    if candidate_analysis.region_coverage_path is not None:
+        shutil.copy2(
+            candidate_analysis.region_coverage_path,
+            experiment_dir / "region_coverage.json",
+        )
     quality_after = build_quality_payload(candidate_validation, candidate_analysis)
     validation_metrics_payload = {
         "split": "val",
@@ -738,10 +870,17 @@ def run_yolo_segmentation_experiment(
         ],
     )
 
-    recommendation: ExperimentRecommendation = recommend_experiment(
-        quality_before=quality_before,
-        quality_after=quality_after,
-        policy=experiment_config.decision_policy,
+    recommendation: ExperimentRecommendation = (
+        confirm_c4_2c_candidate(
+            quality_after=quality_after,
+            protocol=experiment_config.confirmation_protocol,
+        )
+        if is_c4_2c and experiment_config.confirmation_protocol is not None
+        else recommend_experiment(
+            quality_before=quality_before,
+            quality_after=quality_after,
+            policy=experiment_config.decision_policy,
+        )
     )
     comparison = {
         "experiment_id": experiment_config.experiment_id,
@@ -753,6 +892,15 @@ def run_yolo_segmentation_experiment(
         "resource_cost_after": resource_metrics,
         "recommendation": asdict(recommendation),
     }
+    if is_c4_2c:
+        comparison["primary_confirmation"] = asdict(recommendation)
+        comparison["secondary_evidence"] = {
+            "blocking": False,
+            "strict_recall": quality_after["diagnostic"]["recall"],
+            "strict_f1": quality_after["diagnostic"]["f1"],
+            "framework_mask_recall": quality_after["ultralytics"]["mask"]["recall"],
+            "region_coverage": quality_after.get("secondary_region_coverage"),
+        }
     _write_json(experiment_dir / "comparison_to_baseline.json", comparison)
     if candidate_validation.framework_version != baseline_validation.framework_version:
         raise ValueError("Baseline and candidate validation framework versions differ.")
@@ -767,6 +915,7 @@ def run_yolo_segmentation_experiment(
         "constants": experiment_config.baseline_identity,
         "split": "val",
         "test_split_used": False,
+        "test_used": False,
         "quality_before": quality_before,
         "quality_after": quality_after,
         "resource_metrics": resource_metrics,
@@ -780,13 +929,28 @@ def run_yolo_segmentation_experiment(
         "parameter_count": candidate_validation.parameter_count,
         "decision": recommendation.decision,
         "decision_reason": recommendation.decision_reason,
-        "status": "ACCEPTED"
-        if recommendation.decision == "ACCEPT"
-        else ("REJECTED" if recommendation.decision == "REJECT" else "COMPLETED"),
+        "status": (
+            "ACCEPTED"
+            if recommendation.decision == "ACCEPT"
+            else (
+                "REJECTED"
+                if recommendation.decision == "REJECT"
+                else recommendation.decision
+                if recommendation.decision in {"CONFIRMED_CANDIDATE", "CONFIRMATION_FAILED"}
+                else "COMPLETED"
+            )
+        ),
         "repository": provenance.to_json_dict(),
     }
     if prepared_dataset.train_view is not None:
         result_payload["train_view"] = prepared_dataset.train_view.evidence.to_json_dict()
+    if prepared_dataset.crop_train_view is not None:
+        result_payload["train_view"] = prepared_dataset.crop_train_view.evidence.to_json_dict()
+        result_payload["primary_confirmation"] = asdict(recommendation)
+        result_payload["secondary_evidence"] = comparison["secondary_evidence"]
+        if experiment_config.trainer_overrides is None:
+            raise RuntimeError("C4-2C applied trainer args are missing.")
+        result_payload["applied_trainer_args"] = asdict(experiment_config.trainer_overrides)
     validate_experiment_result(result_payload)
     result_path = experiment_dir / "experiment_result.json"
     _write_json(result_path, result_payload)
@@ -801,6 +965,7 @@ def run_yolo_segmentation_experiment(
         experiment_config_path=experiment_config.config_path,
         package_path=package_path,
         train_view=prepared_dataset.train_view,
+        crop_train_view=prepared_dataset.crop_train_view,
     )
     package_metadata_path = experiment_dir / "package_metadata.json"
     _write_json(

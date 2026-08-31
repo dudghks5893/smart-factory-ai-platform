@@ -337,7 +337,7 @@ def select_small_validation_sample(
     )
 
 
-# ADD 2026-08-28: Validated train records에서 compact C4-2B sampling audit를 만든다.
+# ADD 2026-08-28: Sampling audit를 만든다. → MODIFY 2026-09-01: Actual C4-2C view를 검증한다.
 def build_sampling_workbench_summary(
     *,
     experiment: YoloExperimentConfig,
@@ -345,7 +345,7 @@ def build_sampling_workbench_summary(
     dataset_root: Path,
     records: list[DerivedManifestRecord],
 ) -> dict[str, Any] | None:
-    if experiment.sampling_policy is None:
+    if experiment.sampling_policy is None and experiment.crop_sampling_policy is None:
         return None
     train_records = [record for record in records if record.derived_split == "train"]
     plan = plan_component_aware_train_view(
@@ -355,9 +355,11 @@ def build_sampling_workbench_summary(
         experiment_id=experiment.experiment_id,
     )
     expected = experiment.expected_train_view
-    if expected is None:
+    crop_expected = experiment.expected_crop_train_view
+    if expected is not None:
+        expected.validate_evidence(plan.evidence)
+    elif crop_expected is None:
         raise ValueError("Sampling workbench requires expected train-view evidence.")
-    expected.validate_evidence(plan.evidence)
     small_ids = set(plan.eligibility.small_aware_sample_ids)
     multi_ids = set(plan.eligibility.multi_component_sample_ids)
     eligible_rows = [
@@ -370,7 +372,7 @@ def build_sampling_workbench_summary(
         }
         for sample_id in plan.eligibility.eligible_sample_ids
     ]
-    return {
+    summary: dict[str, Any] = {
         "sampling_rule_version": plan.evidence.sampling_rule_version,
         "sampling_validation_source": "TRAIN_ONLY",
         "test_split": "SEALED_NOT_USED",
@@ -397,9 +399,34 @@ def build_sampling_workbench_summary(
         "observed_train_small_cutoff": plan.evidence.observed_train_small_cutoff,
         "eligible_samples": eligible_rows,
     }
+    if crop_expected is not None:
+        crop_policy = experiment.crop_sampling_policy
+        trainer_overrides = experiment.trainer_overrides
+        if crop_policy is None or trainer_overrides is None:
+            raise ValueError("C4-2C Workbench recipe is incomplete.")
+        actual = crop_expected.validate_planned_evidence(plan.evidence)
+        summary.update(
+            {
+                "sampling_mode": crop_policy.sampling_mode,
+                "canonical_train_entries": actual["canonical_entries"],
+                "component_duplicate_entries": actual["component_duplicate_entries"],
+                "crop_entries": actual["small_centered_crop_entries"],
+                "expanded_train_entries": actual["total_entries"],
+                "positive_exposure": actual["positive_exposure"],
+                "good_negative_exposure": actual["negative_exposure"],
+                "crop_sample_ids": list(plan.eligibility.small_aware_sample_ids),
+                "crop_size": crop_policy.crop_size,
+                "trainer_overrides": asdict(trainer_overrides),
+                "expected_train_view": asdict(crop_expected),
+                "actual_train_view": actual,
+                "train_view_validation": "PASS",
+                "test_used": False,
+            }
+        )
+    return summary
 
 
-# ADD 2026-08-27: Official identity를 검증한다. → MODIFY 2026-08-28: Locked runtime을 검증한다.
+# ADD 2026-08-27: Official identity를 검증한다. → MODIFY 2026-08-31: C4-2C summary를 포함한다.
 def build_official_preflight(
     *,
     experiment: YoloExperimentConfig,

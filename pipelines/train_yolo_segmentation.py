@@ -20,6 +20,7 @@ from ml.training.yolo_segmentation import (
     ARTIFACT_SCHEMA_VERSION,
     YoloArtifactMetadata,
     YoloSegmentationBaselineConfig,
+    YoloTrainerOverrides,
     build_ultralytics_training_overrides,
     load_yolo_segmentation_config,
     validate_artifact_id,
@@ -53,10 +54,7 @@ class YoloTrainingResult:
     metadata: YoloArtifactMetadata
 
 
-type TrainingRunner = Callable[
-    [YoloSegmentationBaselineConfig, Path, Path, str, str],
-    BackendTrainingResult,
-]
+type TrainingRunner = Callable[..., BackendTrainingResult]
 
 
 # ADD 2026-08-25: Runtime YAML을 쓴다. → MODIFY 2026-08-28: train source/test omission을 지원한다.
@@ -90,14 +88,14 @@ def write_runtime_dataset_yaml(
     return destination
 
 
-# ADD 2026-08-25: Ultralytics를 lazy import하고 best epoch/checkpoint만 project contract로 반환한다.
-# MODIFY 2026-08-27: Shared trainer overrides와 per-epoch evidence callback을 연결한다.
+# ADD 2026-08-25: Best checkpoint를 반환한다. → MODIFY 2026-08-31: C4-2C args를 전달한다.
 def run_ultralytics_training(
     config: YoloSegmentationBaselineConfig,
     dataset_yaml: Path,
     runtime_root: Path,
     artifact_id: str,
     requested_device: str,
+    experiment_overrides: YoloTrainerOverrides | None = None,
 ) -> BackendTrainingResult:
     """Delegate model optimization to the pinned framework without copying its trainer logic."""
     os.environ.setdefault("YOLO_CONFIG_DIR", str((runtime_root / ".ultralytics-config").resolve()))
@@ -128,7 +126,7 @@ def run_ultralytics_training(
     model.add_callback("on_train_epoch_start", epoch_logger.on_train_epoch_start)
     model.add_callback("on_fit_epoch_end", epoch_logger.on_fit_epoch_end)
     training_kwargs: dict[str, Any] = {
-        **build_ultralytics_training_overrides(config),
+        **build_ultralytics_training_overrides(config, experiment_overrides),
         "data": str(dataset_yaml),
         "device": framework_device,
         "project": str(runtime_root),
@@ -155,7 +153,7 @@ def run_ultralytics_training(
     )
 
 
-# ADD 2026-08-25: Training을 조율한다. → MODIFY 2026-08-28: Prepared YAML을 허용한다.
+# ADD 2026-08-25: Training을 조율한다. → MODIFY 2026-08-31: Applied args를 보존한다.
 def train_yolo_segmentation(
     *,
     config: YoloSegmentationBaselineConfig,
@@ -165,6 +163,7 @@ def train_yolo_segmentation(
     training_runner: TrainingRunner = run_ultralytics_training,
     created_at: str | None = None,
     prepared_dataset_yaml: Path | None = None,
+    experiment_overrides: YoloTrainerOverrides | None = None,
 ) -> YoloTrainingResult:
     """Train from train/val only and persist the selected checkpoint with exact lineage."""
     validate_artifact_id(artifact_id)
@@ -194,9 +193,20 @@ def train_yolo_segmentation(
     seed_training(config.training.seed)
 
     # Train/validation만 사용하는 Ultralytics backend로 best checkpoint를 선택한다.
-    backend_result = training_runner(
-        config, dataset_yaml, config.output.training_runtime_root, artifact_id, device
+    runner_args = (config, dataset_yaml, config.output.training_runtime_root, artifact_id, device)
+    backend_result = (
+        training_runner(*runner_args)
+        if experiment_overrides is None
+        else training_runner(*runner_args, experiment_overrides)
     )
+    training_config: dict[str, Any] = {
+        "model": asdict(config.model),
+        "training": asdict(config.training),
+        "dataset_protocol_name": config.dataset_contract.protocol_name,
+    }
+    if experiment_overrides is not None:
+        experiment_overrides.validate()
+        training_config["applied_trainer_args"] = asdict(experiment_overrides)
     metadata = YoloArtifactMetadata(
         schema_version=ARTIFACT_SCHEMA_VERSION,
         model_name=config.model.weights,
@@ -207,11 +217,7 @@ def train_yolo_segmentation(
         seed=config.training.seed,
         dataset_manifest_sha256=config.dataset_contract.manifest_sha256,
         dataset_semantic_fingerprint_sha256=(config.dataset_contract.semantic_fingerprint_sha256),
-        training_config={
-            "model": asdict(config.model),
-            "training": asdict(config.training),
-            "dataset_protocol_name": config.dataset_contract.protocol_name,
-        },
+        training_config=training_config,
         created_at=created_at or datetime.now(UTC).isoformat(),
         framework="ultralytics",
         framework_version=backend_result.framework_version,

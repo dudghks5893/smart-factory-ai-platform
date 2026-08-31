@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
@@ -23,6 +24,7 @@ from ml.experiments.yolo_workbench_visualization import (
     render_representation_comparison,
 )
 from ml.training.yolo_segmentation import (
+    YoloTrainerOverrides,
     load_yolo_segmentation_config,
     validate_experiment_dataset,
 )
@@ -38,7 +40,7 @@ def _write_json(path: Path, payload: object) -> Path:
     return path
 
 
-# ADD 2026-08-28: Actual augmentation/representation을 locked interpreter에서 생성한다.
+# ADD 2026-08-28: Locked preview를 만든다. → MODIFY 2026-08-31: C4-2C override를 적용한다.
 def run_yolo_workbench_preview(
     *,
     mode: Literal["research", "official"],
@@ -89,6 +91,11 @@ def run_yolo_workbench_preview(
         preview_root=preview_dataset_root,
         sample_ids=train_sample_ids,
         variants=3,
+        experiment_overrides=(
+            YoloTrainerOverrides(**asdict(experiment.trainer_overrides))
+            if mode == "official" and experiment.trainer_overrides is not None
+            else None
+        ),
     )
     albumentations = environment.packages["albumentations"]
     albumentations_active = any(preview.albumentations_active for preview in augmentation_previews)

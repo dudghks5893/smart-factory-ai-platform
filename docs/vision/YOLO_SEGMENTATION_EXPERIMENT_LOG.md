@@ -7,9 +7,10 @@
 보존할 가치가 있다는 뜻이며 runtime model 교체, production calibration 또는 factory certification을 뜻하지
 않는다. 최종 candidate 선택과 derived-test 1회 평가는 C4-3의 별도 경계다.
 
-현재 순서는 Baseline v1 → C4-1 validation error analysis → C4-2A higher resolution이다. C4-2B
-component-preserving sampling/crop, C4-2C larger segmentation model, C4-2D validation cost-based confidence
-calibration 및 C4-3 final candidate selection은 아직 실행하거나 구현하지 않았다.
+현재 순서는 Baseline v1 → C4-1 validation error analysis → C4-2A higher resolution → C4-2B
+component-aware x2 Official experiment까지 진행됐다. C4-2B는 `COMPLETED` / `PENDING`이며 final candidate로
+확정되지 않았다. C4-2C crop confirmation은 구현만 준비됐고 Official run은 실행하지 않았다. C4-2D와 C4-3
+final candidate selection도 아직 구현하거나 실행하지 않았다.
 
 ## 2. 공통 dataset과 validation protocol
 
@@ -165,8 +166,8 @@ artifact를 자동 교체하지 않는다.
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|
 | Baseline v1 / C4-1 | Reference `imgsz=640` | 0.34359 | 0.608696 | 0.250000 | 0.500000 | 0/14 | not captured | not captured¹ | `REFERENCE` |
 | C4-2A | `imgsz 640 -> 1024` | 0.303871 | 0.521739 | 0.125000 | 0.428571 | 0/14 | 7,551,844,352 bytes | 430.421539 sec | `REJECT` |
-| C4-2B | Future slot; not implemented | — | — | — | — | — | — | — | — |
-| C4-2C | Future slot; not implemented | — | — | — | — | — | — | — | — |
+| C4-2B | component-aware eligible x2; Official run completed | 0.4236909445 | 0.6521739 | 0.250000 | 0.500000 | 0/14 | approximately 2.875 GB | 281.608 sec | `PENDING` |
+| C4-2C | crop350 + no-Mosaic + mask ratio 2; implementation ready, Official run not run | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
 | C4-2D | Future slot; not implemented | — | — | — | — | — | — | — | — |
 | C4-3 | Future final selection; not implemented | — | — | — | — | — | — | — | — |
 
@@ -301,8 +302,79 @@ Commit `edc0bd4`의 첫 시도는 training과 final validation 후 epoch callbac
 `1353aefed744ad5c67e931b6e7dd4034c903c065`에서 수행한 retry만 official result이며 첫 시도의 metric이나
 artifact identity를 섞지 않는다.
 
-다음 planned hypothesis는 **C4-2B component-preserving crop / sampling strategy**다. 아직 구현하거나 검증하지
-않았으며 C4-2A의 실패만으로 효과를 가정하지 않는다.
+C4-2A 종료 시점의 다음 planned hypothesis는 **C4-2B component-preserving sampling strategy**였다.
+이후 C4-2B 구현과 Official experiment가 수행됐으며, 이 historical C4-2A 결론은 후속 결과를
+사전에 가정한 기록이 아니다.
+
+### 5.7 C4-2B Official historical evidence
+
+다음은 실제 Kaggle Official run에서 확보된
+`c4_2b_yolo11n_seg_component_aware_sampling_x2_seed42`의 authoritative historical record다. Implementation과
+Official run status는 모두 `COMPLETED`이고 decision은 `PENDING`이다. Candidate는 `ACCEPTED`, `CONFIRMED` 또는
+final model이 아니며, derived test split은 `SEALED_NOT_USED`로 유지됐다.
+
+| Field | Official value |
+|---|---|
+| Implementation | `COMPLETED` |
+| Official run | `COMPLETED` |
+| Status / Decision | `COMPLETED` / `PENDING` |
+| Decision reason | `Failure-focused improvement is incomplete: small_recall_improvement` |
+| Test used | `false`; `SEALED_NOT_USED` |
+
+Candidate와 같은 session에서 다시 측정한 Baseline framework validation은 derived-test 결과가 아닌 validation-only
+comparison reference다.
+
+| Ultralytics Mask validation metric | Same-session Baseline | C4-2B Candidate |
+|---|---:|---:|
+| Precision | 0.559087 | 0.8145489791 |
+| Recall | 0.598485 | 0.6267087419 |
+| mAP50 | 0.597152 | 0.7112364954 |
+| mAP50-95 | 0.343545 | 0.4236909445 |
+
+| Strict candidate diagnostic at confidence 0.25 / mask IoU 0.5 | Value |
+|---|---:|
+| TP / FP / FN | 15 / 12 / 8 |
+| Instance Precision | 0.5555556 |
+| Instance Recall | 0.6521739 |
+| Instance F1 | 0.6000000 |
+| Small / Medium / Large Recall | 0.250 / 1.000 / 0.750 |
+| Multi / Single-component Recall | 0.500 / 0.888889 |
+| Good-negative FP images | 0 / 14; rate 0.0 |
+
+| Decision check | Result |
+|---|---|
+| `mask_map50_95_nonregression` | **PASS** |
+| `instance_recall_nonregression` | **PASS** |
+| `small_recall_improvement` | **FAIL** |
+| `multi_recall_nonregression` | **PASS** |
+| `good_negative_guardrail` | **PASS** |
+
+Primary non-regression과 good-negative guardrail은 통과했지만 failure-focused Small Recall이 Baseline `0.250`보다
+strict하게 개선되지 않았다. 따라서 Official status는 `COMPLETED`, decision은 `PENDING`이며 candidate를 승인,
+확정 또는 final promotion하지 않는다.
+
+| Resource evidence | Official value |
+|---|---:|
+| Training wall time | 281.608 sec |
+| Epoch logger cumulative time | 261.424 sec |
+| Best epoch | 98 |
+| PyTorch peak allocated | approximately 2.708 GB |
+| PyTorch peak reserved | approximately 2.875 GB |
+| `nvidia-smi` memory max / mean | 2,947 / 2,858.9 MiB |
+| GPU utilization mean / max | 47.625% / 87% |
+| GPU power mean / max | 51.01 / 90.17 W |
+| Model size | 6,015,588 bytes |
+
+| Artifact | SHA-256 |
+|---|---|
+| Official C4-2B model | `f14e1fde030bdc95658bb28a5de49fa1eb310f0c1957db3b0d83d162a9c76356` |
+| Official C4-2B metadata | `98e5878cd1ca4277bb98cc738cfdbd1d23885a53d82130180c898562de99e48e` |
+| Official C4-2B package | `0fe60bc0a000e74a6da8e17dfe8c2b6b824abe3424d334f353bcefebd6fd94f2` |
+
+이 SHA들은 Official execution evidence의 identity다. Repository에 package binary가 포함되지 않은 것은 Official
+run 미실행을 뜻하지 않는다. 다만 해당 ZIP이 local Mac에 보존됐다는 근거는 없으므로 local preservation을
+주장하지 않는다. Fast Research의 clean C4-2B reference는 탐색용 별도 run이며 위 Official checkpoint의 exact
+reproduction이나 artifact identity로 사용하지 않는다.
 
 ## 6. Machine-readable evidence contract
 
@@ -432,3 +504,24 @@ Batch를 바꾸거나 새 experiment를 자동 시작하지 않는다.
 Official retry에서는 output export 후 `package_metadata.json`의 ZIP/model/metadata/config SHA와 ZIP 내부
 `SHA256SUMS.txt`를 함께 검증했다. Section 5의 result와 artifact identity는 이 검증을 통과한 package를 근거로
 하며, 후속 reproduction도 검증 완료 전에는 새 result로 간주하지 않는다.
+
+## 11. C4-2C Official confirmation 준비 상태
+
+`c4_2c_yolo11n_seg_crop350_nomosaic_maskratio2_seed42`의 repository-owned typed recipe, deterministic
+component-aware duplicate/crop train view, explicit augmentation override, Fast-compatible validation prediction,
+Region Coverage secondary audit와 absolute Primary confirmation gate가 구현됐다. Workbench는 같은 20-section
+lifecycle에서 이 config를 preflight하고 repository runner를 호출한다.
+
+현재 상태는 **IMPLEMENTATION READY / OFFICIAL CONFIRMATION NOT RUN**이다. 이 문서에는 Fast Research 결과를
+Official 결과로 옮기지 않았으며 실제 C4-2C metric, decision 또는 model promotion을 기록하지 않는다. Derived test
+split은 계속 `SEALED_NOT_USED`이고, runtime dataset YAML은 `train`, `val`, `names`만 포함한다. Primary gate를 모두
+통과하더라도 `CONFIRMED_CANDIDATE`는 final model selection을 의미하지 않는다.
+
+| C4-2C state | Value |
+|---|---|
+| Implementation | `READY` |
+| Official run | `NOT RUN` |
+| Decision | `NOT AVAILABLE` |
+| Test | `SEALED_NOT_USED` |
+| Official metric | none |
+| Final promotion | none |

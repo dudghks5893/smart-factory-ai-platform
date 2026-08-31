@@ -7,7 +7,7 @@ import math
 from dataclasses import asdict, dataclass, replace
 from datetime import date
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 import yaml
 
@@ -27,11 +27,25 @@ from ml.training.yolo_segmentation import (
     load_yolo_segmentation_config,
     validate_artifact_id,
 )
-from shared.hashing import sha256_file
+from shared.hashing import sha256_bytes, sha256_file
 
 EXPERIMENT_SCHEMA_VERSION = 1
-EXPERIMENT_STATUSES = {"PLANNED", "RUNNING", "COMPLETED", "ACCEPTED", "REJECTED"}
-EXPERIMENT_DECISIONS = {"PENDING", "ACCEPT", "REJECT"}
+EXPERIMENT_STATUSES = {
+    "PLANNED",
+    "RUNNING",
+    "COMPLETED",
+    "ACCEPTED",
+    "REJECTED",
+    "CONFIRMED_CANDIDATE",
+    "CONFIRMATION_FAILED",
+}
+EXPERIMENT_DECISIONS = {
+    "PENDING",
+    "ACCEPT",
+    "REJECT",
+    "CONFIRMED_CANDIDATE",
+    "CONFIRMATION_FAILED",
+}
 BASELINE_MODEL_SHA256 = "594003121b0e071c47d68c3e53c10f438dcec18b5b56b4e5d8831d64001192bd"
 BASELINE_METADATA_SHA256 = "9f3e3878141e831a6721c5136d67057da906485b9825262bd4e0897b2879fc6b"
 BASELINE_VALIDATION_METRICS = {
@@ -45,9 +59,211 @@ EXPECTED_PRIORITIES = {
 }
 RESOLUTION_INTERVENTION = "resolution"
 TRAIN_SAMPLING_INTERVENTION = "train_sampling_multiplicity"
+CROP_CONFIRMATION_INTERVENTION = "component_aware_crop_confirmation"
 SAMPLING_CONTROLLED_FIELD = "training.dataset_index_multiplicity"
 SAMPLING_CONTROLLED_BEFORE = "canonical_x1"
 SAMPLING_CONTROLLED_AFTER = "component_aware_eligible_x2"
+CROP_CONTROLLED_FIELD = "training.recipe"
+CROP_CONTROLLED_BEFORE = "c4_2b_component_aware_x2"
+CROP_CONTROLLED_AFTER = "crop350_nomosaic_maskratio2"
+
+
+@dataclass(frozen=True)
+class CropSamplingPolicy:
+    """Exact component-aware duplicate plus small-centered crop policy for C4-2C."""
+
+    sampling_mode: str
+    sampling_multiplicity: int
+    crop_size: int
+
+    # ADD 2026-08-31: C4-2C R17-derived train-view recipe를 고정한다.
+    def validate(self) -> None:
+        if (
+            self.sampling_mode != "component_aware_crop"
+            or self.sampling_multiplicity != 2
+            or self.crop_size != 350
+        ):
+            raise ValueError("C4-2C crop sampling recipe changed from the approved design.")
+
+
+@dataclass(frozen=True)
+class TrainerOverrides:
+    """Explicit Ultralytics augmentation arguments applied only to C4-2C."""
+
+    mosaic: float
+    mask_ratio: int
+    overlap_mask: bool
+    scale: float
+
+    # ADD 2026-08-31: Every C4-2C augmentation argument is explicit and exact.
+    def validate(self) -> None:
+        if asdict(self) != {
+            "mosaic": 0.0,
+            "mask_ratio": 2,
+            "overlap_mask": True,
+            "scale": 0.5,
+        }:
+            raise ValueError("C4-2C trainer overrides changed from the approved recipe.")
+
+
+@dataclass(frozen=True)
+class ExpectedCropTrainView:
+    """Exact approved train-view snapshot asserted for C4-2C preparation."""
+
+    canonical_entries: int
+    canonical_positives: int
+    canonical_negatives: int
+    component_duplicate_entries: int
+    small_centered_crop_entries: int
+    total_entries: int
+    positive_exposure: int
+    negative_exposure: int
+    small_aware_count: int
+    multi_component_count: int
+    eligible_overlap_count: int
+    eligible_union_count: int
+    observed_train_small_cutoff: float
+
+    # ADD 2026-09-01: Actual train-view mapping을 approved snapshot과 비교한다.
+    def _validate_actual(self, actual: dict[str, int | float]) -> None:
+        expected = asdict(self)
+        if actual != expected:
+            raise ValueError(
+                f"C4-2C train-view snapshot mismatch: expected={expected}, actual={actual}"
+            )
+
+    # ADD 2026-08-31: Crop evidence를 검증한다. → MODIFY 2026-09-01: Actual count만 사용한다.
+    def validate_evidence(self, evidence: CropEvidenceContract) -> None:
+        evidence.validate()
+        actual = {
+            "canonical_entries": evidence.canonical_entry_count,
+            "canonical_positives": evidence.canonical_positive_count,
+            "canonical_negatives": evidence.canonical_negative_count,
+            "component_duplicate_entries": evidence.component_duplicate_count,
+            "small_centered_crop_entries": evidence.crop_entry_count,
+            "total_entries": evidence.total_entry_count,
+            "positive_exposure": evidence.positive_exposure,
+            "negative_exposure": evidence.negative_exposure,
+            "small_aware_count": evidence.small_aware_count,
+            "multi_component_count": evidence.multi_component_count,
+            "eligible_overlap_count": evidence.eligible_overlap_count,
+            "eligible_union_count": evidence.eligible_union_count,
+            "observed_train_small_cutoff": evidence.observed_train_small_cutoff,
+        }
+        self._validate_actual(actual)
+
+    # ADD 2026-09-01: Shared planner의 actual projected crop view를 Official preflight에서 검증한다.
+    def validate_planned_evidence(
+        self,
+        evidence: TrainViewEvidence,
+    ) -> dict[str, int | float]:
+        evidence.validate()
+        actual: dict[str, int | float] = {
+            "canonical_entries": evidence.unique_train_count,
+            "canonical_positives": evidence.unique_positive_count,
+            "canonical_negatives": evidence.unique_good_negative_count,
+            "component_duplicate_entries": evidence.eligible_union_count,
+            "small_centered_crop_entries": evidence.small_aware_count,
+            "total_entries": (
+                evidence.unique_train_count
+                + evidence.eligible_union_count
+                + evidence.small_aware_count
+            ),
+            "positive_exposure": (
+                evidence.unique_positive_count
+                + evidence.eligible_union_count
+                + evidence.small_aware_count
+            ),
+            "negative_exposure": evidence.unique_good_negative_count,
+            "small_aware_count": evidence.small_aware_count,
+            "multi_component_count": evidence.multi_component_count,
+            "eligible_overlap_count": evidence.eligible_overlap_count,
+            "eligible_union_count": evidence.eligible_union_count,
+            "observed_train_small_cutoff": evidence.observed_train_small_cutoff,
+        }
+        self._validate_actual(actual)
+        return actual
+
+
+class CropEvidenceContract(Protocol):
+    """Structural train-view fields consumed without introducing an import cycle."""
+
+    def validate(self) -> None: ...
+
+    @property
+    def canonical_entry_count(self) -> int: ...
+
+    @property
+    def canonical_positive_count(self) -> int: ...
+
+    @property
+    def canonical_negative_count(self) -> int: ...
+
+    @property
+    def component_duplicate_count(self) -> int: ...
+
+    @property
+    def crop_entry_count(self) -> int: ...
+
+    @property
+    def total_entry_count(self) -> int: ...
+
+    @property
+    def positive_exposure(self) -> int: ...
+
+    @property
+    def negative_exposure(self) -> int: ...
+
+    @property
+    def small_aware_count(self) -> int: ...
+
+    @property
+    def multi_component_count(self) -> int: ...
+
+    @property
+    def eligible_overlap_count(self) -> int: ...
+
+    @property
+    def eligible_union_count(self) -> int: ...
+
+    @property
+    def observed_train_small_cutoff(self) -> float: ...
+
+
+@dataclass(frozen=True)
+class ConfirmationProtocol:
+    """Fast-compatible validation prediction and absolute confirmation gates."""
+
+    initial_confidence: float
+    final_confidence: float
+    prediction_iou: float
+    max_det: int
+    retina_masks: bool
+    mask_threshold: float
+    mask_resize: str
+    matching_iou: float
+    small_recall_floor_exclusive: float
+    mask_map50_95_floor: float
+    multi_recall_floor: float
+    good_negative_fp_rate: float
+
+    # ADD 2026-08-31: C4-2C prediction normalization과 Primary gate를 exact하게 고정한다.
+    def validate(self) -> None:
+        if asdict(self) != {
+            "initial_confidence": 0.001,
+            "final_confidence": 0.25,
+            "prediction_iou": 0.7,
+            "max_det": 300,
+            "retina_masks": False,
+            "mask_threshold": 0.5,
+            "mask_resize": "opencv_inter_nearest",
+            "matching_iou": 0.5,
+            "small_recall_floor_exclusive": 0.25,
+            "mask_map50_95_floor": 0.4,
+            "multi_recall_floor": 0.5,
+            "good_negative_fp_rate": 0.0,
+        }:
+            raise ValueError("C4-2C confirmation protocol changed from the approved design.")
 
 
 @dataclass(frozen=True)
@@ -211,6 +427,10 @@ class YoloExperimentConfig:
     controlled_change: ControlledChange
     sampling_policy: SamplingPolicy | None
     expected_train_view: ExpectedTrainView | None
+    crop_sampling_policy: CropSamplingPolicy | None
+    expected_crop_train_view: ExpectedCropTrainView | None
+    trainer_overrides: TrainerOverrides | None
+    confirmation_protocol: ConfirmationProtocol | None
     validation_protocol: ValidationProtocol
     telemetry: TelemetryConfig
     output: ExperimentOutputConfig
@@ -218,7 +438,7 @@ class YoloExperimentConfig:
     decision_policy: DecisionPolicy
     config_path: Path
 
-    # ADD 2026-08-27: Imgsz를 검증한다. → MODIFY 2026-08-28: Sampling 변경도 검증한다.
+    # ADD 2026-08-27: Imgsz를 검증한다. → MODIFY 2026-08-31: C4-2C confirmation recipe도 검증한다.
     def validate(self, baseline: YoloSegmentationBaselineConfig) -> None:
         validate_artifact_id(self.experiment_id)
         try:
@@ -272,6 +492,40 @@ class YoloExperimentConfig:
                 raise ValueError("C4-2B requires sampling policy and expected train-view evidence.")
             self.sampling_policy.validate()
             expected_candidate_identity = expected_identity
+            if any(
+                value is not None
+                for value in (
+                    self.crop_sampling_policy,
+                    self.expected_crop_train_view,
+                    self.trainer_overrides,
+                    self.confirmation_protocol,
+                )
+            ):
+                raise ValueError("C4-2B must not declare C4-2C confirmation fields.")
+        elif self.intervention_type == CROP_CONFIRMATION_INTERVENTION:
+            if self.controlled_change != ControlledChange(
+                CROP_CONTROLLED_FIELD,
+                CROP_CONTROLLED_BEFORE,
+                CROP_CONTROLLED_AFTER,
+            ):
+                raise ValueError("C4-2C must declare only the approved combined recipe.")
+            if self.sampling_policy is not None or self.expected_train_view is not None:
+                raise ValueError("C4-2C must use its typed crop train-view policy.")
+            required = (
+                self.crop_sampling_policy,
+                self.expected_crop_train_view,
+                self.trainer_overrides,
+                self.confirmation_protocol,
+            )
+            if any(value is None for value in required):
+                raise ValueError("C4-2C typed recipe sections are incomplete.")
+            assert self.crop_sampling_policy is not None
+            assert self.trainer_overrides is not None
+            assert self.confirmation_protocol is not None
+            self.crop_sampling_policy.validate()
+            self.trainer_overrides.validate()
+            self.confirmation_protocol.validate()
+            expected_candidate_identity = expected_identity
         else:
             raise ValueError("Unsupported YOLO experiment intervention type.")
         if self.candidate_identity != expected_candidate_identity:
@@ -284,6 +538,20 @@ class YoloExperimentConfig:
         for key, expected in EXPECTED_PRIORITIES.items():
             if self.evaluation_priorities.get(key) != expected:
                 raise ValueError(f"Experiment priority changed or is incomplete: {key}")
+
+        if self.intervention_type in {
+            RESOLUTION_INTERVENTION,
+            TRAIN_SAMPLING_INTERVENTION,
+        } and any(
+            value is not None
+            for value in (
+                self.crop_sampling_policy,
+                self.expected_crop_train_view,
+                self.trainer_overrides,
+                self.confirmation_protocol,
+            )
+        ):
+            raise ValueError("Legacy controlled experiments must not declare C4-2C fields.")
 
     # ADD 2026-08-27: Training config를 만든다. → MODIFY 2026-08-28: Intervention을 분기한다.
     def training_config(
@@ -331,6 +599,15 @@ def _boolean(raw: object, *, name: str) -> bool:
     if type(raw) is not bool:
         raise ValueError(f"Experiment config field must be a boolean: {name}")
     return cast(bool, raw)
+
+
+# ADD 2026-08-31: New typed C4-2C sections reject silently ignored keys.
+def _require_keys(section: dict[str, Any], expected: set[str], *, name: str) -> None:
+    if set(section) != expected:
+        raise ValueError(
+            f"Experiment config section keys changed: {name}; "
+            f"expected={sorted(expected)}, actual={sorted(section)}"
+        )
 
 
 # ADD 2026-08-28: Controlled change scalar를 integer 또는 non-empty string으로 제한한다.
@@ -506,13 +783,143 @@ def _load_expected_train_view(raw: object) -> ExpectedTrainView | None:
     )
 
 
-# ADD 2026-08-27: Typed YAML을 읽는다. → MODIFY 2026-08-28: Intervention별 config를 복원한다.
+# ADD 2026-08-31: Optional C4-2C crop policy를 strict typed contract로 복원한다.
+def _load_crop_sampling_policy(raw: object) -> CropSamplingPolicy | None:
+    if raw is None:
+        return None
+    section = _mapping(raw, name="crop_sampling_policy")
+    _require_keys(
+        section,
+        {"sampling_mode", "sampling_multiplicity", "crop_size"},
+        name="crop_sampling_policy",
+    )
+    return CropSamplingPolicy(
+        sampling_mode=str(section["sampling_mode"]),
+        sampling_multiplicity=int(section["sampling_multiplicity"]),
+        crop_size=int(section["crop_size"]),
+    )
+
+
+# ADD 2026-08-31: C4-2C expected train-view snapshot을 strict mapping으로 복원한다.
+def _load_expected_crop_train_view(raw: object) -> ExpectedCropTrainView | None:
+    if raw is None:
+        return None
+    section = _mapping(raw, name="expected_crop_train_view")
+    names = {
+        "canonical_entries",
+        "canonical_positives",
+        "canonical_negatives",
+        "component_duplicate_entries",
+        "small_centered_crop_entries",
+        "total_entries",
+        "positive_exposure",
+        "negative_exposure",
+        "small_aware_count",
+        "multi_component_count",
+        "eligible_overlap_count",
+        "eligible_union_count",
+        "observed_train_small_cutoff",
+    }
+    _require_keys(section, names, name="expected_crop_train_view")
+    return ExpectedCropTrainView(
+        canonical_entries=int(section["canonical_entries"]),
+        canonical_positives=int(section["canonical_positives"]),
+        canonical_negatives=int(section["canonical_negatives"]),
+        component_duplicate_entries=int(section["component_duplicate_entries"]),
+        small_centered_crop_entries=int(section["small_centered_crop_entries"]),
+        total_entries=int(section["total_entries"]),
+        positive_exposure=int(section["positive_exposure"]),
+        negative_exposure=int(section["negative_exposure"]),
+        small_aware_count=int(section["small_aware_count"]),
+        multi_component_count=int(section["multi_component_count"]),
+        eligible_overlap_count=int(section["eligible_overlap_count"]),
+        eligible_union_count=int(section["eligible_union_count"]),
+        observed_train_small_cutoff=float(section["observed_train_small_cutoff"]),
+    )
+
+
+# ADD 2026-08-31: Explicit C4-2C Ultralytics arguments를 typed mapping으로 복원한다.
+def _load_trainer_overrides(raw: object) -> TrainerOverrides | None:
+    if raw is None:
+        return None
+    section = _mapping(raw, name="trainer_overrides")
+    _require_keys(
+        section,
+        {"mosaic", "mask_ratio", "overlap_mask", "scale"},
+        name="trainer_overrides",
+    )
+    return TrainerOverrides(
+        mosaic=float(section["mosaic"]),
+        mask_ratio=int(section["mask_ratio"]),
+        overlap_mask=_boolean(section["overlap_mask"], name="trainer_overrides.overlap_mask"),
+        scale=float(section["scale"]),
+    )
+
+
+# ADD 2026-08-31: Fast-compatible C4-2C prediction/gate protocol을 strict하게 복원한다.
+def _load_confirmation_protocol(raw: object) -> ConfirmationProtocol | None:
+    if raw is None:
+        return None
+    section = _mapping(raw, name="confirmation_protocol")
+    names = {
+        "initial_confidence",
+        "final_confidence",
+        "prediction_iou",
+        "max_det",
+        "retina_masks",
+        "mask_threshold",
+        "mask_resize",
+        "matching_iou",
+        "small_recall_floor_exclusive",
+        "mask_map50_95_floor",
+        "multi_recall_floor",
+        "good_negative_fp_rate",
+    }
+    _require_keys(section, names, name="confirmation_protocol")
+    return ConfirmationProtocol(
+        initial_confidence=float(section["initial_confidence"]),
+        final_confidence=float(section["final_confidence"]),
+        prediction_iou=float(section["prediction_iou"]),
+        max_det=int(section["max_det"]),
+        retina_masks=_boolean(section["retina_masks"], name="confirmation_protocol.retina_masks"),
+        mask_threshold=float(section["mask_threshold"]),
+        mask_resize=str(section["mask_resize"]),
+        matching_iou=float(section["matching_iou"]),
+        small_recall_floor_exclusive=float(section["small_recall_floor_exclusive"]),
+        mask_map50_95_floor=float(section["mask_map50_95_floor"]),
+        multi_recall_floor=float(section["multi_recall_floor"]),
+        good_negative_fp_rate=float(section["good_negative_fp_rate"]),
+    )
+
+
+# ADD 2026-08-27: Typed YAML을 읽는다. → MODIFY 2026-08-31: C4-2C strict recipe도 복원한다.
 def load_yolo_experiment_config(path: Path) -> YoloExperimentConfig:
     resolved_config_path = path.resolve()
     if not resolved_config_path.is_file():
         raise FileNotFoundError(f"YOLO experiment config not found: {resolved_config_path}")
     raw = yaml.safe_load(resolved_config_path.read_text(encoding="utf-8"))
     root = _mapping(raw, name="root")
+    allowed_root_sections = {
+        "experiment",
+        "baseline",
+        "baseline_evidence",
+        "candidate",
+        "controlled_change",
+        "sampling_policy",
+        "expected_train_view",
+        "crop_sampling_policy",
+        "expected_crop_train_view",
+        "trainer_overrides",
+        "confirmation_protocol",
+        "validation_protocol",
+        "telemetry",
+        "output",
+        "evaluation_priorities",
+        "decision_policy",
+    }
+    unknown_sections = set(root) - allowed_root_sections
+    if unknown_sections:
+        raise ValueError(f"Unknown experiment config sections: {sorted(unknown_sections)}")
     experiment = _mapping(root.get("experiment"), name="experiment")
     baseline = _mapping(root.get("baseline"), name="baseline")
     baseline_evidence = _mapping(root.get("baseline_evidence"), name="baseline_evidence")
@@ -525,6 +932,10 @@ def load_yolo_experiment_config(path: Path) -> YoloExperimentConfig:
     decision = _mapping(root.get("decision_policy"), name="decision_policy")
     sampling_raw = root.get("sampling_policy")
     expected_train_view_raw = root.get("expected_train_view")
+    crop_sampling_raw = root.get("crop_sampling_policy")
+    expected_crop_raw = root.get("expected_crop_train_view")
+    trainer_overrides_raw = root.get("trainer_overrides")
+    confirmation_raw = root.get("confirmation_protocol")
     try:
         declared_baseline_path = Path(str(experiment["baseline_config"]))
     except (KeyError, TypeError, ValueError) as exc:
@@ -552,6 +963,10 @@ def load_yolo_experiment_config(path: Path) -> YoloExperimentConfig:
             ),
             sampling_policy=_load_sampling_policy(sampling_raw),
             expected_train_view=_load_expected_train_view(expected_train_view_raw),
+            crop_sampling_policy=_load_crop_sampling_policy(crop_sampling_raw),
+            expected_crop_train_view=_load_expected_crop_train_view(expected_crop_raw),
+            trainer_overrides=_load_trainer_overrides(trainer_overrides_raw),
+            confirmation_protocol=_load_confirmation_protocol(confirmation_raw),
             validation_protocol=ValidationProtocol(
                 split=str(validation["split"]),
                 test_split_used=_boolean(
@@ -701,13 +1116,63 @@ def recommend_experiment(
     )
 
 
-# ADD 2026-08-27: Pre-run metadata를 만든다. → MODIFY 2026-08-28: Intervention을 포함한다.
+# ADD 2026-08-31: C4-2C absolute Primary gates를 legacy recommendation과 분리해 판정한다.
+def confirm_c4_2c_candidate(
+    *,
+    quality_after: dict[str, Any],
+    protocol: ConfirmationProtocol,
+) -> ExperimentRecommendation:
+    protocol.validate()
+    checks = {
+        "small_recall_above_floor": _metric(quality_after, "failure_modes", "small_recall")
+        > protocol.small_recall_floor_exclusive,
+        "mask_map50_95_floor": _metric(quality_after, "ultralytics", "mask", "map50_95")
+        >= protocol.mask_map50_95_floor,
+        "multi_recall_floor": _metric(quality_after, "failure_modes", "multi_component_recall")
+        >= protocol.multi_recall_floor,
+        "good_negative_fp_guardrail": _metric(
+            quality_after, "failure_modes", "good_negative_fp_image_rate"
+        )
+        == protocol.good_negative_fp_rate,
+    }
+    failed = [name for name, passed in checks.items() if not passed]
+    if not failed:
+        return ExperimentRecommendation(
+            decision="CONFIRMED_CANDIDATE",
+            decision_reason=(
+                "All absolute C4-2C validation gates passed; this confirms a candidate only, "
+                "not a final model promotion."
+            ),
+            checks=checks,
+        )
+    return ExperimentRecommendation(
+        decision="CONFIRMATION_FAILED",
+        decision_reason="C4-2C absolute confirmation gates failed: " + ", ".join(failed),
+        checks=checks,
+    )
+
+
+# ADD 2026-08-27: Pre-run metadata를 만든다. → MODIFY 2026-08-31: Resolved C4-2C recipe를 포함한다.
 def build_experiment_metadata(
     config: YoloExperimentConfig,
     *,
     git_commit: str | None,
     manifest_sha256: str,
 ) -> dict[str, Any]:
+    recipe = {
+        "crop_sampling_policy": (
+            None if config.crop_sampling_policy is None else asdict(config.crop_sampling_policy)
+        ),
+        "trainer_overrides": (
+            None if config.trainer_overrides is None else asdict(config.trainer_overrides)
+        ),
+        "confirmation_protocol": (
+            None if config.confirmation_protocol is None else asdict(config.confirmation_protocol)
+        ),
+    }
+    recipe_fingerprint = sha256_bytes(
+        json.dumps(recipe, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    )
     return {
         "schema_version": EXPERIMENT_SCHEMA_VERSION,
         "experiment_id": config.experiment_id,
@@ -723,6 +1188,13 @@ def build_experiment_metadata(
         "expected_train_view": (
             None if config.expected_train_view is None else asdict(config.expected_train_view)
         ),
+        "expected_crop_train_view": (
+            None
+            if config.expected_crop_train_view is None
+            else asdict(config.expected_crop_train_view)
+        ),
+        "resolved_recipe": recipe,
+        "resolved_recipe_fingerprint_sha256": recipe_fingerprint,
         "constants": config.baseline_identity,
         "historical_baseline_evidence": config.baseline_evidence,
         "validation_protocol": asdict(config.validation_protocol),
@@ -732,10 +1204,11 @@ def build_experiment_metadata(
         "experiment_config_sha256": sha256_file(config.config_path),
         "git_commit": git_commit,
         "decision": "PENDING",
+        "test_used": False,
     }
 
 
-# ADD 2026-08-27: Final machine result가 sealed validation과 decision schema를 보존하는지 검증한다.
+# ADD 2026-08-27: Final result schema를 검증한다. → MODIFY 2026-08-31: C4-2C decision을 허용한다.
 def validate_experiment_result(payload: dict[str, Any]) -> None:
     required = {
         "experiment_id",
@@ -758,6 +1231,8 @@ def validate_experiment_result(payload: dict[str, Any]) -> None:
         raise ValueError("Experiment result is missing required fields.")
     if payload["split"] != "val" or payload["test_split_used"] is not False:
         raise ValueError("Experiment result must remain validation-only.")
+    if payload.get("test_used", False) is not False:
+        raise ValueError("Experiment result must keep the derived test split sealed.")
     if payload["decision"] not in EXPERIMENT_DECISIONS:
         raise ValueError("Experiment result decision is invalid.")
     json.dumps(payload, allow_nan=False)
