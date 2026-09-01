@@ -127,9 +127,11 @@ C4-3에서 C4-2C candidate selection을 종료한 뒤 threshold와 candidate를 
 
 이 결과로 새로운 acceptance gate, tuning 또는 candidate reselection을 만들지 않았으며 C4는 `CLOSED`입니다.
 
-다음 단계인 **C5 deployment optimization**은 frozen C4-3 candidate용 C5-1 static FP32 ONNX export와
-C5-2 validation-only PyTorch ↔ ONNX Runtime parity foundation까지 구현했습니다. 두 단계 모두 아직 Official
-artifact/data execution 전이며, TensorRT·FP16·INT8·Quantization은 시작하지 않았습니다.
+**C5 deployment optimization**에서는 frozen C4-3 candidate의 static FP32 ONNX export와
+validation-only PyTorch ↔ ONNX Runtime parity까지 실행했습니다. Acceptance policy v1을 characterization
+이후 별도 commit으로 고정하고 exact ONNX artifact에서 prospective verification을 수행해 17개 gate를 모두
+통과했으며 C5-2는 `PARITY_ACCEPTED / CLOSED` 상태입니다. TensorRT·FP16·INT8·Quantization은 아직
+시작하지 않았습니다.
 
 자세한 C4 provenance와 quality/resource evidence는 [YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md),
 C5 export/parity contract와 test seal은 [YOLO Deployment Optimization](docs/vision/YOLO_DEPLOYMENT_OPTIMIZATION.md)에 기록되어 있습니다.

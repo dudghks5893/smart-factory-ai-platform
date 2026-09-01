@@ -8,14 +8,20 @@ C5는 C4에서 확정한 YOLO11n-seg candidate를 다시 학습하거나 선택�
 | Stage | State |
 | --- | --- |
 | C5-1 ONNX FP32 export | `EXECUTED / ONNX_EXPORT_COMPLETED` |
-| C5-2A PyTorch ↔ ONNX characterization | `EXECUTED / METRICS_COLLECTED_ACCEPTANCE_PENDING` |
-| C5-2B ONNX FP32 acceptance policy v1 | `DEFINED / VERIFICATION NOT YET EXECUTED` |
+| C5-2A PyTorch ↔ ONNX characterization | `EXECUTED / CHARACTERIZATION_COMPLETED` |
+| C5-2B ONNX FP32 acceptance policy v1 | `EXECUTED / PARITY_ACCEPTED` |
+| C5-2 ONNX FP32 parity | `CLOSED` |
 | C5-3+ TensorRT / Quantization | `NOT STARTED` |
 
 C5-1과 첫 C5-2 characterization은 clean detached Git commit
 `643ed9386a61bd2bf0c041f92a10b809b6d52c3e`에서 Kaggle로 실행했다. 첫 parity run은
 수치 허용치를 정하기 위한 characterization이며, 사전에 선언된 numeric gate를 통과한 run으로 소급해
 표현하지 않는다.
+
+이후 acceptance policy v1을 commit
+`1f48a047d14f032dad41f2cd4519399adf4d6bce`에서 고정한 뒤, 기존 C5-1 exact ONNX artifact를 복원해
+validation parity를 새로 실행했다. Frozen policy의 17개 acceptance check를 모두 통과해
+`PARITY_ACCEPTED`가 확인됐으며 C5-2는 `CLOSED` 상태다.
 
 TensorRT, FP16, INT8, quantization은 아직 시작하지 않았다.
 
@@ -194,6 +200,47 @@ FP32 backend의 harmless numerical variation을 위한 headroom을 둔다. 반�
 Policy를 committed clean state로 freeze한 뒤 exact same source/model/export identity에서 새 validation parity
 evidence를 생성하고 policy v1을 적용해 `PARITY_ACCEPTED` 또는 `PARITY_REJECTED`를 판정한다.
 
+### 5.1 Prospective verification 결과와 C5-2 closure
+
+Acceptance policy v1은 characterization 이후 repository에 먼저 commit한 뒤 prospective verification에
+사용했다.
+
+- Policy repository commit: `1f48a047d14f032dad41f2cd4519399adf4d6bce`
+- Policy ID: `c5_2_yolo_onnx_fp32_parity_v1`
+- Policy SHA-256: `488ad32b71adbc6b7a0f0ef8e68823a0f991977ecd32b4ff6fc6b1aa73f7ebdb`
+- Original ONNX export commit: `643ed9386a61bd2bf0c041f92a10b809b6d52c3e`
+- ONNX SHA-256: `f916325bb126d174de9c1fdfc24802eec11c46014f723fbf3ba3b3c1755c1490`
+- ONNX metadata SHA-256: `3286861db66cb4c4f886d2fd71f8f13b749b019bd0d57249f54a025d43b11fcd`
+- Runtime: PyTorch FP32 CPU ↔ ONNX Runtime FP32 `CPUExecutionProvider`
+- validation samples: `28`
+- PyTorch / ONNX predictions: `19 / 19`
+- matched instances: `19`
+- unmatched PyTorch / ONNX: `0 / 0`
+- class agreement rate: `1.0`
+- confidence absolute error max: `2.384185791015625e-06`
+- box IoU min: `1.0`
+- mask IoU min: `1.0`
+- acceptance checks: `17 / 17 PASS`
+- final acceptance state: `PARITY_ACCEPTED`
+- `test_used=false`
+- `test_split_used=false`
+
+새 Kaggle session에서 ONNX를 다시 export한 binary는 byte-level SHA가 기존 artifact와 달랐기 때문에
+prospective evidence로 대체하지 않았다. 대신 C5-1에서 보존한 exact `model.onnx`와 `metadata.json`을 복원하고
+각 SHA를 검증한 뒤 새 parity run을 수행했다. 따라서 acceptance policy가 고정한 exact artifact identity를
+그대로 유지한다.
+
+Prospective acceptance evidence는 Git 밖에서 보존한다.
+
+- External evidence archive:
+  `c5_2b_prospective_acceptance_1f48a04.zip`
+- Archive SHA-256:
+  `320ebc695f059b56c60011ab635eec00619aad9bfd44c534d1c25ddaea23e697`
+
+이 결과로 C5-2 ONNX FP32 parity lifecycle은 `CLOSED`다. 이후 TensorRT FP16은 별도 backend와 precision
+boundary이므로 ONNX FP32 acceptance threshold를 그대로 재사용하지 않고 별도의 characterization과
+acceptance contract를 정의한다.
+
 ## 6. Acceptance evaluator
 
 `ml/deployment/yolo_onnx_parity_acceptance.py`는 저장된 parity evidence에 policy를 적용하는 pure evaluation
@@ -236,10 +283,12 @@ evaluator는 이미 저장된 JSON만 읽으며 dataset 또는 model path를 인
 Raw/derived dataset, checkpoint, ONNX binary, parity JSON, acceptance JSON은 Git에 추가하지 않는다.
 Repository에는 config, evaluator, tests와 documentation만 유지한다.
 
+C5-2 prospective verification은 완료됐으며 `PARITY_ACCEPTED`로 종료했다.
+
 다음 순서는 다음과 같다.
 
-1. Acceptance policy v1 implementation을 검증하고 commit/push한다.
-2. Exact committed policy와 exact ONNX SHA에서 validation parity를 새 `parity_id`로 다시 실행한다.
-3. 새 parity JSON에 policy v1 evaluator를 적용한다.
-4. `PARITY_ACCEPTED` 확인 후 C5-2를 종료한다.
-5. 그 다음에만 C5-3 TensorRT FP16 설계를 시작한다.
+1. C5-2 ONNX FP32 parity 상태를 `CLOSED`로 유지한다.
+2. Exact ONNX와 acceptance evidence는 Git 밖의 immutable evidence archive로 보존한다.
+3. C5-3 TensorRT FP16 export/runtime foundation을 별도 contract로 설계한다.
+4. TensorRT FP16은 먼저 characterization을 수행한 뒤 별도의 acceptance tolerance를 고정한다.
+5. INT8은 calibration dataset과 accuracy-loss budget이 별도로 승인될 때만 후속 단계에서 검토한다.
