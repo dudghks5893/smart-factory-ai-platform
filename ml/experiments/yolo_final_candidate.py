@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import re
+import shutil
 import zipfile
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime
@@ -645,6 +646,75 @@ def load_official_candidate_evidence(
         test_used=False,
         test_split_used=False,
     )
+
+
+# ADD 2026-09-02: Frozen pointer와 Official package evidence의 exact identity를 공유 검증한다.
+def verify_official_candidate_identity(
+    candidate: FinalCandidateManifest,
+    evidence: OfficialCandidateEvidence,
+) -> None:
+    expected = {
+        "experiment_id": candidate.selected_experiment_id,
+        "repository_git_commit": candidate.repository_git_commit,
+        "dataset_manifest_sha256": candidate.dataset_manifest_sha256,
+        "experiment_config_sha256": candidate.experiment_config_sha256,
+        "official_package_sha256": candidate.official_package_sha256,
+        "model_sha256": candidate.model_sha256,
+        "metadata_sha256": candidate.metadata_sha256,
+        "packaged_experiment_result_sha256": candidate.packaged_experiment_result_sha256,
+        "model_size_bytes": candidate.model_size_bytes,
+        "task": candidate.task,
+        "model_family": candidate.model_family,
+        "selected_model_name": candidate.selected_model_name,
+        "framework": candidate.framework,
+        "framework_version": candidate.framework_version,
+        "seed": candidate.seed,
+        "best_epoch": candidate.best_epoch,
+        "validation_metrics": candidate.validation_metrics,
+        "primary_confirmation_checks": candidate.primary_confirmation_checks,
+        "test_used": False,
+        "test_split_used": False,
+    }
+    mismatches = [name for name, value in expected.items() if getattr(evidence, name) != value]
+    if mismatches:
+        raise ValueError(
+            "Official package identity does not match the frozen candidate: "
+            + ", ".join(sorted(mismatches))
+        )
+
+
+# ADD 2026-09-02: Verified package의 fixed model/metadata bytes만 runtime artifact로 복원한다.
+def materialize_official_candidate_artifact(
+    *,
+    package_path: Path,
+    candidate: FinalCandidateManifest,
+    evidence: OfficialCandidateEvidence,
+    artifact_dir: Path,
+) -> Path:
+    verify_official_candidate_identity(candidate, evidence)
+    if sha256_file(package_path) != candidate.official_package_sha256:
+        raise ValueError("Official candidate package bytes changed verified identity.")
+    if artifact_dir.exists():
+        raise FileExistsError(f"Official candidate artifact already exists: {artifact_dir}")
+    model_dir = artifact_dir / "model"
+    model_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        with zipfile.ZipFile(package_path, "r") as archive:
+            for entry, destination in (
+                (OFFICIAL_MODEL_ENTRY, model_dir / "model.pt"),
+                (OFFICIAL_METADATA_ENTRY, model_dir / "metadata.json"),
+            ):
+                with archive.open(entry, "r") as source, destination.open("xb") as target:
+                    shutil.copyfileobj(source, target, length=1024 * 1024)
+        if (
+            sha256_file(model_dir / "model.pt") != candidate.model_sha256
+            or sha256_file(model_dir / "metadata.json") != candidate.metadata_sha256
+        ):
+            raise RuntimeError("Materialized Official candidate bytes changed verified identity.")
+    except Exception:
+        shutil.rmtree(artifact_dir, ignore_errors=True)
+        raise
+    return artifact_dir
 
 
 # ADD 2026-09-01: Eligible Official evidence를 validation-only frozen pointer로 승격한다.

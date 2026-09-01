@@ -127,9 +127,12 @@ C4-3에서 C4-2C candidate selection을 종료한 뒤 threshold와 candidate를 
 
 이 결과로 새로운 acceptance gate, tuning 또는 candidate reselection을 만들지 않았으며 C4는 `CLOSED`입니다.
 
-다음 단계는 **C5 ONNX / TensorRT / Quantization**입니다.
+다음 단계인 **C5 deployment optimization**은 frozen C4-3 candidate용 C5-1 static FP32 ONNX export와
+C5-2 validation-only PyTorch ↔ ONNX Runtime parity foundation까지 구현했습니다. 두 단계 모두 아직 Official
+artifact/data execution 전이며, TensorRT·FP16·INT8·Quantization은 시작하지 않았습니다.
 
-자세한 provenance와 quality/resource evidence는 [YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md)에 기록되어 있습니다.
+자세한 C4 provenance와 quality/resource evidence는 [YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md),
+C5 export/parity contract와 test seal은 [YOLO Deployment Optimization](docs/vision/YOLO_DEPLOYMENT_OPTIMIZATION.md)에 기록되어 있습니다.
 
 ## 5. Serving과 inspection data
 
@@ -416,7 +419,7 @@ Target architecture는 Artifact Registry, Cloud Storage, Cloud SQL, Secret Manag
 | 분류 | 문서 |
 |---|---|
 | Architecture | [Overview](docs/architecture/overview.md), [Project Scope](docs/PROJECT_SCOPE.md), [ADRs](docs/adr/) |
-| Data / Vision | [MVTec Pipeline](docs/data/MVTEC_AD_PIPELINE.md), [PatchCore](docs/vision/PATCHCORE_BASELINE.md), [YOLO Segmentation](docs/vision/YOLO_SEGMENTATION_DATASET.md), [YOLO Validation Error Analysis](docs/vision/YOLO_SEGMENTATION_ERROR_ANALYSIS.md), [YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md) |
+| Data / Vision | [MVTec Pipeline](docs/data/MVTEC_AD_PIPELINE.md), [PatchCore](docs/vision/PATCHCORE_BASELINE.md), [YOLO Segmentation](docs/vision/YOLO_SEGMENTATION_DATASET.md), [YOLO Validation Error Analysis](docs/vision/YOLO_SEGMENTATION_ERROR_ANALYSIS.md), [YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md), [YOLO Deployment Optimization](docs/vision/YOLO_DEPLOYMENT_OPTIMIZATION.md) |
 | Serving / Data | [PatchCore API](docs/serving/PATCHCORE_API.md), [YOLO API](docs/serving/YOLO_SEGMENTATION_API.md), [Combined API](docs/serving/COMBINED_INSPECTION_API.md), [Decision Engine](docs/decision/DECISION_ENGINE.md), [Inspection History](docs/serving/INSPECTION_HISTORY.md) |
 | MLOps | [MLflow](docs/mlops/MLFLOW_TRACKING.md), [Artifact Policy](docs/DATA_ARTIFACT_POLICY.md) |
 | Deployment | [Docker](docs/deployment/DOCKER.md), [CI](docs/deployment/CI_CD.md), [Kubernetes/GCP](docs/deployment/KUBERNETES_GCP.md) |

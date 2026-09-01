@@ -1,0 +1,30 @@
+schema_version: 1
+export_id: c5_1_yolo11n_seg_fp32_static_opset18
+format: onnx
+task: segment
+precision: fp32
+batch: 1
+imgsz: 640
+dynamic: false
+simplify: false
+nms: false
+opset: 18
+device: cpu
+output_root: artifacts/deployment/yolo_segmentation/onnx
+parity:
+  split: val
+  test_used: false
+  test_split_used: false
+  prediction_initial_confidence: 0.001
+  diagnostic_confidence: 0.25
+  prediction_iou: 0.7
+  max_detections: 300
+  retina_masks: false
+  mask_threshold: 0.5
+  mask_resize: opencv_inter_nearest
+  association: greedy_max_mask_iou_positive_overlap
+  acceptance_mode: metrics_only_pending_numeric_tolerance_approval
+  require_finite_outputs: true
+  require_valid_output_shapes: true
+  require_valid_class_ids: true
+  numeric_thresholds: null

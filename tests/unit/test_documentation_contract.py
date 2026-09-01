@@ -7,24 +7,24 @@ from pathlib import Path
 
 _MARKDOWN_LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 _REQUIRED_README_SECTIONS = (
-    "## 1. Problem and objective",
-    "## 2. Key capabilities",
-    "## 3. System architecture",
-    "## 4. Vision AI and data contract",
-    "## 5. Serving and inspection data",
-    "## 6. MLOps and operations",
+    "## 1. 문제 정의와 목표",
+    "## 2. 주요 기능",
+    "## 3. 시스템 아키텍처",
+    "## 4. Vision AI와 데이터 계약",
+    "## 5. Serving과 inspection data",
+    "## 6. MLOps와 운영",
     "## 7. SOP RAG assistant",
-    "## 8. Final benchmark results",
-    "## 9. Repository structure",
-    "## 10. Quick start and model workflow",
+    "## 8. Final benchmark 결과",
+    "## 9. Repository 구조",
+    "## 10. 빠른 시작과 model workflow",
     "## 11. Docker Compose",
-    "## 12. Testing and CI",
-    "## 13. Kubernetes and GCP foundation",
-    "## 14. Documentation",
-    "## 15. Limitations and pending validation",
-    "## 16. Future work",
-    "## 17. Tech stack",
-    "## 18. Completion status",
+    "## 12. 테스트와 CI",
+    "## 13. Kubernetes와 GCP foundation",
+    "## 14. 문서",
+    "## 15. 한계와 미검증 범위",
+    "## 16. 향후 작업",
+    "## 17. 기술 스택",
+    "## 18. 완료 상태",
 )
 
 
@@ -41,7 +41,7 @@ def test_readme_has_final_entry_document_sections() -> None:
 
     assert positions == sorted(positions)
     assert "working_tree_dirty" not in readme
-    assert "production GKE/Cloud SQL deployment" in readme
+    assert "production GKE/Cloud SQL 배포" in readme
 
 
 # ADD 2026-08-22: README/docs의 local Markdown link target이 실제 file 또는 directory인지 검증한다.

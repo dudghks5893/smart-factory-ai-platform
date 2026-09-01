@@ -42,12 +42,12 @@ from ml.experiments.yolo_final_candidate import (
     FINAL_CANDIDATE_SELECTION_BASIS,
     FINAL_CANDIDATE_STATE,
     FINAL_TEST_STATE,
-    OFFICIAL_METADATA_ENTRY,
-    OFFICIAL_MODEL_ENTRY,
     FinalCandidateManifest,
     OfficialCandidateEvidence,
     load_final_candidate_manifest,
     load_official_candidate_evidence,
+    materialize_official_candidate_artifact,
+    verify_official_candidate_identity,
 )
 from ml.experiments.yolo_segmentation import YoloExperimentConfig, load_yolo_experiment_config
 from ml.training.device import resolve_device
@@ -513,41 +513,6 @@ def _reserve_output_namespace(preflight: FinalTestPreflight) -> None:
         raise
 
 
-# ADD 2026-09-01: Frozen manifest와 Official package identity를 field-by-field 교차 검증한다.
-def _verify_official_identity(
-    candidate: FinalCandidateManifest,
-    evidence: OfficialCandidateEvidence,
-) -> None:
-    expected = {
-        "experiment_id": candidate.selected_experiment_id,
-        "repository_git_commit": candidate.repository_git_commit,
-        "dataset_manifest_sha256": candidate.dataset_manifest_sha256,
-        "experiment_config_sha256": candidate.experiment_config_sha256,
-        "official_package_sha256": candidate.official_package_sha256,
-        "model_sha256": candidate.model_sha256,
-        "metadata_sha256": candidate.metadata_sha256,
-        "packaged_experiment_result_sha256": candidate.packaged_experiment_result_sha256,
-        "model_size_bytes": candidate.model_size_bytes,
-        "task": candidate.task,
-        "model_family": candidate.model_family,
-        "selected_model_name": candidate.selected_model_name,
-        "framework": candidate.framework,
-        "framework_version": candidate.framework_version,
-        "seed": candidate.seed,
-        "best_epoch": candidate.best_epoch,
-        "validation_metrics": candidate.validation_metrics,
-        "primary_confirmation_checks": candidate.primary_confirmation_checks,
-        "test_used": False,
-        "test_split_used": False,
-    }
-    mismatches = [name for name, value in expected.items() if getattr(evidence, name) != value]
-    if mismatches:
-        raise ValueError(
-            "Official package identity does not match the frozen candidate: "
-            + ", ".join(sorted(mismatches))
-        )
-
-
 # ADD 2026-09-01: C4-2C config의 frozen model/checkpoint와 evaluation recipe를 검증한다.
 def _build_final_test_protocol(
     candidate: FinalCandidateManifest,
@@ -625,7 +590,7 @@ def prepare_yolo_final_test(
         package_path,
         expected_package_sha256=candidate.official_package_sha256,
     )
-    _verify_official_identity(candidate, evidence)
+    verify_official_candidate_identity(candidate, evidence)
 
     # Repository config bytes와 typed model/protocol identity를 frozen evidence에 고정한다.
     experiment_config_path = _repository_path(
@@ -712,7 +677,7 @@ def _revalidate_preflight(preflight: FinalTestPreflight) -> None:
         preflight.official_package_path,
         expected_package_sha256=preflight.candidate.official_package_sha256,
     )
-    _verify_official_identity(preflight.candidate, current_evidence)
+    verify_official_candidate_identity(preflight.candidate, current_evidence)
     current_provenance = preflight.provenance_resolver(preflight.repository_root)
     current_provenance.validate()
     if (
@@ -722,30 +687,22 @@ def _revalidate_preflight(preflight: FinalTestPreflight) -> None:
         raise RuntimeError("Repository state changed after C4-4 preflight.")
 
 
-# ADD 2026-09-01: Verified ZIP의 exact model/metadata entry만 controlled runtime path에 복원한다.
+# ADD 2026-09-01: ZIP entry를 복원한다. → MODIFY 2026-09-02: 공유 materializer를 재사용한다.
 def _materialize_verified_artifact(preflight: FinalTestPreflight) -> Path:
     evidence = load_official_candidate_evidence(
         preflight.official_package_path,
         expected_package_sha256=preflight.candidate.official_package_sha256,
     )
-    _verify_official_identity(preflight.candidate, evidence)
+    verify_official_candidate_identity(preflight.candidate, evidence)
     artifact_dir = preflight.output_dir / "runtime_artifact"
-    model_dir = artifact_dir / "model"
-    model_dir.mkdir(parents=True, exist_ok=False)
-    with zipfile.ZipFile(preflight.official_package_path, "r") as archive:
-        for entry, destination in (
-            (OFFICIAL_MODEL_ENTRY, model_dir / "model.pt"),
-            (OFFICIAL_METADATA_ENTRY, model_dir / "metadata.json"),
-        ):
-            with archive.open(entry, "r") as source, destination.open("xb") as target:
-                shutil.copyfileobj(source, target, length=1024 * 1024)
-    if (
-        sha256_file(model_dir / "model.pt") != preflight.candidate.model_sha256
-        or sha256_file(model_dir / "metadata.json") != preflight.candidate.metadata_sha256
-    ):
-        raise RuntimeError("Materialized final-test artifact changed verified package bytes.")
+    materialize_official_candidate_artifact(
+        package_path=preflight.official_package_path,
+        candidate=preflight.candidate,
+        evidence=evidence,
+        artifact_dir=artifact_dir,
+    )
     validate_yolo_artifact(
-        model_dir,
+        artifact_dir / "model",
         expected_contract=preflight.baseline_config.dataset_contract,
     )
     return artifact_dir
