@@ -1,0 +1,26 @@
+schema_version: 1
+policy_id: c5_2_yolo_onnx_fp32_parity_v1
+backend:
+  reference: pytorch_fp32
+  candidate: onnxruntime_fp32
+identity:
+  source_experiment_id: c4_2c_yolo11n_seg_crop350_nomosaic_maskratio2_seed42
+  frozen_manifest_sha256: 2a26b1bc03a1876f828e12a625c69c76af5e8c5713e3f64be699feffe2e8aa09
+  source_model_sha256: e3fd10cdd708d31421feacfc5d694cb638e0ea60672e08796391b33aecf67155
+  export_config_sha256: f1c2ef5045fdd89d964b2dc79c501580c9f55c2a1d38f38f13cf4794bafd0e85
+  onnx_sha256: f916325bb126d174de9c1fdfc24802eec11c46014f723fbf3ba3b3c1755c1490
+structural:
+  required_split: val
+  require_test_used_false: true
+  require_test_split_used_false: true
+  require_structural_gates_passed: true
+  require_finite_outputs: true
+  require_tensor_schema_match: true
+  require_prediction_count_match: true
+  require_zero_unmatched: true
+  required_class_agreement_rate: 1.0
+numeric:
+  max_confidence_abs_error: 0.0001
+  min_box_iou: 0.999
+  min_mask_iou: 0.999
+output_root: outputs/deployment/yolo_segmentation/onnx_parity_acceptance
