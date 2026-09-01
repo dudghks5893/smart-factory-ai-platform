@@ -319,8 +319,11 @@ Repository config는
 이다. 첫 build contract는 batch `1`, image size `640`, static shape, TensorRT FP16 builder flag,
 workspace `4 GiB`, CUDA device `0`으로 제한한다. Dynamic shape와 INT8은 포함하지 않는다.
 
-Engine은 accepted ONNX를 TensorRT Python API로 parse한 뒤 serialized `.engine`으로 build한다. Generated
-artifact와 metadata는 Git에서 제외된 namespace에 기록한다.
+Engine은 accepted ONNX를 TensorRT Python API로 parse한 뒤 static FP16 serialized engine으로 build한다.
+`model.engine` 앞에는 pinned Ultralytics TensorRT backend가 frozen class names와 segmentation task를 복원할 수
+있도록 length-prefixed JSON metadata header를 기록한다. Engine contract 검사에서는 이 header를 검증한 뒤
+raw TensorRT payload만 deserialize한다. Generated artifact와 sidecar metadata는 Git에서 제외된 namespace에
+기록한다.
 
 ```text
 artifacts/deployment/yolo_segmentation/tensorrt/

@@ -17,6 +17,7 @@ import torch
 import yaml
 
 from ml.deployment.yolo_onnx import (
+    EXPECTED_CLASSES,
     ONNX_METADATA_FILENAME,
     ONNX_MODEL_FILENAME,
     YoloOnnxExportMetadata,
@@ -431,6 +432,82 @@ def _import_tensorrt() -> Any:
         ) from exc
 
 
+# ADD 2026-09-02: Raw TensorRT engine에 Ultralytics inference metadata header를 붙인다.
+def _encode_ultralytics_engine_container(
+    serialized_engine: bytes,
+    config: YoloTensorRtExportConfig,
+) -> bytes:
+    if not serialized_engine:
+        raise ValueError("C5-3A serialized TensorRT engine bytes must be non-empty.")
+    metadata = {
+        "args": {"dynamic": config.dynamic, "nms": False},
+        "batch": config.batch,
+        "channels": 3,
+        "imgsz": [config.imgsz, config.imgsz],
+        "names": dict(EXPECTED_CLASSES),
+        "stride": 32,
+        "task": config.task,
+    }
+    metadata_bytes = json.dumps(
+        metadata,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return (
+        len(metadata_bytes).to_bytes(4, byteorder="little", signed=True)
+        + metadata_bytes
+        + serialized_engine
+    )
+
+
+# ADD 2026-09-02: Ultralytics-compatible metadata header와 raw TensorRT payload를 분리한다.
+def _read_ultralytics_engine_container(path: Path) -> tuple[dict[str, Any], bytes]:
+    data = path.read_bytes()
+    if len(data) < 5:
+        return {}, data
+
+    metadata_length = int.from_bytes(data[:4], byteorder="little", signed=True)
+    if metadata_length <= 0 or 4 + metadata_length >= len(data):
+        return {}, data
+
+    metadata_bytes = data[4 : 4 + metadata_length]
+    try:
+        metadata = json.loads(metadata_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {}, data
+    if not isinstance(metadata, dict):
+        return {}, data
+
+    return cast(dict[str, Any], metadata), data[4 + metadata_length :]
+
+
+# ADD 2026-09-02: Engine header가 frozen segmentation class/task contract를 보존하는지 검증한다.
+def _validate_ultralytics_engine_metadata(
+    metadata: Mapping[str, Any],
+    *,
+    config: YoloTensorRtExportConfig,
+) -> None:
+    names_raw = metadata.get("names")
+    if not isinstance(names_raw, dict):
+        raise ValueError("C5-3A TensorRT engine metadata is missing class names.")
+    try:
+        names = {int(key): str(value) for key, value in names_raw.items()}
+    except (TypeError, ValueError) as exc:
+        raise ValueError("C5-3A TensorRT engine class names are invalid.") from exc
+
+    if (
+        names != EXPECTED_CLASSES
+        or metadata.get("task") != config.task
+        or metadata.get("batch") != config.batch
+        or metadata.get("channels") != 3
+        or metadata.get("imgsz") != [config.imgsz, config.imgsz]
+        or metadata.get("stride") != 32
+        or metadata.get("args") != {"dynamic": False, "nms": False}
+    ):
+        raise ValueError("C5-3A TensorRT engine metadata changed frozen inference identity.")
+
+
 # ADD 2026-09-02: Repository TensorRT FP16 YAML을 strict typed contract로 로드한다.
 def load_yolo_tensorrt_export_config(path: Path) -> YoloTensorRtExportConfig:
     try:
@@ -588,6 +665,7 @@ def resolve_tensorrt_environment(device: int) -> Mapping[str, str]:
 
 
 # ADD 2026-09-02: TensorRT Python API로 exact ONNX를 static FP16 serialized engine으로 build한다.
+# MODIFY 2026-09-02: Ultralytics class/task metadata header를 engine artifact에 포함한다.
 def build_tensorrt_fp16_engine(
     onnx_path: Path,
     engine_path: Path,
@@ -619,15 +697,22 @@ def build_tensorrt_fp16_engine(
     serialized = builder.build_serialized_network(network, builder_config)
     if serialized is None:
         raise RuntimeError("C5-3A TensorRT builder did not produce serialized engine bytes.")
-    engine_path.write_bytes(bytes(serialized))
+    engine_path.write_bytes(_encode_ultralytics_engine_container(bytes(serialized), config))
 
 
 # ADD 2026-09-02: Serialized engine의 static I/O shape와 device memory를 관측한다.
+# MODIFY 2026-09-02: Ultralytics header를 검증하고 raw TensorRT payload만 deserialize한다.
 def inspect_tensorrt_engine(engine_path: Path) -> TensorRtEngineContract:
+    config = load_yolo_tensorrt_export_config(DEFAULT_TENSORRT_EXPORT_CONFIG)
+    metadata, serialized_engine = _read_ultralytics_engine_container(engine_path)
+    _validate_ultralytics_engine_metadata(metadata, config=config)
+    if not serialized_engine:
+        raise RuntimeError("C5-3A TensorRT engine payload is empty.")
+
     trt = _import_tensorrt()
     logger = trt.Logger(trt.Logger.WARNING)
     runtime = trt.Runtime(logger)
-    engine = runtime.deserialize_cuda_engine(engine_path.read_bytes())
+    engine = runtime.deserialize_cuda_engine(serialized_engine)
     if engine is None:
         raise RuntimeError("C5-3A TensorRT engine deserialization failed.")
 

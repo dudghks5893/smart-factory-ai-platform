@@ -16,6 +16,9 @@ from ml.deployment.yolo_tensorrt import (
     TensorRtEngineContract,
     TensorRtTensorContract,
     YoloTensorRtExportMetadata,
+    _encode_ultralytics_engine_container,
+    _read_ultralytics_engine_container,
+    _validate_ultralytics_engine_metadata,
     load_yolo_tensorrt_export_config,
 )
 
@@ -151,3 +154,34 @@ def test_tensorrt_metadata_rejects_dirty_repository() -> None:
     raw["repository"]["working_tree_dirty"] = True
     with pytest.raises(ValueError, match="clean repository"):
         YoloTensorRtExportMetadata.from_json_dict(raw)
+
+
+# ADD 2026-09-02: Engine container가 Ultralytics class/task metadata와 raw payload를 보존한다.
+def test_tensorrt_engine_container_preserves_ultralytics_metadata(tmp_path: Path) -> None:
+    config = load_yolo_tensorrt_export_config(DEFAULT_TENSORRT_EXPORT_CONFIG)
+    raw_engine = b"synthetic-tensorrt-engine-payload"
+    path = tmp_path / "model.engine"
+    path.write_bytes(_encode_ultralytics_engine_container(raw_engine, config))
+
+    metadata, restored_engine = _read_ultralytics_engine_container(path)
+    _validate_ultralytics_engine_metadata(metadata, config=config)
+
+    assert restored_engine == raw_engine
+    assert metadata["task"] == "segment"
+    assert metadata["batch"] == 1
+    assert metadata["imgsz"] == [640, 640]
+    assert metadata["names"] == {"0": "bent", "1": "color", "2": "scratch"}
+
+
+# ADD 2026-09-02: Metadata 없는 raw engine은 Ultralytics identity validation을 통과하지 못한다.
+def test_tensorrt_engine_container_rejects_missing_ultralytics_metadata(tmp_path: Path) -> None:
+    config = load_yolo_tensorrt_export_config(DEFAULT_TENSORRT_EXPORT_CONFIG)
+    path = tmp_path / "model.engine"
+    path.write_bytes(b"raw-engine-without-ultralytics-header")
+
+    metadata, restored_engine = _read_ultralytics_engine_container(path)
+
+    assert metadata == {}
+    assert restored_engine == path.read_bytes()
+    with pytest.raises(ValueError, match="missing class names"):
+        _validate_ultralytics_engine_metadata(metadata, config=config)
