@@ -5,13 +5,15 @@
 이 문서는 YOLO segmentation model-quality evolution의 기술 source of truth다. 각 candidate는 한 번에 하나의
 명시적 변수를 바꾸고, sealed `test` split이 아니라 `val` evidence로만 비교한다. `ACCEPT`는 다음 candidate로
 보존할 가치가 있다는 뜻이며 runtime model 교체, production calibration 또는 factory certification을 뜻하지
-않는다. Validation-only final candidate freeze는 C4-3, derived-test 1회 평가는 후속 C4-4의 분리된 경계다.
+않는다. Validation-only final candidate freeze는 C4-3, derived-test 1회 report-only 평가는 C4-4의
+분리된 경계다.
 
 현재 순서는 Baseline v1 → C4-1 validation error analysis → C4-2A higher resolution → C4-2B
-component-aware x2 → C4-2C crop confirmation Official experiment → C4-3 validation-only final-candidate freeze까지
-진행됐다. C4-2A는 `REJECTED`, C4-2B는 `COMPLETED` / `PENDING`, C4-2C는
-`CONFIRMED_CANDIDATE`다. C4-3에서 C4-2C를 `FINAL_CANDIDATE_FROZEN`으로 고정했지만 production model이나
-test-validated model로 승격한 것은 아니다. Derived-test 1회 평가는 후속 C4-4 경계이며 아직 실행하지 않았다.
+component-aware x2 → C4-2C crop confirmation Official experiment → C4-3 validation-only final-candidate freeze →
+C4-4 one-time final test로 완료됐다. C4-2A는 `REJECTED`, C4-2B는 `COMPLETED` / `PENDING`,
+C4-2C는 `CONFIRMED_CANDIDATE`다. C4-3에서 C4-2C를 `FINAL_CANDIDATE_FROZEN`으로 고정한 뒤
+C4-4는 selection을 다시 열지 않고 `FINAL_TEST_COMPLETED`를 report-only로 기록했다. C4는 `CLOSED`이며
+다음 단계는 C5 ONNX / TensorRT / Quantization이다.
 
 ## 2. 공통 dataset과 validation protocol
 
@@ -163,7 +165,7 @@ artifact를 자동 교체하지 않는다.
 
 ## 5. Experiment overview
 
-| Experiment | Change | Val mask mAP50-95 | Diagnostic Recall | Small Recall | Multi Recall | Good FP | PyTorch peak reserved | Training time | Decision |
+| Experiment | Change | Val mask mAP50-95 | Diagnostic Recall | Small Recall | Multi Recall | Good FP | PyTorch peak reserved | Recorded wall time³ | Decision |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|
 | Baseline v1 / C4-1 | Reference `imgsz=640` | 0.34359 | 0.608696 | 0.250000 | 0.500000 | 0/14 | not captured | not captured¹ | `REFERENCE` |
 | C4-2A | `imgsz 640 -> 1024` | 0.303871 | 0.521739 | 0.125000 | 0.428571 | 0/14 | 7,551,844,352 bytes | 430.421539 sec | `REJECT` |
@@ -171,10 +173,12 @@ artifact를 자동 교체하지 않는다.
 | C4-2C | crop350 + no-Mosaic + mask ratio 2; Official run completed | 0.4623876120 | 0.7391304348 | 0.375000 | 0.571429 | 0/14 | 6,796,869,632 bytes | 542.329836 sec | `CONFIRMED_CANDIDATE` |
 | C4-2D | Future slot; not implemented | — | — | — | — | — | — | — | — |
 | C4-3 | Validation-only final-candidate freeze; no new metric | — | — | — | — | — | — | — | `FINAL_CANDIDATE_FROZEN` |
-| C4-4 | Guarded one-time derived-test evaluation implemented; not run | — | — | — | — | — | — | — | `SEALED_NOT_USED` |
+| C4-4 | Frozen C4-2C one-time final test; report-only | —² | 0.789474 | 0.750000 | 0.800000 | 0/14 | 1,275,068,416 bytes | 10.162518 sec | `FINAL_TEST_COMPLETED` |
 
 ¹ Baseline checkpoint에는 cumulative epoch time `222.485`초가 있으나 C4 telemetry의 exact end-to-end
 wall-clock boundary가 아니므로 candidate의 `430.421539`초와 속도 비율을 계산하지 않는다.
+² C4-4 Mask mAP50-95 `0.4439883323`는 final-test metric이며 validation 컬럼에 혼합하지 않는다.
+³ C4-2A/B/C는 training wall time, C4-4는 final-test evaluation wall time이며 서로 같은 성능 boundary가 아니다.
 
 ### 5.1 Validation-only quality comparison
 
@@ -453,8 +457,9 @@ Pre-training view는 train/validation Manifest EDA, deterministic GT gallery, pi
 transform preview와 actual non-augmented letterbox를 사용한 640/1024 representation 비교를 제공한다. Post-training
 view는 existing telemetry/result JSON과 C4-1-compatible validation diagnostics를 읽고 training curves, resource
 summary, taxonomy별 deterministic failure gallery 및 동일 validation sample의 Baseline/Candidate 비교를 표시한다.
-Generated PNG/JSONL은 ignored output에만 저장한다. Final Test Review는 후속 C4-4 전까지 locked이며 test row를
-load하지 않는다.
+Generated PNG/JSONL은 ignored output에만 저장한다. Official experiment Workbench의 Final Test Review는
+C4-3 candidate freeze까지 locked를 유지했고 test row를 load하지 않았다. One-time final test는 후속
+C4-4 전용 execution surface에서 분리해 수행했다.
 
 ## 9. Hardware benchmark domain
 
@@ -603,10 +608,11 @@ evidence는 별도 namespace에 기록해야 한다. 해당 unlock/evaluation li
 ## 13. C4-4 guarded one-time final-test evaluation
 
 C4-4는 candidate selection experiment가 아니라 C4-3에서 validation-only로 고정한 exact candidate의 report-only
-final-test execution boundary다. Infrastructure는 구현했지만 actual Official final test는 아직 실행하지 않았으므로
-현재 state는 `IMPLEMENTED / READY_FOR_EXECUTION`, `FINAL TEST = SEALED_NOT_USED`다. C4-2A `REJECTED`, C4-2B
-`COMPLETED / PENDING`, C4-2C `COMPLETED / CONFIRMED_CANDIDATE`, C4-3
-`FINAL_CANDIDATE_FROZEN / VALIDATION_ONLY` 기록은 변경하지 않는다.
+final-test execution boundary다. Guarded execution은 clean commit
+`e15fd92776a3981a1b5927ad567802d0d0a3bb54`에서 완료됐고 현재 state는
+`FINAL_TEST_COMPLETED`다. C4-2A `REJECTED`, C4-2B `COMPLETED / PENDING`, C4-2C
+`COMPLETED / CONFIRMED_CANDIDATE`, C4-3 `FINAL_CANDIDATE_FROZEN / VALIDATION_ONLY` 기록은 변경하지
+않는다. Candidate selection은 C4-3에서 종료됐으며 C4-4 test result로 재개하지 않았다.
 
 Preflight는 derived-test row나 image/label을 열기 전에 다음 순서로 fail closed한다.
 
@@ -632,9 +638,8 @@ Actual access는 committed/pushed immutable C4-4 revision에서 operator가 같�
 `--confirm-final-test`를 명시한 경우에만 열린다. Unlock 뒤 test-only typed records와 image/label content를
 검증하고, framework default confidence policy의 standard Ultralytics `split=test` metrics와 별도의
 confidence `0.25`, class-aware greedy mask IoU `0.5` strict diagnostics를 계산한다. Size bucket,
-prediction normalization, Region Coverage 기준도 C4-2C validation
-protocol에서 고정된 값을 그대로 사용하며 test 결과로 threshold, hyperparameter, checkpoint, augmentation 또는
-candidate를 다시 선택하지 않는다.
+prediction normalization, Region Coverage 기준도 C4-2C validation protocol에서 고정된 값을 그대로 사용하며
+test 결과로 threshold, hyperparameter, checkpoint, augmentation 또는 candidate를 다시 선택하지 않는다.
 
 Completed evidence는
 `outputs/final_test/yolo_segmentation/<experiment-id>-<frozen-manifest-sha-prefix>/`에만 기록한다. Namespace가
@@ -642,7 +647,9 @@ Completed evidence는
 `PREPARATION_FAILED`, `FINAL_TEST_FAILED`, `FINAL_TEST_COMPLETED`를 구분한다. `READY`와
 `PREPARATION_FAILED`는 evaluator가 호출되지 않아 `test_access_started=false`, `cleanup_permitted=true`다. Operator는
 `completed/`가 없고 이 두 state 중 하나임을 확인한 경우에만 namespace를 수동 제거할 수 있다. `RUNNING` 또는
-`FINAL_TEST_FAILED`는 test access가 발생했을 수 있으므로 cleanup과 재실행을 허용하지 않는다.
+`FINAL_TEST_FAILED`는 test access가 발생했을 수 있으므로 repository-owned workflow의 정상 경로에서는 cleanup과
+자동 재실행을 허용하지 않는다.
+
 Atomic reservation 중 process가 중단되어 canonical namespace 대신 hidden `.starting` directory만 남은 경우도
 evaluator 호출 전 `READY` state이므로 operator가 state를 확인한 뒤 수동 제거할 수 있다.
 
@@ -656,6 +663,125 @@ Region Coverage diagnostics, environment와 runtime resource evidence가 포함�
 
 이 one-time 보호는 explicit unlock, immutable identity, dedicated namespace와 fail-if-existing를 결합한 practical
 workflow protection이다. Test bytes를 기술적으로 영원히 다시 읽을 수 없다는 cryptographic claim은 아니다.
+
 Kaggle 실행 surface는 training Workbench와 분리된
 [`yolo_final_test_evaluation.ipynb`](../../notebooks/vision/yolo_final_test_evaluation.ipynb)이며, preflight cell과
 기본값 `RUN_FINAL_TEST=False`인 operator-controlled execution cell을 분리한다.
+
+### 13.1 완료 실행 이력 및 식별 정보
+
+| Field | Value |
+|---|---|
+| Selected experiment | `c4_2c_yolo11n_seg_crop350_nomosaic_maskratio2_seed42` |
+| C4-3 freeze commit | `9c6916c74beed01875421e2faf1f8113232f2d15` |
+| C4-4 execution commit | `e15fd92776a3981a1b5927ad567802d0d0a3bb54` |
+| Final state | `FINAL_TEST_COMPLETED` |
+| Candidate frozen before test | `true` |
+| Candidate selection changed | `false` |
+| Test used | `true` |
+| Threshold tuned on test | `false` |
+| Frozen Manifest SHA-256 | `2a26b1bc03a1876f828e12a625c69c76af5e8c5713e3f64be699feffe2e8aa09` |
+| Official package SHA-256 | `81c721ab6d34e5563e9f8907fe4c9914d50e48ef35aacfabb6f4ca745420cd76` |
+| Model SHA-256 | `e3fd10cdd708d31421feacfc5d694cb638e0ea60672e08796391b33aecf67155` |
+| Dataset Manifest SHA-256 | `1746338c091c18e96a11399c81ea9be0d7350105c4860cfa6a4162144ddb9905` |
+| Final evidence package SHA-256 | `f2581f1d7706ec73b1179ada70a83ee5cb6431bc0f845d98dca61a91220a3bd6` |
+
+Model, dataset, generated output, `final_test_result.json`과 `final_test_evidence.zip`은 Git 외부에 유지한다.
+위 SHA 값은 completed external evidence를 가리키는 report-only identity pointer다.
+
+### 13.2 최종 테스트 framework 지표
+
+Ultralytics framework metric은 고정된 checkpoint와 `split=test`를 사용해 측정했다.
+이 값은 confidence `0.25`를 사용하는 strict diagnostic과 서로 다른 evaluation boundary의 지표이므로
+동일한 metric으로 해석하지 않는다.
+
+| Metric | Box | Mask |
+|---|---:|---:|
+| Precision | 0.9207809409086756 | 0.8393081275881961 |
+| Recall | 0.8246124882876041 | 0.7423629650336087 |
+| mAP50 | 0.9257799145299147 | 0.780363247863248 |
+| mAP50-95 | 0.5067243853075719 | 0.44398833229530743 |
+
+Class별 final-test mask mAP50-95는 bent `0.6290234741784038`, color `0.273385593220339`,
+scratch `0.4295559294871795`다. 이 지표에서는 color가 final-test segmentation class 중 가장 낮았다.
+이는 final-test 결과에 대한 관찰값일 뿐이며 새로운 tuning이나 candidate selection의 근거로 사용하지 않는다.
+
+### 13.3 Strict diagnostic 및 실패 분석
+
+| Diagnostic at confidence 0.25 / mask IoU 0.5 | Value |
+|---|---:|
+| TP / FP / FN | 15 / 6 / 4 |
+| Precision | 0.7142857142857143 |
+| Recall | 0.7894736842105263 |
+| F1 | 0.75 |
+| Small Recall | 0.75 (3/4) |
+| Medium Recall | 0.8333333333333334 (5/6) |
+| Large Recall | 0.7777777777777778 (7/9) |
+| Multi-component Recall | 0.8 (8/10) |
+| Single-component Recall | 0.7777777777777778 (7/9) |
+| Complete-miss samples | 1 |
+| Wrong-class samples | 0 |
+
+Good-negative evidence는 총 14개 sample이며 false-positive image와 false-positive instance는 모두 0이다.
+따라서 completed final test에서도 `good-negative FP images = 0/14`, FP image rate `0.0`이 유지됐다.
+
+### 13.4 Region Coverage 및 리소스
+
+| Region Coverage metric | Value |
+|---|---:|
+| Strict instance GT Recall | 0.7894736842105263 |
+| GT component coverage Recall@0.5 | 0.7894736842105263 |
+| Small GT coverage Recall@0.5 | 0.75 |
+| Class-aware union IoU | 0.7033265183235076 |
+| Class-aware union GT coverage | 0.7740030281899053 |
+| Class-aware union prediction Precision | 0.8850888168329045 |
+| Near miss, mask IoU 0.30 to 0.50 | 1 |
+
+Final-test evaluation wall time은 `10.162518154999816`초였고,
+peak CUDA allocated/reserved memory는 각각 `1,113,677,312` / `1,275,068,416` bytes였다.
+이 값은 guarded final-test evaluation 구간의 resource evidence이며 training 시간이나
+end-to-end production serving benchmark와 동일한 boundary가 아니다.
+
+### 13.5 Validation–Test 비교 및 C4 종료
+
+C4-2C validation canonical Mask mAP50-95는 `0.46238761201759876`,
+one-time final-test Mask mAP50-95는 `0.44398833229530743`이다.
+Final-test 값은 validation보다 `0.01839927972229133` 낮았다.
+
+이 차이는 서로 다른 validation / final-test split에서 관측된 결과로만 기록한다.
+Final-test 결과를 기준으로 새로운 acceptance gate를 만들지 않았으며,
+threshold, checkpoint, augmentation, hyperparameter 또는 candidate를 변경하거나 다시 선택하지 않았다.
+
+Candidate selection은 C4-3에서 종료됐다. C4-4는 이미 freeze된 candidate에 대해
+사전에 정의된 report-only final-test boundary를 완료하는 단계다.
+
+```text
+C4 = CLOSED
+
+candidate_selection_changed = false
+
+candidate_frozen_before_test = true
+
+threshold_tuned_on_test = false
+
+FINAL TEST = FINAL_TEST_COMPLETED
+
+NEXT = C5 ONNX / TensorRT / Quantization
+```
+
+### 13.6 성능 결과로 간주하지 않는 인프라 실패 시도
+
+첫 번째 Kaggle 실행은 Matplotlib의 `MPLBACKEND` 환경 설정 문제로 중단됐다.
+해당 시도에서는 completed metric, prediction, diagnostic 또는 completed evidence가 생성되기 전에
+실행환경 오류가 발생했으므로 model-performance evidence로 사용하지 않는다.
+
+Repository-owned C4-4 workflow 자체는 `FINAL_TEST_FAILED` 상태에 대한 자동 rerun 경로를 제공하지 않는다.
+이번에는 metric 생성 전 발생한 명확한 실행환경 오류였기 때문에 incomplete runtime namespace를 수동으로
+정리한 뒤 non-interactive Matplotlib backend를 `MPLBACKEND=Agg`로 설정하고 동일한 final test를 다시 실행했다.
+
+재실행 전후에 frozen candidate, checkpoint, threshold, dataset identity, evaluation protocol,
+C4-4 execution commit은 변경하지 않았다. Test 결과를 확인한 뒤 model, augmentation, hyperparameter,
+threshold 또는 candidate를 조정하거나 다시 선택하는 작업도 수행하지 않았다.
+
+Sections 13.1–13.5에 기록된 `FINAL_TEST_COMPLETED` 실행과 해당 evidence identity만
+C4-4의 authoritative model-performance result로 사용한다.

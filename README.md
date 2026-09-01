@@ -1,76 +1,73 @@
 # SmartFactory AI Quality Platform
 
-Production-oriented smart factory AI platform combining visual anomaly detection, inspection
-history, experiment lineage, observability, drift analysis, an operations dashboard, and a grounded
-SOP RAG assistant.
+시각 이상 탐지, 검사 이력, 실험 lineage, observability, drift 분석, 운영 대시보드, 근거 기반 SOP RAG assistant를 결합한 **production-oriented 스마트팩토리 AI 품질 플랫폼**입니다.
 
-> **Status:** STEP 0–16 implementation and local/static verification complete. Actual factory data,
-> production GKE/Cloud SQL deployment, and production LLM/private SOP verification remain pending.
+> **상태:** STEP 0–16의 repository-scoped 구현과 local/static 검증을 완료했습니다.
+>
+> 실제 공장 데이터 검증, production GKE/Cloud SQL 배포, production LLM 및 private SOP 검증은 아직 수행하지 않았습니다.
 
-## 1. Problem and objective
+## 1. 문제 정의와 목표
 
-제조 이미지 모델은 정확도만으로 운영되지 않습니다. 재현 가능한 데이터 분할과 threshold, 배포 가능한 model
-artifact, API와 검사 이력, 운영 metric, drift evidence, 배포 순서, 현장 SOP 근거가 함께 필요합니다.
+제조 이미지 모델은 정확도만 높다고 바로 운영할 수 없습니다. 재현 가능한 데이터 분할과 threshold, 배포 가능한 model artifact, API와 검사 이력, 운영 metric, drift evidence, 배포 절차, 현장 SOP 근거까지 함께 관리해야 합니다.
 
-이 저장소는 MVTec AD `metal_nut` 기반 PatchCore 이상 탐지를 중심으로 다음 lifecycle을 하나의 monorepo에
-구현합니다.
+이 저장소는 MVTec AD `metal_nut` 기반 PatchCore 이상 탐지를 중심으로 다음 lifecycle을 하나의 monorepo에 구현합니다.
 
 - Normal-only PatchCore artifact 학습과 validation-only threshold calibration
 - Image/pixel 품질 평가와 명시적 boundary를 가진 성능 benchmark
 - FastAPI inference와 PostgreSQL inspection audit history
 - MLflow experiment/model lineage backfill
 - Docker, GitHub Actions CI, Prometheus/Grafana와 batch drift analysis
-- FastAPI를 통해 inspection을 읽는 Streamlit operations dashboard
+- FastAPI를 통해 inspection을 조회하는 Streamlit operations dashboard
 - Same-origin REST/WebSocket recovery를 갖춘 browser-native live inspection monitor
 - 별도 FastAPI service로 동작하는 grounded SOP RAG와 deterministic evaluation
 - Migration-gated Kubernetes/GCP deployment foundation
 
-PatchCore는 알려진 defect class를 분류하지 않습니다. 현재 serving 결과는 `normal` 또는 `anomaly`이며,
-`bent/color/flip/scratch`는 official test diagnostics이지 production defect class prediction이 아닙니다.
+PatchCore는 알려진 defect class를 분류하지 않습니다. 현재 serving 결과는 `normal` 또는 `anomaly`이며, `bent/color/flip/scratch`는 official test diagnostics용 label이지 production defect class prediction이 아닙니다.
 
-## 2. Key capabilities
+## 2. 주요 기능
 
-| Area | Implemented capability |
+| 영역 | 구현 내용 |
 |---|---|
 | Data | MVTec 구조·이미지·mask 검증, deterministic split, manifest integrity |
-| Vision | Frozen WideResNet50-2 features, PatchCore coreset memory bank, nearest-neighbor score |
-| Evaluation | Validation-only threshold, fixed-threshold image/pixel metrics, per-defect diagnostics |
-| Serving | Real PatchCore artifact loading, strict threshold, bounded upload, stable FastAPI errors |
+| Vision | Frozen WideResNet50-2 feature, PatchCore coreset memory bank, nearest-neighbor score |
+| Evaluation | Validation-only threshold, fixed-threshold image/pixel metric, defect별 diagnostics |
+| Serving | 실제 PatchCore artifact loading, strict threshold, bounded upload, 안정적인 FastAPI error contract |
 | Persistence | SQLAlchemy repository, PostgreSQL/psycopg, Alembic migration, inspection history/detail |
-| MLOps | MLflow run/parameter/metric/artifact lineage backfill with local SQLite verification |
-| Delivery | Multi-stage Docker images, Compose lifecycle, four-job GitHub Actions CI |
-| Operations | Prometheus metrics, provisioned Grafana dashboard, immutable batch drift reports |
-| Dashboard | Streamlit analytics plus browser-native latest-100 real-time inspection monitoring |
-| RAG | Immutable SOP index, exact cosine retrieval, grounded generation, citations and abstention |
-| Deployment | Kustomize base, CPU/GPU overlays, separate migration Job and gated rollout runbook |
-| Evidence | Cross-domain final benchmark with source hashes, lineage and repository provenance |
+| MLOps | MLflow run/parameter/metric/artifact lineage backfill 및 local SQLite 검증 |
+| Delivery | Multi-stage Docker image, Compose lifecycle, 4-job GitHub Actions CI |
+| Operations | Prometheus metric, provisioned Grafana dashboard, immutable batch drift report |
+| Dashboard | Streamlit analytics와 browser-native latest-100 real-time inspection monitoring |
+| RAG | Immutable SOP index, exact cosine retrieval, grounded generation, citation, abstention |
+| Deployment | Kustomize base, CPU/GPU overlay, 별도 migration Job, gated rollout runbook |
+| Evidence | Source hash, lineage, repository provenance를 포함한 cross-domain final benchmark |
 
-## 3. System architecture
+## 3. 시스템 아키텍처
 
 ```mermaid
 flowchart LR
-    Image["Manufacturing image"] --> API["FastAPI Vision API"]
+    Image["제조 이미지"] --> API["FastAPI Vision API"]
     API --> Runtime["PatchCore inference runtime"]
     Runtime --> Decision["Normal / anomaly"]
-    Decision --> DB["PostgreSQL inspection history"]
-    Dashboard["Streamlit operations dashboard"] -->|"HTTP"| API
+    Decision --> DB["PostgreSQL 검사 이력"]
+
+    Dashboard["Streamlit 운영 대시보드"] -->|"HTTP"| API
     Live["Browser live monitor"] -->|"REST + WebSocket"| API
+
     Drift["Batch drift analysis"] -->|"read-only report"| Dashboard
     DB --> Drift
+
     API --> Metrics["Prometheus metrics"]
     Metrics --> Prometheus["Prometheus"]
     Prometheus --> Grafana["Grafana service dashboard"]
 
-    Manuals["Demo or approved SOP"] --> Index["Offline immutable RAG index"]
+    Manuals["Demo 또는 승인된 SOP"] --> Index["Offline immutable RAG index"]
     Index --> RAG["Independent RAG FastAPI service"]
     RAG --> Retriever["Exact cosine retriever"]
     Retriever --> Generator["Grounded generator"]
-    Generator --> Citations["Answer, citations, abstention"]
+    Generator --> Citations["Answer / citations / abstention"]
 ```
 
-Dashboard는 PostgreSQL에 직접 연결하지 않습니다. Grafana는 service telemetry용이며 inspection business UI가
-아닙니다. Drift는 Prometheus anomaly ratio가 아니라 inspection history와 immutable reference를 비교하는 별도
-batch pipeline입니다. RAG는 Vision API/PostgreSQL lifecycle과 분리된 service입니다.
+Dashboard는 PostgreSQL에 직접 연결하지 않습니다. Grafana는 service telemetry용이며 inspection business UI가 아닙니다. Drift는 Prometheus anomaly ratio가 아니라 inspection history와 immutable reference를 비교하는 별도 batch pipeline입니다. RAG는 Vision API/PostgreSQL lifecycle과 분리된 독립 service입니다.
 
 ```mermaid
 flowchart LR
@@ -80,101 +77,109 @@ flowchart LR
     Artifact --> Predict["Threshold-free predictions"]
     Predict --> Calibrate["Validation-only calibration"]
     Calibrate --> Evaluate["Untouched test evaluation"]
-    Artifact --> Benchmark["Model and API benchmarks"]
+
+    Artifact --> Benchmark["Model / API benchmarks"]
     Evaluate --> MLflow["MLflow lineage backfill"]
     Benchmark --> Final["Final benchmark evidence"]
 
-    Source["Source and lockfile"] --> Docker["Docker runtime images"]
+    Source["Source / lockfile"] --> Docker["Docker runtime images"]
     Docker --> CI["Quality / PostgreSQL / Docker / Kubernetes CI"]
     CI --> K8s["Kustomize deployment foundation"]
-    K8s -.-> GCP["GKE / Cloud SQL / Cloud Storage target — not deployed"]
+    K8s -.-> GCP["GKE / Cloud SQL / Cloud Storage target — 미배포"]
 ```
 
-Detailed boundaries are documented in [Architecture Overview](docs/architecture/overview.md).
+세부 boundary는 [Architecture Overview](docs/architecture/overview.md)에 정리되어 있습니다.
 
-## 4. Vision AI and data contract
+## 4. Vision AI와 데이터 계약
 
-MVTec AD raw data is not included in Git. Place the official dataset under
-`data/raw/mvtec_ad/`; the repository stores only code, configuration and reproducibility metadata.
+MVTec AD raw data는 Git에 포함하지 않습니다. 공식 dataset은 `data/raw/mvtec_ad/` 아래에 배치하며, repository에는 code, configuration, reproducibility metadata만 저장합니다.
 
-The internal `metal_nut` split is:
+내부 `metal_nut` split은 다음과 같습니다.
 
-| Split | Samples | Policy |
+| Split | Samples | 정책 |
 |---|---:|---|
-| Train | 198 normal | PatchCore memory bank construction only |
-| Validation | 22 normal | Image/pixel threshold calibration only |
-| Test good | 22 | Official test, never moved into calibration |
-| Test anomaly | 93 | Official test, never used for threshold tuning |
+| Train | 198 normal | PatchCore memory bank 구성에만 사용 |
+| Validation | 22 normal | Image/pixel threshold calibration에만 사용 |
+| Test good | 22 | Official test, calibration에 사용하지 않음 |
+| Test anomaly | 93 | Official test, threshold tuning에 사용하지 않음 |
 
-PatchCore uses a frozen `wide_resnet50_2` feature extractor (`layer2`, `layer3`), a 10% coreset memory bank and
-9-nearest-neighbor anomaly scoring. Images are resized to 256×256, center-cropped to 224×224 and ImageNet-normalized.
-The test set is evaluated only after thresholds are fixed from normal validation predictions.
+PatchCore는 frozen `wide_resnet50_2` feature extractor의 `layer2`, `layer3` feature를 사용하고, 10% coreset memory bank와 9-nearest-neighbor anomaly scoring을 적용합니다. 이미지는 256×256 resize, 224×224 center crop, ImageNet normalization을 거칩니다.
 
-See [MVTec AD Pipeline](docs/data/MVTEC_AD_PIPELINE.md),
-[PatchCore Baseline](docs/vision/PATCHCORE_BASELINE.md), and
-[Evaluation Contract](docs/benchmarks/PATCHCORE_EVALUATION.md).
+Test set은 normal validation prediction으로 threshold를 고정한 이후에만 평가합니다.
 
-YOLO11n-seg의 validation error analysis에서 Small Recall `0.25`를 확인한 뒤 `imgsz 640 -> 1024`만 바꾼
-validation-only C4-2A controlled experiment를 Tesla T4에서 수행했다. Mask Precision은 증가했지만 Small Recall은
-`0.125`, mask mAP50-95는 `0.303871`로 하락해 predeclared guardrail에 따라 candidate를 `REJECT`했고 v2로
-promote하지 않았다. Derived test는 sealed 상태를 유지했다. 자세한 quality/resource evidence와 제한된 결론은
-[YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md)에 있으며, reusable interface는
-[YOLO Experiment Workbench](notebooks/vision/yolo_segmentation_experiment_workbench.ipynb)다.
+관련 문서:
 
-## 5. Serving and inspection data
+- [MVTec AD Pipeline](docs/data/MVTEC_AD_PIPELINE.md)
+- [PatchCore Baseline](docs/vision/PATCHCORE_BASELINE.md)
+- [Evaluation Contract](docs/benchmarks/PATCHCORE_EVALUATION.md)
 
-The Vision API loads validated PatchCore artifacts once during startup. An optional YOLO segmentation singleton
-serves compact known-defect instances at `/v1/known-defects` without changing the PatchCore prediction contract.
-YOLO parent/child results are stored independently, recoverable through REST history/detail, and notified through the
-separate best-effort `/v1/ws/known-defects` channel after commit.
-The additive `/v1/combined-inspections` orchestrator decodes one upload once, runs both independent runtimes in
-parallel workers, and atomically persists both child results, a recoverable correlation UUID and its decision. It
-returns model observations plus a durable Decision Policy v1 `PASS`/`REJECT`/`REVIEW` result. This deterministic
-model-agreement baseline is versioned and explainable, but is not production calibrated or factory certified.
-Successful predictions are persisted with UUID, UTC timestamp, score, threshold, result, device and model/manifest/
-threshold provenance. PostgreSQL migrations run as a separate Alembic lifecycle; application startup does not run
-migrations implicitly.
+### YOLO11n-seg C4 완료 상태
 
-The database does not persist raw inspection images. It stores bounded image metadata and SHA provenance only.
-Model artifacts and thresholds are mounted read-only and delivered outside Git.
+YOLO11n-seg C4 lifecycle은 validation-only controlled experiment, C4-3 candidate freeze, C4-4 one-time final test를 분리해 완료했습니다.
 
-The browser-native Live Inspection Monitor is served from the Vision API at `/live/`. Combined manufacturing,
-PatchCore and YOLO sections each open an independent WebSocket before loading REST history, merge buffered events by
-their domain UUID, and reload PostgreSQL-backed history after bounded reconnects. The Combined section displays only
-backend-persisted experimental Policy v1 decisions and never recomputes policy or correlates independently created
-child results. This view complements rather than replaces Streamlit's analytical dashboard.
+C4-3에서 C4-2C candidate selection을 종료한 뒤 threshold와 candidate를 변경하지 않고 final test를 report-only로 평가했습니다.
 
-See [PatchCore API](docs/serving/PATCHCORE_API.md),
-[YOLO Segmentation API](docs/serving/YOLO_SEGMENTATION_API.md),
-[Combined Inspection API](docs/serving/COMBINED_INSPECTION_API.md),
-[Decision Engine](docs/decision/DECISION_ENGINE.md), and
-[Inspection History](docs/serving/INSPECTION_HISTORY.md).
+- Validation Mask mAP50-95: `0.4623876120`
+- Final-test Mask mAP50-95: `0.4439883323`
+- Strict diagnostic Recall: `0.7894736842`
+- Good-negative false-positive image: `0/14`
+- Final-test에서 가장 낮은 class별 Mask mAP50-95: color `0.2733855932`
 
-## 6. MLOps and operations
+이 결과로 새로운 acceptance gate, tuning 또는 candidate reselection을 만들지 않았으며 C4는 `CLOSED`입니다.
 
-- MLflow: project-native artifacts remain source of truth; a backfill pipeline records config, manifest, model,
-  threshold, evaluation and benchmark lineage. Local SQLite round-trip is verified; remote server and Model Registry
-  operation are pending.
-- Monitoring: FastAPI exports bounded-cardinality HTTP, inference, persistence and prediction metrics. Prometheus
-  scrapes the API and Grafana provides the service dashboard.
-- Drift: validation-normal scores form an immutable reference. PostgreSQL inspection windows are compared using PSI,
-  quantile shift and anomaly-ratio change. Drift does not prove accuracy degradation and does not trigger retraining.
-- Dashboard: recent inspection KPI, record-level score/threshold, model lineage and latest drift report. It calls
-  FastAPI for inspection data and links to Grafana for telemetry.
+다음 단계는 **C5 ONNX / TensorRT / Quantization**입니다.
 
-See [MLflow Tracking](docs/mlops/MLFLOW_TRACKING.md),
-[Monitoring](docs/monitoring/MONITORING.md), [Drift](docs/monitoring/DRIFT.md), and
-[Operations Dashboard](docs/dashboard/DASHBOARD.md).
+자세한 provenance와 quality/resource evidence는 [YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md)에 기록되어 있습니다.
+
+## 5. Serving과 inspection data
+
+Vision API는 startup 시 검증된 PatchCore artifact를 한 번 load합니다. Optional YOLO segmentation singleton은 PatchCore prediction contract를 변경하지 않고 `/v1/known-defects`에서 compact known-defect instance를 제공합니다.
+
+YOLO parent/child result는 독립적으로 저장하며 REST history/detail로 복구할 수 있습니다. Commit 이후 별도의 best-effort `/v1/ws/known-defects` channel로 notification을 전달합니다.
+
+추가된 `/v1/combined-inspections` orchestrator는 하나의 upload를 한 번 decode한 뒤 두 개의 독립 runtime을 parallel worker에서 실행합니다. 이후 두 child result, recoverable correlation UUID, decision을 atomic하게 persist합니다.
+
+응답에는 model observation과 durable Decision Policy v1의 `PASS` / `REJECT` / `REVIEW` 결과가 함께 포함됩니다. 이 deterministic model-agreement baseline은 versioned·explainable하지만 production calibration이나 factory certification이 완료된 것은 아닙니다.
+
+성공한 prediction은 UUID, UTC timestamp, score, threshold, result, device, model/manifest/threshold provenance를 PostgreSQL에 저장합니다.
+
+PostgreSQL migration은 별도 Alembic lifecycle로 실행하며 application startup에서 migration을 암묵적으로 수행하지 않습니다.
+
+Database에는 raw inspection image를 저장하지 않습니다. 제한된 image metadata와 SHA provenance만 저장합니다. Model artifact와 threshold는 read-only mount로 제공하며 Git 외부에서 전달합니다.
+
+Browser-native Live Inspection Monitor는 Vision API의 `/live/`에서 제공합니다. Combined manufacturing, PatchCore, YOLO section은 각각 독립 WebSocket을 먼저 연 뒤 REST history를 load하고, buffered event를 domain UUID 기준으로 merge합니다. Bounded reconnect 이후에는 PostgreSQL-backed history를 다시 load합니다.
+
+Combined section은 backend에 persist된 experimental Policy v1 decision만 표시하며, frontend에서 policy를 재계산하거나 독립 생성된 child result를 임의로 correlate하지 않습니다. 이 화면은 Streamlit analytical dashboard를 대체하는 것이 아니라 보완합니다.
+
+관련 문서:
+
+- [PatchCore API](docs/serving/PATCHCORE_API.md)
+- [YOLO Segmentation API](docs/serving/YOLO_SEGMENTATION_API.md)
+- [Combined Inspection API](docs/serving/COMBINED_INSPECTION_API.md)
+- [Decision Engine](docs/decision/DECISION_ENGINE.md)
+- [Inspection History](docs/serving/INSPECTION_HISTORY.md)
+
+## 6. MLOps와 운영
+
+- **MLflow**: project-native artifact를 source of truth로 유지하고 config, manifest, model, threshold, evaluation, benchmark lineage를 backfill합니다. Local SQLite round-trip은 검증했으며 remote server와 Model Registry operation은 아직 검증하지 않았습니다.
+- **Monitoring**: FastAPI에서 bounded-cardinality HTTP, inference, persistence, prediction metric을 export합니다. Prometheus가 API를 scrape하고 Grafana가 service dashboard를 제공합니다.
+- **Drift**: validation-normal score를 immutable reference로 사용합니다. PostgreSQL inspection window를 PSI, quantile shift, anomaly-ratio change로 비교합니다. Drift는 정확도 저하를 증명하지 않으며 자동 retraining trigger로 사용하지 않습니다.
+- **Dashboard**: 최근 inspection KPI, record-level score/threshold, model lineage, 최신 drift report를 제공합니다. Inspection data는 FastAPI를 통해 읽고 telemetry는 Grafana로 연결합니다.
+
+관련 문서:
+
+- [MLflow Tracking](docs/mlops/MLFLOW_TRACKING.md)
+- [Monitoring](docs/monitoring/MONITORING.md)
+- [Drift](docs/monitoring/DRIFT.md)
+- [Operations Dashboard](docs/dashboard/DASHBOARD.md)
 
 ## 7. SOP RAG assistant
 
-The RAG service is provider-agnostic at the application boundary. It builds an immutable index from Markdown/TXT,
-performs exact cosine retrieval over a normalized NumPy matrix, validates controlled citation IDs, and abstains before
-generation when no context passes the retrieval threshold.
+RAG service는 application boundary에서 provider-agnostic하게 설계했습니다. Markdown/TXT 기반 immutable index를 생성하고, normalized NumPy matrix 위에서 exact cosine retrieval을 수행합니다. Controlled citation ID를 검증하며 retrieval threshold를 통과한 context가 없으면 generation 전에 abstain합니다.
 
-The tracked manuals are explicitly fictional project demo SOPs. Private factory documents, production provider
-credentials and query logs are not committed. The OpenAI-compatible embedding/generation adapter is implemented, but
-credentialed production-provider execution has not been verified.
+Tracked manual은 명시적으로 fictional project demo SOP입니다. Private factory document, production provider credential, query log는 commit하지 않습니다.
+
+OpenAI-compatible embedding/generation adapter는 구현되어 있지만 credential이 필요한 production-provider execution은 아직 검증하지 않았습니다.
 
 Deterministic demo evaluation:
 
@@ -187,7 +192,7 @@ uv run python -m pipelines.evaluate_rag \
   --evaluation-id step14-demo-eval-v2
 ```
 
-Production-adapter index construction requires provider model/base URL/API key configuration:
+Production-adapter index 생성 시 provider model/base URL/API key 설정이 필요합니다.
 
 ```bash
 uv run python -m pipelines.build_rag_index \
@@ -196,78 +201,82 @@ uv run python -m pipelines.build_rag_index \
   --index-id <index-id>
 ```
 
-See [RAG Assistant](docs/rag/RAG_ASSISTANT.md) and [RAG Evaluation](docs/rag/RAG_EVALUATION.md).
+관련 문서:
 
-## 8. Final benchmark results
+- [RAG Assistant](docs/rag/RAG_ASSISTANT.md)
+- [RAG Evaluation](docs/rag/RAG_EVALUATION.md)
 
-STEP 15 aggregates existing historical STEP 3/4 evidence and the actual STEP 14 artifact without rerunning or tuning
-the model, threshold or retriever. Results remain separated by environment and measurement boundary.
+## 8. Final benchmark 결과
 
-| Area | Result | Environment and boundary |
+STEP 15는 model, threshold, retriever를 다시 실행하거나 tuning하지 않고 기존 STEP 3/4 evidence와 실제 STEP 14 artifact를 집계합니다. 서로 다른 환경과 measurement boundary의 결과를 분리해서 기록합니다.
+
+| 영역 | 결과 | 환경 및 측정 boundary |
 |---|---|---|
-| Vision image quality | AUROC **0.997556**, F1 **0.994595** | Kaggle T4; fixed validation threshold on official test predictions |
-| Pixel localization | AUROC **0.982486**, F1 **0.834279** | Kaggle T4; separate pixel threshold and localization metric |
-| T4 model runtime | p50 **21.634 ms**, **45.114 images/s** | Batch 1; disk read, artifact restore, warmup, threshold excluded |
-| FastAPI schema v1 | p50 **44.902 ms**, **22.030 req/s** | T4 in-process ASGI; pre-persistence; external network excluded |
-| RAG retrieval | Document R@5 **1.0**, Chunk R@5 **1.0** | Fictional demo corpus; deterministic evaluation providers |
-| RAG evidence | Citation P/R **0.25625/1.0**, Faithfulness **1.0** | Exact expected chunks and lexical extractive support |
-| RAG correctness | Fact Recall **0.25**, Abstention **1.0** | 8 answerable and 1 unanswerable demo cases |
+| Vision image quality | AUROC **0.997556**, F1 **0.994595** | Kaggle T4; fixed validation threshold로 official test prediction 평가 |
+| Pixel localization | AUROC **0.982486**, F1 **0.834279** | Kaggle T4; 별도 pixel threshold와 localization metric |
+| T4 model runtime | p50 **21.634 ms**, **45.114 images/s** | Batch 1; disk read, artifact restore, warmup, threshold 제외 |
+| FastAPI schema v1 | p50 **44.902 ms**, **22.030 req/s** | T4 in-process ASGI; persistence 이전, external network 제외 |
+| RAG retrieval | Document R@5 **1.0**, Chunk R@5 **1.0** | Fictional demo corpus, deterministic evaluation provider |
+| RAG evidence | Citation P/R **0.25625/1.0**, Faithfulness **1.0** | Exact expected chunk와 lexical extractive support |
+| RAG correctness | Fact Recall **0.25**, Abstention **1.0** | Answerable 8건, unanswerable 1건의 demo case |
 
-Citation Precision `0.25625` and Reference Fact Recall `0.25` are visible weaknesses: Top-5 coverage is high, but the
-extractive baseline cites too much context and provides limited answer completeness. Faithfulness `1.0` is lexical
-grounding, not production answer correctness.
+Citation Precision `0.25625`와 Reference Fact Recall `0.25`는 현재 확인된 약점입니다. Top-5 coverage는 높지만 extractive baseline이 지나치게 많은 context를 citation하고 answer completeness가 낮습니다. Faithfulness `1.0`은 lexical grounding 지표이며 production answer correctness를 의미하지 않습니다.
 
-The T4 model benchmark, in-process pre-persistence API benchmark, and local deterministic RAG evaluation are not one
-production-environment benchmark. API schema v2 with real PostgreSQL and production-class GPU remains unmeasured.
+T4 model benchmark, in-process pre-persistence API benchmark, local deterministic RAG evaluation은 하나의 production-environment benchmark가 아닙니다. API schema v2의 real PostgreSQL 및 production-class GPU 환경은 아직 측정하지 않았습니다.
 
-See [Final Benchmark](docs/benchmarks/FINAL_BENCHMARK.md) and
-[Metrics Contract](docs/benchmarks/METRICS_CONTRACT.md).
+관련 문서:
 
-## 9. Repository structure
+- [Final Benchmark](docs/benchmarks/FINAL_BENCHMARK.md)
+- [Metrics Contract](docs/benchmarks/METRICS_CONTRACT.md)
+
+## 9. Repository 구조
 
 ```text
-apps/dashboard/       Streamlit internal operations UI
-apps/live_monitor/    Same-origin HTML/CSS/JavaScript real-time inspection UI
-configs/              Data, model, evaluation and benchmark evidence configuration
-docs/                 Architecture, contracts, operations guides and benchmark history
+apps/dashboard/           Streamlit 내부 운영 UI
+apps/live_monitor/        Same-origin HTML/CSS/JavaScript 실시간 inspection UI
+configs/                  Data, model, evaluation, benchmark evidence configuration
+docs/                     Architecture, contract, operations guide, benchmark history
 examples/dashboard_demo/  Local-only synthetic inspection/drift portfolio demo
-infra/k8s/            Kustomize base plus local CPU and GCP GPU overlays
-manuals/demo/         Fictional public SOP corpus only
-migrations/           Alembic environment and inspection schema revision
-ml/                   Dataset, PatchCore, evaluation, RAG, drift and tracking logic
-monitoring/           Prometheus and Grafana configuration
-pipelines/            Reproducible CLI entry points
-services/             Vision API, inference, persistence, monitoring, tracking and RAG services
-shared/               Hashing and benchmark utilities
-tests/                Unit and integration contracts
-.github/workflows/    GitHub Actions CI
+infra/k8s/                Kustomize base, local CPU, GCP GPU overlay
+manuals/demo/             Fictional public SOP corpus
+migrations/               Alembic environment와 inspection schema revision
+ml/                       Dataset, PatchCore, evaluation, RAG, drift, tracking logic
+monitoring/               Prometheus와 Grafana configuration
+pipelines/                Reproducible CLI entry point
+services/                 Vision API, inference, persistence, monitoring, tracking, RAG service
+shared/                   Hashing과 benchmark utility
+tests/                    Unit/integration contract
+.github/workflows/        GitHub Actions CI
 ```
 
-Generated `data/`, `artifacts/`, `outputs/`, `models/`, `checkpoints/`, `mlruns/`, local databases and secrets are
-excluded from Git. The tracked demo SOP and RAG evaluation dataset are intentional public fixtures.
+생성되는 `data/`, `artifacts/`, `outputs/`, `models/`, `checkpoints/`, `mlruns/`, local database, secret은 Git에서 제외합니다. Tracked demo SOP와 RAG evaluation dataset만 의도적으로 public fixture로 유지합니다.
 
-## 10. Quick start and model workflow
+## 10. 빠른 시작과 model workflow
 
-Requirements: Python 3.12 and [uv](https://docs.astral.sh/uv/). The universal lock selects macOS PyPI wheels,
-Linux arm64 CPU wheels, or Linux x86_64 CUDA 13.0 wheels through environment markers.
+요구사항:
+
+- Python 3.12
+- [uv](https://docs.astral.sh/uv/)
+
+Universal lock은 environment marker를 통해 macOS PyPI wheel, Linux arm64 CPU wheel, Linux x86_64 CUDA 13.0 wheel을 선택합니다.
 
 ```bash
 uv sync --locked
 make check
 ```
 
-After placing MVTec AD under `data/raw/mvtec_ad/`, the executable workflow is:
+MVTec AD를 `data/raw/mvtec_ad/` 아래에 배치한 뒤 다음 workflow를 실행할 수 있습니다.
 
 ```bash
-# Validate data and create the deterministic manifest.
+# Data 검증 및 deterministic manifest 생성
 uv run python -m pipelines.prepare_mvtec_ad
 
-# Construct the normal-only PatchCore artifact.
+# Normal-only PatchCore artifact 구성
 uv run python -m pipelines.train_patchcore \
   --artifact-id <artifact-id> \
   --device auto
 
-# Generate validation predictions and calibrate thresholds.
+# Validation prediction 생성 및 threshold calibration
 uv run python -m pipelines.predict_patchcore \
   --artifact-dir artifacts/models/patchcore/<artifact-id> \
   --output-id <validation-prediction-id> \
@@ -279,7 +288,7 @@ uv run python -m pipelines.calibrate_patchcore_thresholds \
   --artifact-dir artifacts/models/patchcore/<artifact-id> \
   --output-id <threshold-id>
 
-# Generate untouched test predictions and evaluate with stored thresholds.
+# 고정된 threshold로 untouched test prediction 생성 및 평가
 uv run python -m pipelines.predict_patchcore \
   --artifact-dir artifacts/models/patchcore/<artifact-id> \
   --output-id <test-prediction-id> \
@@ -292,19 +301,18 @@ uv run python -m pipelines.evaluate_patchcore \
   --artifact-dir artifacts/models/patchcore/<artifact-id> \
   --output-id <evaluation-id>
 
-# Benchmark model runtime without changing thresholds.
+# Threshold를 변경하지 않고 model runtime benchmark
 uv run python -m pipelines.benchmark_patchcore \
   --artifact-dir artifacts/models/patchcore/<artifact-id> \
   --output-id <benchmark-id> \
   --device auto
 ```
 
-Full contracts and optional commands are maintained in the linked data, Vision, serving, drift, tracking, RAG and
-benchmark documents rather than duplicated here.
+세부 contract와 optional command는 data, Vision, serving, drift, tracking, RAG, benchmark 문서에 유지하며 README에 중복 작성하지 않습니다.
 
 ## 11. Docker Compose
 
-Copy the example environment and replace local placeholders, especially artifact paths and passwords:
+예제 환경 파일을 복사하고 artifact path와 password 등 local placeholder를 실제 값으로 교체합니다.
 
 ```bash
 cp .env.example .env
@@ -312,10 +320,17 @@ make docker-build
 make docker-up
 ```
 
-`docker-up` enforces `PostgreSQL healthy → Alembic migration complete → API start`. The Vision API does not become
-ready without real compatible model and threshold artifacts mounted read-only.
+`docker-up`은 다음 순서를 강제합니다.
 
-Optional observers and services:
+```text
+PostgreSQL healthy
+→ Alembic migration complete
+→ API start
+```
+
+Vision API는 실제 compatible model과 threshold artifact가 read-only로 mount되지 않으면 ready 상태가 되지 않습니다.
+
+Optional observer/service:
 
 ```bash
 make monitoring-up
@@ -323,31 +338,37 @@ make dashboard-up
 make rag-up
 ```
 
-When a real local Vision API is already available, start the host Dashboard with the single official command:
+실제 local Vision API가 이미 실행 중이면 다음 command로 host Dashboard를 시작합니다.
 
 ```bash
 make dashboard
 ```
 
-For a populated local Dashboard without a model or PostgreSQL, run the explicitly synthetic demo
-in two terminals:
+Model이나 PostgreSQL 없이 populated local Dashboard를 확인하려면 두 terminal에서 explicit synthetic demo를 실행합니다.
 
 ```bash
 make dashboard-demo-api
 make dashboard-demo
 ```
 
-The screen is labeled `DEMO — SYNTHETIC DATA`; its 100 inspection records and drift report are
-deterministic visualization fixtures, not factory or benchmark evidence. See
-[Operations Dashboard](docs/dashboard/DASHBOARD.md) for the local actual-service and demo boundaries.
+화면에는 `DEMO — SYNTHETIC DATA`가 표시됩니다. 100개 inspection record와 drift report는 deterministic visualization fixture이며 factory data나 benchmark evidence가 아닙니다.
 
-The RAG profile also requires a compatible verified index and provider configuration. Stop services with
-`make rag-down`, `make dashboard-down`, `make monitoring-down`, and `make docker-down`. `make docker-clean-volumes`
-deletes persistent local volumes and must be used deliberately.
+RAG profile 역시 compatible verified index와 provider configuration이 필요합니다.
 
-See [Docker Lifecycle](docs/deployment/DOCKER.md).
+종료:
 
-## 12. Testing and CI
+```bash
+make rag-down
+make dashboard-down
+make monitoring-down
+make docker-down
+```
+
+`make docker-clean-volumes`는 persistent local volume을 삭제하므로 의도적으로 실행해야 합니다.
+
+자세한 내용은 [Docker Lifecycle](docs/deployment/DOCKER.md)을 참고합니다.
+
+## 12. 테스트와 CI
 
 ```bash
 uv lock --check
@@ -356,38 +377,43 @@ make k8s-check
 docker compose config --quiet
 ```
 
-`make check` runs Ruff formatting, Ruff lint, mypy and pytest. GitHub Actions runs four jobs on pull requests and main:
+`make check`는 Ruff formatting, Ruff lint, mypy, pytest를 실행합니다.
 
-1. `quality`: locked dependency sync and full quality gate
-2. `postgres-integration`: Alembic plus actual PostgreSQL 17.6 contracts
-3. `docker`: Compose validation and API/Dashboard/RAG Linux arm64 image builds
+GitHub Actions는 pull request와 main branch에서 다음 4개 job을 실행합니다.
+
+1. `quality`: locked dependency sync와 full quality gate
+2. `postgres-integration`: Alembic과 실제 PostgreSQL 17.6 contract
+3. `docker`: Compose validation 및 API/Dashboard/RAG Linux arm64 image build
 4. `kubernetes`: base/local CPU/GCP GPU Kustomize render
 
-CI does not download MVTec/model artifacts or require GPU, GCP, private SOP, paid providers or production credentials.
-Registry publication and production CD are not implemented.
+CI는 MVTec/model artifact를 download하지 않으며 GPU, GCP, private SOP, paid provider, production credential을 요구하지 않습니다.
 
-See [CI/CD Foundation](docs/deployment/CI_CD.md).
+Registry publication과 production CD는 아직 구현하지 않았습니다.
 
-## 13. Kubernetes and GCP foundation
+자세한 내용은 [CI/CD Foundation](docs/deployment/CI_CD.md)을 참고합니다.
 
-The repository includes:
+## 13. Kubernetes와 GCP foundation
 
-- Kustomize base, `local-cpu` and `gcp-gpu` overlays
-- Separate, security-hardened Alembic migration Job
-- FastAPI Deployment and internal ClusterIP Service
-- Non-secret ConfigMap plus external Secret/PVC contracts
-- Startup/liveness/readiness probes, resource baselines and non-root/read-only security contexts
-- Label-gated runbook that waits for migration completion before applying API resources
+Repository에는 다음 항목이 포함되어 있습니다.
 
-The target architecture uses Artifact Registry, Cloud Storage, Cloud SQL, Secret Manager and GKE. No GCP resource,
-GPU node pool, public Load Balancer or production endpoint has been created. PostgreSQL is a managed-service target,
-not a Kubernetes StatefulSet. HPA remains future work until production load and accelerator capacity are measured.
+- Kustomize base, `local-cpu`, `gcp-gpu` overlay
+- 별도 security-hardened Alembic migration Job
+- FastAPI Deployment와 internal ClusterIP Service
+- Non-secret ConfigMap과 external Secret/PVC contract
+- Startup/liveness/readiness probe
+- Resource baseline
+- Non-root/read-only security context
+- Migration 완료를 기다린 뒤 API resource를 적용하는 label-gated runbook
 
-See [Kubernetes/GCP Foundation](docs/deployment/KUBERNETES_GCP.md).
+Target architecture는 Artifact Registry, Cloud Storage, Cloud SQL, Secret Manager, GKE를 사용합니다.
 
-## 14. Documentation
+현재 실제 GCP resource, GPU node pool, public Load Balancer, production endpoint는 생성하지 않았습니다. PostgreSQL은 managed-service target이며 Kubernetes StatefulSet으로 운영하지 않습니다. HPA는 production load와 accelerator capacity를 측정한 이후의 future work입니다.
 
-| Category | Documents |
+자세한 내용은 [Kubernetes/GCP Foundation](docs/deployment/KUBERNETES_GCP.md)을 참고합니다.
+
+## 14. 문서
+
+| 분류 | 문서 |
 |---|---|
 | Architecture | [Overview](docs/architecture/overview.md), [Project Scope](docs/PROJECT_SCOPE.md), [ADRs](docs/adr/) |
 | Data / Vision | [MVTec Pipeline](docs/data/MVTEC_AD_PIPELINE.md), [PatchCore](docs/vision/PATCHCORE_BASELINE.md), [YOLO Segmentation](docs/vision/YOLO_SEGMENTATION_DATASET.md), [YOLO Validation Error Analysis](docs/vision/YOLO_SEGMENTATION_ERROR_ANALYSIS.md), [YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md) |
@@ -399,61 +425,55 @@ See [Kubernetes/GCP Foundation](docs/deployment/KUBERNETES_GCP.md).
 | Benchmarks | [Final](docs/benchmarks/FINAL_BENCHMARK.md), [Vision Evaluation](docs/benchmarks/PATCHCORE_EVALUATION.md), [T4 Runtime](docs/benchmarks/PATCHCORE_INFERENCE_BENCHMARK.md), [Metric Definitions](docs/benchmarks/METRICS_CONTRACT.md) |
 | Engineering | [Coding Conventions](docs/CODING_CONVENTIONS.md) |
 
-## 15. Limitations and pending validation
+## 15. 한계와 미검증 범위
 
-- Only the public MVTec AD `metal_nut` category is evaluated; no actual factory image or production ground truth is used.
-- API schema v2 persistence-inclusive latency on a production-class GPU and real PostgreSQL remains unmeasured.
-- Raw inspection images, heatmaps, overlays and defect classes are not persisted or shown in the dashboard.
-- Drift monitors score distribution without production labels; ground-truth performance degradation is unavailable.
-- GKE, Cloud SQL, Cloud Storage delivery, production ingress/TLS, IAP/authentication and HPA are not deployed.
-- MLflow remote tracking/Registry operation is unverified.
-- RAG uses fictional public SOPs and deterministic evaluation providers; private SOP and production LLM quality,
-  latency, security and cost are unverified.
-- Current RAG citation selection is broad and answer completeness is limited.
+- Public MVTec AD `metal_nut` category만 평가했습니다. 실제 factory image나 production ground truth는 사용하지 않았습니다.
+- Production-class GPU와 real PostgreSQL을 포함한 API schema v2 persistence-inclusive latency는 아직 측정하지 않았습니다.
+- Raw inspection image, heatmap, overlay, defect class는 database에 persist하거나 dashboard에 표시하지 않습니다.
+- Drift는 production label 없이 score distribution을 monitoring합니다. 실제 ground-truth 성능 저하는 직접 판단할 수 없습니다.
+- GKE, Cloud SQL, Cloud Storage delivery, production ingress/TLS, IAP/authentication, HPA는 아직 배포하지 않았습니다.
+- MLflow remote tracking 및 Registry operation은 아직 검증하지 않았습니다.
+- RAG는 fictional public SOP와 deterministic evaluation provider를 사용합니다. Private SOP와 production LLM의 품질, latency, security, cost는 미검증 상태입니다.
+- 현재 RAG citation selection은 넓고 answer completeness가 제한적입니다.
 
-## 16. Future work
+## 16. 향후 작업
 
-- Validate with approved real factory data and production ground truth.
-- Run API schema v2 benchmark with real PostgreSQL and production-class GPU.
-- Deploy the migration-gated stack to GKE with Cloud SQL, artifact delivery and Secret Manager.
-- Add production authentication/IAP, ingress/TLS and HPA only after load testing.
-- Add authenticated `wss://`, Origin validation and cross-replica event delivery before public live-monitor exposure.
-- Evaluate a production embedding/generation provider and private held-out SOP corpus.
-- Improve selective citations with reranking/context selection and measure the change.
-- Add feature/embedding drift and a raw-image/object-storage retention policy.
-- Consider a hybrid model only as future work: PatchCore for unknown anomalies plus a supervised
-  classifier/detector for approved known-defect labels.
+- 승인된 실제 factory data와 production ground truth로 검증
+- Real PostgreSQL과 production-class GPU 환경에서 API schema v2 benchmark
+- Cloud SQL, artifact delivery, Secret Manager를 포함한 migration-gated stack의 GKE 배포
+- Load testing 이후 production authentication/IAP, ingress/TLS, HPA 추가
+- Public live-monitor 노출 전 authenticated `wss://`, Origin validation, cross-replica event delivery 구현
+- Production embedding/generation provider와 private held-out SOP corpus 평가
+- Reranking/context selection을 통한 selective citation 개선 및 재측정
+- Feature/embedding drift와 raw-image/object-storage retention policy 추가
+- PatchCore를 unknown anomaly에, supervised classifier/detector를 승인된 known-defect label에 사용하는 hybrid model 검토
 
-## 17. Tech stack
+## 17. 기술 스택
 
-Python 3.12, uv, PyTorch, Torchvision, Anomalib/PatchCore, OpenCV, NumPy, scikit-learn, FastAPI,
-Pydantic, SQLAlchemy, psycopg, PostgreSQL, Alembic, MLflow, Docker/Compose, GitHub Actions,
-Prometheus, Grafana, Streamlit, browser-native HTML/CSS/JavaScript, Kubernetes/Kustomize, and an OpenAI-compatible
-RAG adapter.
+Python 3.12, uv, PyTorch, Torchvision, Anomalib/PatchCore, OpenCV, NumPy, scikit-learn, FastAPI, Pydantic, SQLAlchemy, psycopg, PostgreSQL, Alembic, MLflow, Docker/Compose, GitHub Actions, Prometheus, Grafana, Streamlit, browser-native HTML/CSS/JavaScript, Kubernetes/Kustomize, OpenAI-compatible RAG adapter를 사용합니다.
 
-LangChain, Vector DB, Kafka, Redis, Celery and Airflow are not part of the implemented stack.
+LangChain, Vector DB, Kafka, Redis, Celery, Airflow는 현재 구현된 stack에 포함되지 않습니다.
 
-## 18. Completion status
+## 18. 완료 상태
 
-| Step | Status | Verified scope |
+| Step | 상태 | 검증 범위 |
 |---:|---|---|
-| 0 | Complete | Repository foundation, conventions and ADRs |
-| 1 | Complete | Data validation, split and manifest |
-| 2 | Complete | PatchCore preprocessing, memory bank and artifact |
-| 3 | Complete | Threshold calibration, evaluation and T4 model benchmark |
-| 4 | Complete | FastAPI serving, real-model smoke and schema v1 HTTP benchmark |
-| 5 | Complete | Inspection persistence and read APIs |
-| 6 | Complete | MLflow tracking/lineage with local round-trip |
-| 7 | Complete | Docker/Compose and actual local PostgreSQL integration |
-| 8 | Complete | GitHub Actions CI and CD-ready build foundation |
+| 0 | Complete | Repository foundation, convention, ADR |
+| 1 | Complete | Data validation, split, manifest |
+| 2 | Complete | PatchCore preprocessing, memory bank, artifact |
+| 3 | Complete | Threshold calibration, evaluation, T4 model benchmark |
+| 4 | Complete | FastAPI serving, real-model smoke, schema v1 HTTP benchmark |
+| 5 | Complete | Inspection persistence와 read API |
+| 6 | Complete | MLflow tracking/lineage와 local round-trip |
+| 7 | Complete | Docker/Compose와 실제 local PostgreSQL integration |
+| 8 | Complete | GitHub Actions CI와 CD-ready build foundation |
 | 9 | Complete | Prometheus/Grafana application monitoring |
 | 10 | Complete | Batch PatchCore score drift detection |
-| 11 | Complete | Kubernetes/GCP manifest foundation; actual deployment pending |
-| 12 | Complete | Internal operations dashboard; production auth pending |
-| 13 | Complete | Grounded demo SOP RAG; production provider pending |
+| 11 | Complete | Kubernetes/GCP manifest foundation; 실제 deployment는 pending |
+| 12 | Complete | Internal operations dashboard; production auth는 pending |
+| 13 | Complete | Grounded demo SOP RAG; production provider는 pending |
 | 14 | Complete | Deterministic public-demo RAG evaluation |
-| 15 | Complete | Final benchmark aggregation and clean repository provenance |
-| 16 | Complete | README, architecture and repository completion audit |
+| 15 | Complete | Final benchmark aggregation과 clean repository provenance |
+| 16 | Complete | README, architecture, repository completion audit |
 
-“Complete” means the repository-scoped implementation and stated verification contract is complete. It does not claim
-actual GCP deployment, factory-data validation, or production-provider operation.
+여기서 `Complete`는 repository-scoped implementation과 명시된 verification contract가 완료되었다는 의미입니다. 실제 GCP deployment, factory-data validation, production-provider operation까지 완료되었다는 의미는 아닙니다.
