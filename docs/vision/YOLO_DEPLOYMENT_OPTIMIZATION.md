@@ -11,7 +11,10 @@ C5는 C4에서 확정한 YOLO11n-seg candidate를 다시 학습하거나 선택�
 | C5-2A PyTorch ↔ ONNX characterization | `EXECUTED / CHARACTERIZATION_COMPLETED` |
 | C5-2B ONNX FP32 acceptance policy v1 | `EXECUTED / PARITY_ACCEPTED` |
 | C5-2 ONNX FP32 parity | `CLOSED` |
-| C5-3+ TensorRT / Quantization | `NOT STARTED` |
+| C5-3A TensorRT FP16 foundation | `IMPLEMENTED / GPU EXECUTION PENDING` |
+| C5-3B TensorRT FP16 characterization | `NOT EXECUTED` |
+| C5-3C TensorRT FP16 acceptance | `NOT DEFINED` |
+| C5-4 INT8 / Quantization | `NOT STARTED` |
 
 C5-1과 첫 C5-2 characterization은 clean detached Git commit
 `643ed9386a61bd2bf0c041f92a10b809b6d52c3e`에서 Kaggle로 실행했다. 첫 parity run은
@@ -23,7 +26,9 @@ C5-1과 첫 C5-2 characterization은 clean detached Git commit
 validation parity를 새로 실행했다. Frozen policy의 17개 acceptance check를 모두 통과해
 `PARITY_ACCEPTED`가 확인됐으며 C5-2는 `CLOSED` 상태다.
 
-TensorRT, FP16, INT8, quantization은 아직 시작하지 않았다.
+C5-3A TensorRT FP16 code/config/test foundation은 구현했지만 실제 GPU engine build와 characterization은
+아직 실행하지 않았다. TensorRT FP16 acceptance tolerance는 characterization 이후 별도로 정의하며 INT8은
+후속 승인 전까지 시작하지 않는다.
 
 ## 2. Immutable C4 source
 
@@ -289,6 +294,63 @@ C5-2 prospective verification은 완료됐으며 `PARITY_ACCEPTED`로 종료했�
 
 1. C5-2 ONNX FP32 parity 상태를 `CLOSED`로 유지한다.
 2. Exact ONNX와 acceptance evidence는 Git 밖의 immutable evidence archive로 보존한다.
-3. C5-3 TensorRT FP16 export/runtime foundation을 별도 contract로 설계한다.
-4. TensorRT FP16은 먼저 characterization을 수행한 뒤 별도의 acceptance tolerance를 고정한다.
-5. INT8은 calibration dataset과 accuracy-loss budget이 별도로 승인될 때만 후속 단계에서 검토한다.
+3. C5-3A TensorRT FP16 foundation을 repository quality gate로 검증하고 commit한다.
+4. GPU environment에서 exact accepted ONNX로 engine을 build하고 validation-only characterization을 수행한다.
+5. Characterization 결과를 본 뒤 별도의 TensorRT FP16 acceptance tolerance를 commit으로 고정한다.
+6. 고정된 policy로 prospective verification을 수행한 뒤에만 C5-3를 종료한다.
+7. INT8은 calibration dataset과 accuracy-loss budget이 별도로 승인될 때만 후속 단계에서 검토한다.
+
+## 8. C5-3 TensorRT FP16 foundation
+
+C5-3는 C5-2에서 승인된 exact ONNX binary를 다시 export하거나 model-quality tuning에 사용하지 않는다.
+Source of truth는 다음 artifact identity다.
+
+- ONNX SHA-256:
+  `f916325bb126d174de9c1fdfc24802eec11c46014f723fbf3ba3b3c1755c1490`
+- ONNX metadata SHA-256:
+  `3286861db66cb4c4f886d2fd71f8f13b749b019bd0d57249f54a025d43b11fcd`
+- ONNX export config SHA-256:
+  `f1c2ef5045fdd89d964b2dc79c501580c9f55c2a1d38f38f13cf4794bafd0e85`
+- Original ONNX export commit:
+  `643ed9386a61bd2bf0c041f92a10b809b6d52c3e`
+
+Repository config는
+[`configs/export/yolo_segmentation_tensorrt_fp16.yaml`](../../configs/export/yolo_segmentation_tensorrt_fp16.yaml)
+이다. 첫 build contract는 batch `1`, image size `640`, static shape, TensorRT FP16 builder flag,
+workspace `4 GiB`, CUDA device `0`으로 제한한다. Dynamic shape와 INT8은 포함하지 않는다.
+
+Engine은 accepted ONNX를 TensorRT Python API로 parse한 뒤 serialized `.engine`으로 build한다. Generated
+artifact와 metadata는 Git에서 제외된 namespace에 기록한다.
+
+```text
+artifacts/deployment/yolo_segmentation/tensorrt/
+└── c5_3a_yolo11n_seg_tensorrt_fp16_static/
+    ├── model.engine
+    └── metadata.json
+```
+
+Metadata에는 source ONNX/model/config hash, engine SHA/size, static I/O tensor contract, TensorRT/CUDA/PyTorch
+version, GPU name/compute capability/memory, clean Git provenance와 test seal을 기록한다. TensorRT engine은
+GPU architecture와 TensorRT/CUDA environment에 종속될 수 있으므로 이후 prospective verification은
+characterization에서 고정한 runtime identity를 별도로 검증해야 한다.
+
+C5-3B characterization은 PyTorch FP32 GPU reference와 TensorRT FP16 engine을 같은 CUDA device에서
+validation split만 사용해 비교한다. C4-2C prediction normalization과 mask association은 유지하며 다음을
+수집한다.
+
+- prediction count와 unmatched count
+- class agreement
+- confidence absolute error
+- box IoU
+- mask IoU
+- finite result tensor evidence
+- PyTorch/TensorRT end-to-end single-image latency
+- engine SHA와 runtime/GPU provenance
+
+Latency는 validation 첫 sample을 사용해 backend별 warmup `10`회 후 `50`회를 측정한다. 측정 scope는
+Ultralytics의 image load/preprocess/inference/postprocess를 포함한 single-image end-to-end path이며 독립적인
+kernel-only benchmark로 해석하지 않는다.
+
+이 단계에서는 TensorRT FP16 numeric acceptance threshold를 정의하지 않는다. Evidence state는
+`TENSORRT_FP16_METRICS_COLLECTED_ACCEPTANCE_PENDING`이며 실제 GPU characterization 결과를 관측한 뒤
+별도 policy를 commit하기 전에는 `PASS`를 선언하지 않는다.
