@@ -15,8 +15,9 @@ C5는 C4에서 확정한 YOLO11n-seg candidate를 다시 학습하거나 선택�
 | C5-3B TensorRT FP16 characterization | `EXECUTED / CHARACTERIZATION_COMPLETED` |
 | C5-3C TensorRT FP16 acceptance policy v1 | `EXECUTED / PARITY_ACCEPTED` |
 | C5-3 TensorRT FP16 parity | `CLOSED` |
-| C5-4A INT8 explicit-Q/DQ PTQ contract | `FOUNDATION / LOCAL VALIDATION PENDING` |
-| C5-4B Quantized ONNX + TensorRT INT8 engine | `NOT STARTED` |
+| C5-4A INT8 explicit-Q/DQ PTQ contract | `FROZEN / CONTRACT_COMMITTED` |
+| C5-4B1 ModelOpt INT8 Q/DQ ONNX | `FOUNDATION / LOCAL VALIDATION PENDING` |
+| C5-4B2 TensorRT INT8 engine | `NOT STARTED` |
 | C5-4C INT8 validation characterization | `NOT STARTED` |
 | C5-4D INT8 acceptance policy v1 | `NOT STARTED` |
 | C5-4E INT8 prospective verification | `NOT STARTED` |
@@ -534,3 +535,34 @@ C5-4C characterization에서는 최소 다음 세 runtime을 같은 Tesla T4 bou
 end-to-end latency다. Characterization 결과를 보기 전에는 INT8 numeric PASS를 선언하지 않는다.
 관측 이후 별도 C5-4D policy commit에서 tolerance와 INT8 채택에 필요한 latency benefit을 고정하고,
 새 clean repository state의 C5-4E prospective verification으로 최종 `ACCEPTED` 또는 `REJECTED`를 판정한다.
+### 10.1 C5-4B1 ModelOpt INT8 Q/DQ ONNX foundation
+
+C5-4A contract commit 이후 C5-4B는 quantized ONNX 생성과 TensorRT engine build를 분리한다.
+
+C5-4B1은 exact accepted C5-1 FP32 ONNX를 source로 사용하고 frozen derived dataset의 `train`
+84장만 calibration에 사용해 NVIDIA ModelOpt explicit Q/DQ ONNX를 생성한다. `val` 28장은
+calibration에 사용하지 않으며 C5-4C characterization까지 열지 않는다. final-test 역시 계속 sealed다.
+
+Implementation boundary:
+
+- Source: exact accepted FP32 ONNX
+- Quantizer: `nvidia-modelopt==0.46.0`
+- API: `modelopt.onnx.quantization.quantize`
+- Quantization mode: `int8`
+- Calibration method: `entropy`
+- Calibration execution provider: `cpu`
+- Calibration reader: one image per batch, manifest `sample_id` ascending
+- Preprocess: static `640×640` letterbox, BGR→RGB, NCHW, FP32, `/255`
+- High precision dtype: `fp16`
+- ONNX simplify: `false`
+- Required candidate structure: at least one `QuantizeLinear` and one `DequantizeLinear`
+- Source/candidate external input and output names/shapes must remain identical
+- Validation used: `false`
+- Final-test used: `false`
+
+C5-4B1 output은 ignored artifact namespace에 quantized ONNX와 deterministic provenance metadata로
+보존한다. Metadata에는 source/config/dataset SHA-256, calibration sample ID digest, Q/DQ node count,
+ModelOpt version과 clean repository commit을 기록한다.
+
+C5-4B1에서 생성된 exact Q/DQ ONNX가 별도 evidence로 고정된 뒤에만 C5-4B2 TensorRT INT8
+engine build의 source로 사용한다.

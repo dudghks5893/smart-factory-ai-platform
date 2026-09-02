@@ -141,7 +141,7 @@ Prospective verification에서 34개 acceptance check를 모두 통과해
 `TENSORRT_FP16_PARITY_ACCEPTED`를 확인했으며 C5-3 TensorRT FP16 parity lifecycle은 `CLOSED` 상태입니다.
 동일 validation measurement boundary에서 PyTorch FP32 GPU mean latency는 `31.131 ms`,
 TensorRT FP16 mean latency는 `25.844 ms`, speedup ratio는 약 `1.205x`로 관측됐습니다.
-C5-4A에서는 INT8 explicit-Q/DQ PTQ contract를 정의하기 시작했으며, INT8 quantized ONNX/engine build와 validation characterization은 아직 실행하지 않았습니다.
+C5-4A INT8 explicit-Q/DQ PTQ contract는 commit으로 고정했습니다. C5-4B1에서는 exact FP32 ONNX와 train-only calibration을 사용하는 ModelOpt Q/DQ ONNX 생성 foundation을 준비하며, TensorRT INT8 engine build와 validation characterization은 아직 실행하지 않았습니다.
 
 자세한 C4 provenance와 quality/resource evidence는 [YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md),
 C5 export/parity contract와 test seal은 [YOLO Deployment Optimization](docs/vision/YOLO_DEPLOYMENT_OPTIMIZATION.md)에 기록되어 있습니다.
