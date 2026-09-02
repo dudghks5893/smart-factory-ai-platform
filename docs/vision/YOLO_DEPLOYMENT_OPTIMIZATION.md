@@ -13,7 +13,8 @@ C5는 C4에서 확정한 YOLO11n-seg candidate를 다시 학습하거나 선택�
 | C5-2 ONNX FP32 parity | `CLOSED` |
 | C5-3A TensorRT FP16 engine | `EXECUTED / TENSORRT_FP16_ENGINE_BUILT` |
 | C5-3B TensorRT FP16 characterization | `EXECUTED / CHARACTERIZATION_COMPLETED` |
-| C5-3C TensorRT FP16 acceptance policy v1 | `FROZEN / PROSPECTIVE VERIFICATION PENDING` |
+| C5-3C TensorRT FP16 acceptance policy v1 | `EXECUTED / PARITY_ACCEPTED` |
+| C5-3 TensorRT FP16 parity | `CLOSED` |
 | C5-4 INT8 / Quantization | `NOT STARTED` |
 
 C5-1과 첫 C5-2 characterization은 clean detached Git commit
@@ -28,8 +29,10 @@ validation parity를 새로 실행했다. Frozen policy의 17개 acceptance chec
 
 C5-3A/B는 exact accepted ONNX를 사용해 Tesla T4에서 TensorRT FP16 engine build와 validation-only
 characterization을 완료했다. C5-3C acceptance policy v1은 이 관측 이후 별도 repository contract로
-고정하며, policy commit의 clean state에서 exact same engine을 복원해 새 parity evidence를 생성하는
-prospective verification 전에는 acceptance를 선언하지 않는다. INT8은 후속 승인 전까지 시작하지 않는다.
+고정했다. Policy commit의 clean state에서 C5-3B의 exact TensorRT engine을 rebuild 없이 복원하고
+새 validation-only parity evidence를 생성한 뒤 frozen policy를 적용했다. 34개 acceptance check를 모두
+통과해 `TENSORRT_FP16_PARITY_ACCEPTED`를 확인했으며 C5-3 TensorRT FP16 parity lifecycle은 `CLOSED`다.
+INT8은 별도의 calibration dataset과 accuracy-loss budget을 정의한 뒤 후속 C5-4에서 검토한다.
 
 ## 2. Immutable C4 source
 
@@ -291,15 +294,13 @@ Repository에는 config, evaluator, tests와 documentation만 유지한다.
 
 C5-2 prospective verification은 완료됐으며 `PARITY_ACCEPTED`로 종료했다.
 
-다음 순서는 다음과 같다.
+현재 deployment optimization 상태는 다음과 같다.
 
-1. C5-2 ONNX FP32 parity 상태를 `CLOSED`로 유지한다.
+1. C5-2 ONNX FP32 parity는 `PARITY_ACCEPTED / CLOSED` 상태를 유지한다.
 2. Exact ONNX와 acceptance evidence는 Git 밖의 immutable evidence archive로 보존한다.
-3. C5-3A TensorRT FP16 foundation을 repository quality gate로 검증하고 commit한다.
-4. GPU environment에서 exact accepted ONNX로 engine을 build하고 validation-only characterization을 수행한다.
-5. Characterization 결과를 본 뒤 별도의 TensorRT FP16 acceptance tolerance를 commit으로 고정한다.
-6. 고정된 policy로 prospective verification을 수행한 뒤에만 C5-3를 종료한다.
-7. INT8은 calibration dataset과 accuracy-loss budget이 별도로 승인될 때만 후속 단계에서 검토한다.
+3. C5-3 TensorRT FP16은 frozen policy 기반 prospective verification에서 `PARITY_ACCEPTED`를 확인해 `CLOSED`다.
+4. C5-3 prospective acceptance evidence와 exact engine identity는 Git 밖에서 immutable evidence로 보존한다.
+5. C5-4 INT8은 calibration dataset, accuracy-loss budget, latency measurement boundary를 별도로 정의한 뒤에만 시작한다.
 
 ## 8. C5-3 TensorRT FP16 foundation
 
@@ -433,3 +434,55 @@ Acceptance evaluator는 saved parity JSON과 committed policy만 읽으며 datas
 수행하지 않는다. 최종 state는 `TENSORRT_FP16_PARITY_ACCEPTED` 또는
 `TENSORRT_FP16_PARITY_REJECTED`다. Prospective verification이 끝나기 전까지 C5-3는 `CLOSED`로
 표현하지 않는다.
+
+### 9.3 C5-3C prospective verification 결과와 C5-3 closure
+
+TensorRT FP16 acceptance policy v1은 characterization 이후 repository에 먼저 commit한 뒤
+prospective verification에 사용했다.
+
+Prospective run은 policy commit의 clean detached repository state에서 실행했다. C5-3B에서 보존한
+exact TensorRT engine과 ONNX artifact를 복원했으며 engine을 다시 build하지 않았다.
+Dataset은 validation split만 사용했고 final-test split은 열지 않았다.
+
+- Policy repository commit:
+  `880b2cba33013320adf966a4097b556309688864`
+- Policy SHA-256:
+  `4f8f81a70417e380062358a9f3888d4fe0fa236fdfbc7b04da2616356833bfd9`
+- TensorRT engine SHA-256:
+  `9bbbe5297e6cc55bcea877a79f45485ee7e1e5e6a831ad5276aedc8e3d904037`
+- Runtime: PyTorch FP32 GPU ↔ TensorRT FP16
+- GPU: `Tesla T4`, compute capability `7.5`
+- Validation samples: `28`
+- PyTorch / TensorRT predictions: `19 / 19`
+- Matched instances: `19`
+- Unmatched PyTorch / TensorRT: `0 / 0`
+- Class agreement rate: `1.0`
+- Confidence absolute error max: `0.005336761474609375`
+- Box IoU min / mean:
+  `0.9841219602257741 / 0.998657164643238`
+- Mask IoU min / mean:
+  `0.9972451790633609 / 0.9991235966986481`
+- PyTorch mean latency: `31.130911420002576 ms`
+- TensorRT FP16 mean latency: `25.844023020001714 ms`
+- Speedup ratio: `1.2045690949860681`
+- Acceptance checks: `34 / 34 PASS`
+- Final acceptance state: `TENSORRT_FP16_PARITY_ACCEPTED`
+- `engine_rebuilt=false`
+- `test_used=false`
+- `test_split_used=false`
+
+Prospective evidence identities:
+
+- Parity SHA-256:
+  `d14400bbb1b71036ee3c87e307a9b830d44a1824089b08fbf7a05eb333d8549c`
+- Acceptance JSON SHA-256:
+  `b6499f261a5c726a7017b39f74f917a2263297bc9bf676f429fa9d05199ff651`
+- External evidence archive:
+  `c5_3c_tensorrt_fp16_prospective_acceptance_evidence.zip`
+- External evidence archive SHA-256:
+  `5ae1a16fcbecdb73634ba0dc19876232bec67178defa5fee0720a39c54a11de6`
+
+이 결과로 C5-3 TensorRT FP16 parity lifecycle은 `CLOSED`다.
+
+C5-4 INT8 / Quantization은 C5-3 tolerance를 재사용하지 않는다. INT8 calibration dataset,
+accuracy-loss budget과 latency measurement boundary를 별도로 정의한 뒤 시작한다.
