@@ -15,7 +15,11 @@ C5는 C4에서 확정한 YOLO11n-seg candidate를 다시 학습하거나 선택�
 | C5-3B TensorRT FP16 characterization | `EXECUTED / CHARACTERIZATION_COMPLETED` |
 | C5-3C TensorRT FP16 acceptance policy v1 | `EXECUTED / PARITY_ACCEPTED` |
 | C5-3 TensorRT FP16 parity | `CLOSED` |
-| C5-4 INT8 / Quantization | `NOT STARTED` |
+| C5-4A INT8 explicit-Q/DQ PTQ contract | `FOUNDATION / LOCAL VALIDATION PENDING` |
+| C5-4B Quantized ONNX + TensorRT INT8 engine | `NOT STARTED` |
+| C5-4C INT8 validation characterization | `NOT STARTED` |
+| C5-4D INT8 acceptance policy v1 | `NOT STARTED` |
+| C5-4E INT8 prospective verification | `NOT STARTED` |
 
 C5-1과 첫 C5-2 characterization은 clean detached Git commit
 `643ed9386a61bd2bf0c041f92a10b809b6d52c3e`에서 Kaggle로 실행했다. 첫 parity run은
@@ -484,5 +488,49 @@ Prospective evidence identities:
 
 이 결과로 C5-3 TensorRT FP16 parity lifecycle은 `CLOSED`다.
 
-C5-4 INT8 / Quantization은 C5-3 tolerance를 재사용하지 않는다. INT8 calibration dataset,
-accuracy-loss budget과 latency measurement boundary를 별도로 정의한 뒤 시작한다.
+C5-4 INT8 / Quantization은 C5-3 tolerance를 재사용하지 않는다. C5-4A에서 calibration dataset,
+quantization toolchain과 latency measurement boundary를 먼저 고정하고, 실제 INT8 numeric tolerance는
+새 validation characterization을 관측한 뒤 별도 policy commit으로만 정의한다.
+
+## 10. C5-4A INT8 explicit-Q/DQ PTQ foundation
+
+C5-4는 accepted C5-1 FP32 ONNX와 closed C5-3 FP16 evidence를 source/baseline으로 사용하지만,
+FP16 engine을 INT8 source로 변환하지 않는다. INT8 source graph는 exact accepted FP32 ONNX다.
+
+TensorRT 10.x의 legacy implicit INT8 calibrator API는 deprecated 상태이고 TensorRT 11.x에서는 제거되므로,
+C5-4는 NVIDIA ModelOpt로 ONNX graph에 explicit Quantize/Dequantize(Q/DQ) node를 삽입한 뒤
+TensorRT engine을 build하는 경로를 사용한다.
+
+C5-4A contract:
+
+- Exact source ONNX SHA-256:
+  `f916325bb126d174de9c1fdfc24802eec11c46014f723fbf3ba3b3c1755c1490`
+- Quantizer: `nvidia-modelopt==0.46.0`
+- Quantization: INT8 explicit Q/DQ PTQ
+- Calibration method: `entropy`
+- High-precision fallback dtype: `fp16`
+- Static input: batch `1`, `640×640`
+- Calibration source: dataset manifest의 `train` 84장 전체
+- Calibration order: manifest sample ID ascending
+- Validation calibration 사용: `false`
+- Final-test calibration 사용: `false`
+- INT8 quality characterization: `val` 28장만 사용
+- Final-test characterization 사용: `false`
+- Numeric acceptance threshold: 아직 정의하지 않음
+- Benchmark: C5-3과 동일한 warmup `10`, measured `50`,
+  `ultralytics_end_to_end_single_image`
+
+Calibration은 activation range를 정하는 quantization 과정이므로 model-quality validation과 분리한다.
+`val` 28장은 INT8 결과의 quality/equivalence characterization에만 사용하며 calibration data로 재사용하지 않는다.
+Final-test는 C5-4 전체에서 계속 sealed 상태를 유지한다.
+
+C5-4C characterization에서는 최소 다음 세 runtime을 같은 Tesla T4 boundary에서 비교한다.
+
+1. PyTorch FP32 GPU reference
+2. Accepted TensorRT FP16 baseline
+3. Candidate TensorRT INT8
+
+관측할 evidence는 prediction count, unmatched count, class agreement, confidence error, box/mask IoU와
+end-to-end latency다. Characterization 결과를 보기 전에는 INT8 numeric PASS를 선언하지 않는다.
+관측 이후 별도 C5-4D policy commit에서 tolerance와 INT8 채택에 필요한 latency benefit을 고정하고,
+새 clean repository state의 C5-4E prospective verification으로 최종 `ACCEPTED` 또는 `REJECTED`를 판정한다.

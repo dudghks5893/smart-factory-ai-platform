@@ -1,0 +1,70 @@
+schema_version: 1
+quantization_id: c5_4a_yolo11n_seg_tensorrt_int8_qdq_ptq
+format: onnx_qdq_to_engine
+task: segment
+precision: int8
+batch: 1
+imgsz: 640
+dynamic: false
+workspace_gib: 4
+device: 0
+
+source:
+  onnx_sha256: f916325bb126d174de9c1fdfc24802eec11c46014f723fbf3ba3b3c1755c1490
+  onnx_metadata_sha256: 3286861db66cb4c4f886d2fd71f8f13b749b019bd0d57249f54a025d43b11fcd
+  onnx_export_config_sha256: f1c2ef5045fdd89d964b2dc79c501580c9f55c2a1d38f38f13cf4794bafd0e85
+  onnx_export_commit: 643ed9386a61bd2bf0c041f92a10b809b6d52c3e
+  frozen_manifest_sha256: 2a26b1bc03a1876f828e12a625c69c76af5e8c5713e3f64be699feffe2e8aa09
+  model_sha256: e3fd10cdd708d31421feacfc5d694cb638e0ea60672e08796391b33aecf67155
+  dataset_manifest_sha256: 1746338c091c18e96a11399c81ea9be0d7350105c4860cfa6a4162144ddb9905
+
+quantizer:
+  implementation: nvidia_modelopt
+  package: nvidia-modelopt
+  version: 0.46.0
+  api: modelopt.onnx.quantization.quantize
+  quantize_mode: int8
+  calibration_method: entropy
+  explicit_qdq: true
+  high_precision_dtype: fp16
+  simplify: false
+
+calibration:
+  split: train
+  sample_count: 84
+  ordering: manifest_sample_id_ascending
+  batch_size: 1
+  validation_used: false
+  test_used: false
+  test_split_used: false
+  input_name: images
+  decode: opencv_bgr
+  resize: ultralytics_letterbox_640
+  color: bgr_to_rgb
+  layout: nchw
+  dtype: float32
+  scale: 0.00392156862745098
+
+characterization:
+  split: val
+  sample_count: 28
+  test_used: false
+  test_split_used: false
+  reference_backend: pytorch_fp32_gpu
+  candidate_backend: tensorrt_int8
+  comparison_baseline: accepted_tensorrt_fp16
+  prediction_initial_confidence: 0.001
+  diagnostic_confidence: 0.25
+  prediction_iou: 0.7
+  max_detections: 300
+  retina_masks: false
+  mask_threshold: 0.5
+  mask_resize: opencv_inter_nearest
+  association: greedy_max_mask_iou_positive_overlap
+  acceptance_mode: metrics_only_pending_tensorrt_int8_tolerance_approval
+  numeric_thresholds: null
+  benchmark:
+    warmup_iterations: 10
+    measured_iterations: 50
+    sample_selector: first_validation_sample
+    scope: ultralytics_end_to_end_single_image
