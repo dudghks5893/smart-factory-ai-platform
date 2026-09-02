@@ -11,9 +11,9 @@ C5는 C4에서 확정한 YOLO11n-seg candidate를 다시 학습하거나 선택�
 | C5-2A PyTorch ↔ ONNX characterization | `EXECUTED / CHARACTERIZATION_COMPLETED` |
 | C5-2B ONNX FP32 acceptance policy v1 | `EXECUTED / PARITY_ACCEPTED` |
 | C5-2 ONNX FP32 parity | `CLOSED` |
-| C5-3A TensorRT FP16 foundation | `IMPLEMENTED / GPU EXECUTION PENDING` |
-| C5-3B TensorRT FP16 characterization | `NOT EXECUTED` |
-| C5-3C TensorRT FP16 acceptance | `NOT DEFINED` |
+| C5-3A TensorRT FP16 engine | `EXECUTED / TENSORRT_FP16_ENGINE_BUILT` |
+| C5-3B TensorRT FP16 characterization | `EXECUTED / CHARACTERIZATION_COMPLETED` |
+| C5-3C TensorRT FP16 acceptance policy v1 | `FROZEN / PROSPECTIVE VERIFICATION PENDING` |
 | C5-4 INT8 / Quantization | `NOT STARTED` |
 
 C5-1과 첫 C5-2 characterization은 clean detached Git commit
@@ -26,9 +26,10 @@ C5-1과 첫 C5-2 characterization은 clean detached Git commit
 validation parity를 새로 실행했다. Frozen policy의 17개 acceptance check를 모두 통과해
 `PARITY_ACCEPTED`가 확인됐으며 C5-2는 `CLOSED` 상태다.
 
-C5-3A TensorRT FP16 code/config/test foundation은 구현했지만 실제 GPU engine build와 characterization은
-아직 실행하지 않았다. TensorRT FP16 acceptance tolerance는 characterization 이후 별도로 정의하며 INT8은
-후속 승인 전까지 시작하지 않는다.
+C5-3A/B는 exact accepted ONNX를 사용해 Tesla T4에서 TensorRT FP16 engine build와 validation-only
+characterization을 완료했다. C5-3C acceptance policy v1은 이 관측 이후 별도 repository contract로
+고정하며, policy commit의 clean state에서 exact same engine을 복원해 새 parity evidence를 생성하는
+prospective verification 전에는 acceptance를 선언하지 않는다. INT8은 후속 승인 전까지 시작하지 않는다.
 
 ## 2. Immutable C4 source
 
@@ -357,3 +358,78 @@ kernel-only benchmark로 해석하지 않는다.
 이 단계에서는 TensorRT FP16 numeric acceptance threshold를 정의하지 않는다. Evidence state는
 `TENSORRT_FP16_METRICS_COLLECTED_ACCEPTANCE_PENDING`이며 실제 GPU characterization 결과를 관측한 뒤
 별도 policy를 commit하기 전에는 `PASS`를 선언하지 않는다.
+## 9. C5-3B characterization과 C5-3C TensorRT FP16 acceptance policy v1
+
+C5-3A/B GPU characterization은 clean detached repository commit
+`5604219d07bf384f46f2827f4da999781832e183`에서 실행했다. C5-2에서 승인된 exact ONNX를 다시 export하지
+않고 보존본을 복원해 TensorRT FP16 engine을 build했다.
+
+### 9.1 C5-3A/B 실행 결과
+
+- GPU: `Tesla T4`, compute capability `7.5`
+- CUDA runtime: `13.0`
+- TensorRT: `10.13.3.9.post1`
+- PyTorch: `2.13.0+cu130`
+- Ultralytics: `8.4.128`
+- Source ONNX SHA-256:
+  `f916325bb126d174de9c1fdfc24802eec11c46014f723fbf3ba3b3c1755c1490`
+- TensorRT config SHA-256:
+  `edc135932e9367f67b9179dbbd47b01da6fa07db878a7f8af73b491718b517c9`
+- Engine SHA-256:
+  `9bbbe5297e6cc55bcea877a79f45485ee7e1e5e6a831ad5276aedc8e3d904037`
+- TensorRT metadata SHA-256:
+  `d400c7fe1a09c9c53baf63b0727c5cf5f84602ca26a85d3996e2296d480e99da`
+- Characterization parity SHA-256:
+  `0b6eba9ca3eee24b5e3fb5f1ce09227ffced26d80477d56c355648c24235f9bf`
+- External evidence archive SHA-256:
+  `e6266f46b3c4aad6605873fe8a950c11abd1ea642d8039673210b587dd419bcb`
+- validation samples: `28`
+- PyTorch / TensorRT predictions: `19 / 19`
+- matched instances: `19`
+- unmatched PyTorch / TensorRT: `0 / 0`
+- class agreement rate: `1.0`
+- confidence absolute error max: `0.005336761474609375`
+- box IoU min / mean: `0.9841219602257741 / 0.998657164643238`
+- mask IoU min / mean: `0.9972451790633609 / 0.9991235966986481`
+- PyTorch mean latency: `32.93056183998942 ms`
+- TensorRT mean latency: `27.092740620000768 ms`
+- speedup ratio: `1.2154754774302523`
+- `test_used=false`
+- `test_split_used=false`
+
+이 결과의 lifecycle state는
+`TENSORRT_FP16_METRICS_COLLECTED_ACCEPTANCE_PENDING`이며 characterization 자체를 PASS run으로
+소급하지 않는다.
+
+### 9.2 C5-3C policy v1
+
+Policy:
+[`configs/deployment/yolo_tensorrt_fp16_parity_acceptance.yaml`](../../configs/deployment/yolo_tensorrt_fp16_parity_acceptance.yaml)
+
+Policy는 characterization 관측값을 그대로 threshold로 복사하지 않고 다음 headroom을 둔다.
+
+- confidence absolute error max `<= 0.01`
+- box IoU min `>= 0.98`
+- mask IoU min `>= 0.995`
+- TensorRT mean latency `<` PyTorch mean latency
+- end-to-end speedup ratio `>= 1.05`
+
+Structural gate는 validation `28` samples, no-test seal, prediction count match, zero unmatched,
+class agreement `1.0`, nested tensor finite evidence를 요구한다. 또한 hardware-specific TensorRT engine을
+다른 runtime에서 조용히 재사용하지 않도록 TensorRT/CUDA/GPU/compute-capability/PyTorch/Ultralytics
+identity를 characterization 환경에 고정한다.
+
+가장 중요한 prospective boundary는 parity evidence의 clean Git commit이 acceptance policy를 실행하는
+clean Git commit과 같아야 한다는 점이다. 따라서 C5-3B에서 policy보다 먼저 생성한 characterization JSON은
+policy v1의 prospective PASS evidence로 재사용할 수 없다.
+
+Prospective verification에서는 engine을 rebuild하지 않는다. External C5-3B evidence archive에서 exact
+`model.engine`과 sidecar metadata를 복원하고 engine SHA
+`9bbbe5297e6cc55bcea877a79f45485ee7e1e5e6a831ad5276aedc8e3d904037`을 검증한 뒤, policy가 이미 commit된
+clean repository state에서 validation parity를 새로 실행한다. 그 새 parity JSON에만 C5-3C acceptance
+evaluator를 적용한다.
+
+Acceptance evaluator는 saved parity JSON과 committed policy만 읽으며 dataset/model inference를 다시
+수행하지 않는다. 최종 state는 `TENSORRT_FP16_PARITY_ACCEPTED` 또는
+`TENSORRT_FP16_PARITY_REJECTED`다. Prospective verification이 끝나기 전까지 C5-3는 `CLOSED`로
+표현하지 않는다.

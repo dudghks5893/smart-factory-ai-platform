@@ -130,10 +130,10 @@ C4-3에서 C4-2C candidate selection을 종료한 뒤 threshold와 candidate를 
 **C5 deployment optimization**에서는 frozen C4-3 candidate의 static FP32 ONNX export와
 validation-only PyTorch ↔ ONNX Runtime parity까지 실행했습니다. Acceptance policy v1을 characterization
 이후 별도 commit으로 고정하고 exact ONNX artifact에서 prospective verification을 수행해 17개 gate를 모두
-통과했으며 C5-2는 `PARITY_ACCEPTED / CLOSED` 상태입니다. C5-3A에서는 exact accepted ONNX를 source of
-truth로 사용하는 static TensorRT FP16 engine build와 validation-only characterization foundation을
-구현했습니다. 실제 GPU engine build/characterization은 아직 실행 전이며 TensorRT FP16 acceptance
-threshold와 INT8·Quantization은 아직 정의하지 않았습니다.
+통과했으며 C5-2는 `PARITY_ACCEPTED / CLOSED` 상태입니다. C5-3A/B에서는 exact accepted ONNX로 Tesla T4
+TensorRT FP16 engine을 build하고 validation-only PyTorch FP32 GPU ↔ TensorRT FP16 characterization을
+완료했습니다. C5-3C TensorRT FP16 acceptance policy v1은 characterization 결과에 margin을 둔 별도
+contract로 고정하며 prospective verification은 아직 실행 전입니다. INT8·Quantization은 시작하지 않았습니다.
 
 자세한 C4 provenance와 quality/resource evidence는 [YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md),
 C5 export/parity contract와 test seal은 [YOLO Deployment Optimization](docs/vision/YOLO_DEPLOYMENT_OPTIMIZATION.md)에 기록되어 있습니다.
