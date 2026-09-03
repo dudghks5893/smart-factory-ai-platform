@@ -18,7 +18,7 @@ C5는 C4에서 확정한 YOLO11n-seg candidate를 다시 학습하거나 선택�
 | C5-4A INT8 explicit-Q/DQ PTQ contract | `FROZEN / CONTRACT_COMMITTED` |
 | C5-4B1 ModelOpt INT8 Q/DQ ONNX | `EXECUTED / INT8_QDQ_ONNX_QUANTIZED` |
 | C5-4B2 TensorRT INT8 engine | `EXECUTED / TENSORRT_INT8_ENGINE_BUILT` |
-| C5-4C INT8 validation characterization | `FOUNDATION / LOCAL VALIDATION PENDING` |
+| C5-4C INT8 validation characterization | `EXECUTED / CHARACTERIZATION_COMPLETED` |
 | C5-4D INT8 acceptance policy v1 | `NOT STARTED` |
 | C5-4E INT8 prospective verification | `NOT STARTED` |
 
@@ -691,3 +691,72 @@ C5-4C의 same-runtime INT8 speedup denominator로 직접 사용하지 않는다.
 C5-4C actual metrics를 관측하기 전에는 INT8 numeric tolerance를 정의하지 않는다. 관측 이후 C5-4D에서
 acceptance policy v1을 별도 clean commit으로 freeze하고, C5-4E에서 exact engine prospective verification을
 수행한다.
+
+### 10.6 C5-4C actual INT8 validation characterization result
+
+Foundation commit `ad558fd10c35b7342e50fe62a2155ded5fd8f06b`을 clean detached checkout한
+Kaggle Tesla T4 환경에서 C5-4B2 exact INT8 engine을 rebuild 없이 복원하고 validation 28장만 사용해
+PyTorch FP32 GPU ↔ TensorRT INT8 characterization을 실행했다.
+
+Runtime:
+
+- Python: `3.12.13`
+- PyTorch: `2.10.0+cu128`
+- CUDA runtime: `12.8`
+- TensorRT: `10.13.3.9.post1`
+- Ultralytics: `8.4.128`
+- GPU: `Tesla T4`, compute capability `7.5`
+
+Artifact / evidence identity:
+
+- INT8 engine SHA-256:
+  `4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971`
+- C5-4C characterization JSON SHA-256:
+  `483d251a05663f2108cce725fe4ba5ca2b0aca2a22947f8a4b7f7ba069d6d8aa`
+- C5-4C run summary SHA-256:
+  `fb48982aebf93d19fbbf05d54c9e75658e521c892e1b3f2b9c2da1500299732f`
+- C5-4C config evidence SHA-256:
+  `c7e50511226a6b4b45ceab82df07d6840808c79d979693a38910ea1731d0f30f`
+- C5-4C evidence ZIP SHA-256:
+  `5dcbff1969d4ad4d7a63e05488258c0d47c8f95c06ba1d32f979ad6380e7eb64`
+
+Validation characterization:
+
+- validation samples: `28`
+- PyTorch predictions: `19`
+- TensorRT INT8 predictions: `19`
+- matched instances: `19`
+- unmatched PyTorch / INT8: `0 / 0`
+- class agreement rate: `1.0`
+- confidence absolute error min / mean / max:
+  `0.0024236440658569336 / 0.03416892101890162 / 0.10978221893310547`
+- box IoU min / mean / max:
+  `0.9381443298969072 / 0.9718233538884476 / 0.9974160206718347`
+- mask IoU min / mean / max:
+  `0.9405993578308954 / 0.975080122673965 / 0.9931489469677747`
+- structural gates: passed
+- `test_used=false`
+- `test_split_used=false`
+- `engine_rebuilt=false`
+
+Same-session latency characterization:
+
+- PyTorch FP32 GPU mean: `30.977266720000216 ms`
+- TensorRT INT8 mean: `27.640050220001058 ms`
+- speedup ratio: `1.120738438368837x`
+- mean latency reduction: 약 `10.77%`
+
+기존 C5-3 accepted FP16 latency는 CUDA runtime `13.0`에서 수집됐고 이번 C5-4C는 `12.8`이므로
+FP16 `25.844 ms`와 INT8 `27.640 ms`를 same-runtime 성능 판정값으로 직접 비교하지 않는다.
+FP16 결과는 historical accepted baseline으로만 유지한다.
+
+INT8에서는 prediction count, matching, class agreement의 structural parity는 유지됐지만,
+confidence/box/mask numeric deviation은 C5-3 FP16 characterization에서 관측된 값보다 커졌다.
+이 C5-4C run은 tolerance 정의 전에 실행한 characterization이므로 PASS/FAIL로 소급 분류하지 않는다.
+상태는 `TENSORRT_INT8_METRICS_COLLECTED_ACCEPTANCE_PENDING`,
+numeric acceptance는 `PENDING_TENSORRT_INT8_TOLERANCE_APPROVAL`로 유지한다.
+
+C5-4C evidence는 Git 밖
+`smart-factory-ai-platform-evidence/C5/C5-4C/c5_4c_tensorrt_int8_characterization_evidence.zip`
+에 보존한다. 다음 C5-4D에서 관측 결과를 근거로 INT8 acceptance policy v1을 별도 clean commit으로
+freeze한 뒤 C5-4E prospective verification을 수행한다.

@@ -141,7 +141,7 @@ Prospective verification에서 34개 acceptance check를 모두 통과해
 `TENSORRT_FP16_PARITY_ACCEPTED`를 확인했으며 C5-3 TensorRT FP16 parity lifecycle은 `CLOSED` 상태입니다.
 동일 validation measurement boundary에서 PyTorch FP32 GPU mean latency는 `31.131 ms`,
 TensorRT FP16 mean latency는 `25.844 ms`, speedup ratio는 약 `1.205x`로 관측됐습니다.
-C5-4B1에서는 train 84장만 사용한 ModelOpt INT8 PTQ로 explicit Q/DQ ONNX 생성을 완료했습니다. C5-4B2에서는 이 exact Q/DQ artifact를 source로 strongly typed TensorRT INT8 engine build를 완료했습니다. Exact engine은 외부 evidence로 보존했습니다. C5-4C에서는 이 engine을 rebuild하지 않고 validation 28장 metrics-only characterization하는 foundation을 준비하며 actual GPU run은 아직 실행하지 않았습니다.
+C5-4B1에서는 train 84장만 사용한 ModelOpt INT8 PTQ로 explicit Q/DQ ONNX 생성을 완료했습니다. C5-4B2에서는 이 exact Q/DQ artifact를 source로 strongly typed TensorRT INT8 engine build를 완료했습니다. Exact engine은 외부 evidence로 보존했습니다. C5-4C에서는 이 engine을 rebuild하지 않고 validation 28장 metrics-only characterization을 완료했습니다. PyTorch/INT8 prediction은 `19/19`, unmatched는 `0/0`, class agreement는 `1.0`이었고, same-session latency는 PyTorch FP32 `30.977 ms` 대비 TensorRT INT8 `27.640 ms`로 약 `1.121x` speedup이 관측됐습니다. Numeric acceptance는 아직 pending이며 C5-4D에서 별도 policy로 freeze합니다.
 
 자세한 C4 provenance와 quality/resource evidence는 [YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md),
 C5 export/parity contract와 test seal은 [YOLO Deployment Optimization](docs/vision/YOLO_DEPLOYMENT_OPTIMIZATION.md)에 기록되어 있습니다.
