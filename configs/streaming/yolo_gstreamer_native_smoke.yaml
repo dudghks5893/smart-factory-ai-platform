@@ -1,0 +1,25 @@
+schema_version: 1
+smoke_id: c6_2_yolo_gstreamer_native_smoke_v1
+required_plugins:
+  - videotestsrc
+  - videoconvert
+  - queue
+  - appsink
+  - uridecodebin
+  - x264enc
+  - h264parse
+  - mp4mux
+synthetic:
+  num_buffers: 30
+  pattern: ball
+fixture:
+  num_buffers: 30
+  width: 320
+  height: 240
+  framerate: 30
+  encoder:
+    name: x264enc
+    tune: zerolatency
+    speed_preset: ultrafast
+    key_int_max: 30
+output_root: outputs/streaming/yolo_gstreamer/c6_2_native_smoke

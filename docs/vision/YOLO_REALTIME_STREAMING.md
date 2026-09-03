@@ -21,7 +21,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | Stage | Status |
 |---|---|
 | C6-1 GStreamer ingress contract | `FROZEN / CONTRACT_COMMITTED` |
-| C6-2 Native GStreamer synthetic/file smoke test | `NOT STARTED` |
+| C6-2 Native GStreamer synthetic/file smoke test | `FOUNDATION / CANONICAL RUN PENDING` |
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `NOT STARTED` |
 | C6-4 RTSP reconnect/backpressure/observability | `NOT STARTED` |
 | C6-5 DeepStream GPU/NVMM integration | `NOT STARTED` |
@@ -102,3 +102,23 @@ C6-1 local validation 결과:
 
 이 결과를 기준으로 C6-1 ingress contract를 clean repository commit으로 freeze한다.
 실제 GStreamer executable과 plugin runtime은 C6-2에서 별도 검증한다.
+
+## 8. C6-2 Native GStreamer smoke foundation
+
+개발용 macOS에서 Homebrew GStreamer `1.28.6` 설치 후 ad-hoc preflight를 먼저 수행했다.
+`videotestsrc`, `videoconvert`, `queue`, `appsink`, `uridecodebin`, `x264enc`, `h264parse`,
+`mp4mux` plugin이 모두 발견됐고 synthetic live-like pipeline과 generated local MP4 decode가
+각각 exit code `0`으로 종료됐다. 이 preflight는 runtime availability 확인용이며 canonical
+repository evidence로 소급 사용하지 않는다.
+
+Canonical C6-2 run은 이 foundation을 clean commit으로 먼저 고정한 뒤 실행한다. Runner는:
+
+- exact repository commit과 clean working tree를 기록한다.
+- required GStreamer plugin 8개를 fail-closed로 확인한다.
+- 30-buffer `videotestsrc`를 C6-1 BGR/appsink boundary로 실행한다.
+- temporary 320×240, 30 FPS H264/MP4 fixture를 생성한다.
+- `uridecodebin`으로 fixture를 decode해 동일 BGR/appsink boundary를 검증한다.
+- `outputs/streaming/yolo_gstreamer/c6_2_native_smoke/` 아래 JSON evidence를 생성한다.
+- TensorRT inference, DeepStream, RTSP, final-test는 사용하지 않는다.
+
+C6-2 evidence는 runtime smoke evidence이며 model quality 또는 C5 parity acceptance를 다시 열지 않는다.
