@@ -23,7 +23,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-1 GStreamer ingress contract | `FROZEN / CONTRACT_COMMITTED` |
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
-| C6-4 RTSP reconnect/backpressure/observability | `NOT STARTED` |
+| C6-4 RTSP reconnect/backpressure/observability | `FOUNDATION / RTSP_RELIABILITY_CONTRACT_VALIDATION_PENDING` |
 | C6-5 DeepStream GPU/NVMM integration | `NOT STARTED` |
 | C6-6 Service integration and closure | `NOT STARTED` |
 
@@ -490,3 +490,61 @@ C6-3의 목적이었던 accepted C5-4 TensorRT INT8 backend의 GStreamer appsink
 다음 단계 C6-4에서 실제 RTSP source를 추가하고 reconnect, timeout, stale-frame/backpressure,
 stream health observability를 별도 contract와 runtime evidence로 검증한다. C6-3 acceptance는
 C6-4에서 threshold를 다시 조정하기 위한 근거로 소급 변경하지 않는다.
+
+## 17. C6-4A RTSP reconnect/backpressure/observability foundation
+
+C6-3가 `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED`로 종료됐으므로 C6-4에서는 model quality나
+TensorRT latency threshold를 다시 열지 않고, 실제 network stream에서 발생하는 연결 단절과
+stale frame을 운영 관점에서 다룬다.
+
+C6-4A는 **contract-only foundation**이다. 아직 실제 RTSP endpoint에 연결하지 않으며 TensorRT,
+DeepStream, dataset, validation/test/final-test를 실행하지 않는다.
+
+Inherited C6-3 identity:
+
+- C6-3 closure commit:
+  `2b23c1993e5a3c71567d7ea1a7c381ffa8754117`
+- state: `TENSORRT_INT8_STREAMING_ACCEPTED`
+- acceptance SHA-256:
+  `23b0717b114a579290de56babc5afdd09f6e71c3873b32e1547511c6e251a35e`
+- engine SHA-256:
+  `4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971`
+
+Initial RTSP source contract:
+
+- scheme: `rtsp://`
+- codec: `H264`
+- transport: `TCP`
+- URI source: `SMART_FACTORY_RTSP_URL` environment variable
+- GStreamer jitter latency: `200 ms`
+- connection timeout: `5000 ms`
+- frame stale boundary: `1500 ms`
+- `drop-on-latency=true`
+- credentials must be redacted from logs/evidence
+
+Backpressure remains inherited from C6-3:
+
+- mode: `latest_frame_wins`
+- queue: `max-size-buffers=1`, `leaky=downstream`
+- appsink: `framesink`, `max-buffers=1`, `drop=true`, `sync=false`
+
+Application-level reconnect contract:
+
+- retry events: GStreamer error, EOS, frame timeout
+- maximum reconnect attempts: `5`
+- backoff: `500 → 1000 → 2000 → 4000 → 8000 ms`
+- reconnect budget resets after `30` consecutive healthy frames
+- reconnect exhaustion is fail-closed
+
+Minimum stream-health observability:
+
+- states:
+  `DISCONNECTED`, `CONNECTING`, `STREAMING`, `STALE`, `RECONNECTING`, `FAILED`
+- counters:
+  connection attempts, reconnects, received/processed/dropped frames, errors, EOS, stale events
+- gauges:
+  stream up/down, seconds since last frame, current reconnect backoff
+
+These values are an operational reliability contract, not a new model-accuracy acceptance policy.
+C6-4B will exercise the frozen contract with a deterministic RTSP runtime/fault-injection smoke test before
+a real external camera endpoint is considered.

@@ -1,0 +1,69 @@
+schema_version: 1
+contract_id: c6_4a_yolo_rtsp_reliability_v1
+
+c6_3_identity:
+  closure_commit: 2b23c1993e5a3c71567d7ea1a7c381ffa8754117
+  acceptance_state: TENSORRT_INT8_STREAMING_ACCEPTED
+  acceptance_sha256: 23b0717b114a579290de56babc5afdd09f6e71c3873b32e1547511c6e251a35e
+  engine_sha256: 4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971
+
+source:
+  scheme: rtsp
+  codec: H264
+  transport: tcp
+  location_env: SMART_FACTORY_RTSP_URL
+  latency_ms: 200
+  connect_timeout_ms: 5000
+  frame_stale_after_ms: 1500
+  drop_on_latency: true
+
+backpressure:
+  mode: latest_frame_wins
+  queue_max_buffers: 1
+  queue_leaky: downstream
+  appsink_name: framesink
+  appsink_max_buffers: 1
+  appsink_drop: true
+  appsink_sync: false
+
+reconnect:
+  retryable_events:
+    - gst_error
+    - eos
+    - frame_timeout
+  max_reconnect_attempts: 5
+  initial_backoff_ms: 500
+  multiplier: 2.0
+  max_backoff_ms: 8000
+  reset_after_healthy_frames: 30
+  fail_closed_after_exhaustion: true
+
+observability:
+  states:
+    - DISCONNECTED
+    - CONNECTING
+    - STREAMING
+    - STALE
+    - RECONNECTING
+    - FAILED
+  counters:
+    - rtsp_connection_attempts_total
+    - rtsp_reconnects_total
+    - rtsp_frames_received_total
+    - rtsp_frames_processed_total
+    - rtsp_frames_dropped_total
+    - rtsp_errors_total
+    - rtsp_eos_total
+    - rtsp_stale_events_total
+  gauges:
+    - rtsp_stream_up
+    - rtsp_seconds_since_last_frame
+    - rtsp_current_backoff_seconds
+  redact_credentials: true
+
+foundation:
+  contract_only: true
+  actual_rtsp_used: false
+  tensorrt_inference_used: false
+  deepstream_used: false
+  final_test_used: false
