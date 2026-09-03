@@ -146,6 +146,8 @@ C5-4B1에서는 train 84장만 사용한 ModelOpt INT8 PTQ로 explicit Q/DQ ONNX
 자세한 C4 provenance와 quality/resource evidence는 [YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md),
 C5 export/parity contract와 test seal은 [YOLO Deployment Optimization](docs/vision/YOLO_DEPLOYMENT_OPTIMIZATION.md)에 기록되어 있습니다.
 
+**C6 real-time streaming**은 accepted TensorRT INT8 engine을 다시 최적화하지 않고 GStreamer 영상 ingress에 연결하는 단계입니다. C6-1에서는 `BGR uint8 HWC` appsink frame contract와 `latest_frame_wins` bounded backpressure를 먼저 고정하며, native GStreamer runtime, RTSP, TensorRT streaming inference와 DeepStream/NVMM은 후속 gate에서 분리해 검증합니다. 자세한 contract는 [YOLO Real-Time Streaming](docs/vision/YOLO_REALTIME_STREAMING.md)에 기록합니다.
+
 ## 5. Serving과 inspection data
 
 Vision API는 startup 시 검증된 PatchCore artifact를 한 번 load합니다. Optional YOLO segmentation singleton은 PatchCore prediction contract를 변경하지 않고 `/v1/known-defects`에서 compact known-defect instance를 제공합니다.

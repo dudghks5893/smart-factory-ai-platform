@@ -1,0 +1,33 @@
+schema_version: 1
+pipeline_id: c6_1_yolo_gstreamer_ingress_v1
+
+accepted_backend:
+  precision: int8
+  engine_sha256: 4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971
+  acceptance_policy_sha256: 938c06a099b681de9ac48d95132f423f5255ba4527f05d3f27f75d9eae5ad56c
+  acceptance_state: TENSORRT_INT8_PARITY_ACCEPTED
+  c5_4_closure_commit: 88e9b0b2440e99b6dfd2594bdc9a4947eff75187
+
+source:
+  kind: test
+  location: null
+  test_pattern: ball
+  is_live: true
+
+frame_contract:
+  pixel_format: BGR
+  dtype: uint8
+  layout: HWC
+  contiguous: true
+
+latency_policy:
+  mode: latest_frame_wins
+  queue_max_buffers: 1
+  queue_leaky: downstream
+  appsink_max_buffers: 1
+  appsink_drop: true
+  appsink_sync: false
+
+sink:
+  name: framesink
+  emit_signals: false
