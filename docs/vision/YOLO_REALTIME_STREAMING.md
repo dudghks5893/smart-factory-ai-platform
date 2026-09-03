@@ -22,7 +22,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 |---|---|
 | C6-1 GStreamer ingress contract | `FROZEN / CONTRACT_COMMITTED` |
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
-| C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CHARACTERIZED / STREAMING_POLICY_FREEZE_PENDING` |
+| C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `FROZEN / POLICY_COMMITTED_PROSPECTIVE_RUN_PENDING` |
 | C6-4 RTSP reconnect/backpressure/observability | `NOT STARTED` |
 | C6-5 DeepStream GPU/NVMM integration | `NOT STARTED` |
 | C6-6 Service integration and closure | `NOT STARTED` |
@@ -410,3 +410,11 @@ Structural gates additionally require:
 
 The next stage is C6-3D prospective execution. Acceptance or rejection must be based only on that
 fresh run, not on the C6-3B characterization used to design this policy.
+
+C6-3C policy identity:
+
+- policy commit: `ec72151bc595759f2de01671b487028fb8de74e1`
+- policy config SHA-256:
+  `6279cbfbbdcf2a57a1c69ad69158a45f73ea7be604bb255fbefddd9e9e78cd76`
+- state: `FROZEN / POLICY_COMMITTED_PROSPECTIVE_RUN_PENDING`
+- prospective C6-3D execution performed at policy-freeze time: `false`
