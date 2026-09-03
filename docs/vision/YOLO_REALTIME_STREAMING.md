@@ -22,7 +22,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 |---|---|
 | C6-1 GStreamer ingress contract | `FROZEN / CONTRACT_COMMITTED` |
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
-| C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `NOT STARTED` |
+| C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `FOUNDATION / PYTHON_FRAME_ADAPTER_PENDING` |
 | C6-4 RTSP reconnect/backpressure/observability | `NOT STARTED` |
 | C6-5 DeepStream GPU/NVMM integration | `NOT STARTED` |
 | C6-6 Service integration and closure | `NOT STARTED` |
@@ -165,3 +165,37 @@ C6-2는 native GStreamer source/decode/appsink boundary가 실제 macOS runtime�
 C6-5에서 DeepStream/NVMM contract를 별도로 검증한다.
 
 C6-2 final state: `CLOSED / NATIVE_SMOKE_ACCEPTED`.
+
+## 10. C6-3 Python frame adapter foundation
+
+C6-3 시작 전에 macOS local runtime에서 Python GStreamer binding을 별도 확인했다.
+
+- Homebrew GStreamer: `1.28.6`
+- project Python: `3.12.14`
+- PyGObject: `3.58.0`
+- PyCairo: `1.29.1`
+- streaming dependency group:
+  - `numpy==2.5.2`
+  - `pygobject>=3.58,<4`
+- ad-hoc appsink pull:
+  - format: `BGR`
+  - size: `320×240`
+  - bytes: `230400`
+  - result: `PASS`
+
+macOS에서는 Homebrew `libffi`가 keg-only이고 uv Python이 Homebrew GLib dylib search path를
+자동 상속하지 않으므로 `scripts/run_streaming_uv.sh`가 streaming runtime/build environment를
+한 곳에서 구성한다. 전역 shell profile 수정이나 Homebrew Python site-packages 재사용은 하지 않는다.
+
+C6-3 frame adapter foundation은 `GstBuffer → NumPy` 경계를 다음처럼 고정한다.
+
+- pixel format: `BGR`
+- dtype: `uint8`
+- layout: `HWC`
+- output memory: owned copy
+- output contiguity: `C-contiguous`
+- GstVideo row stride padding: 제거 후 packed frame으로 변환
+
+이 foundation은 아직 TensorRT engine을 load하거나 inference하지 않는다. C5-4 accepted INT8 engine
+identity와 final-test seal은 그대로 유지하며, Python frame boundary가 canonical runtime validation을
+통과한 뒤 NVIDIA GPU 환경에서 TensorRT streaming inference를 별도 시작한다.

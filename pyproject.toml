@@ -41,6 +41,10 @@ rag = [
     "pydantic==2.13.4",
     "uvicorn==0.52.4",
 ]
+streaming = [
+    "numpy==2.5.2",
+    "pygobject>=3.58,<4",
+]
 
 [tool.uv]
 default-groups = ["dev", "dashboard"]
