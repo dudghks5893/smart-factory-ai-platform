@@ -1,0 +1,34 @@
+schema_version: 1
+export_id: c5_4b2_yolo11n_seg_tensorrt_int8_qdq
+format: engine
+task: segment
+precision: int8_qdq
+batch: 1
+imgsz: 640
+dynamic: false
+workspace_gib: 4
+device: 0
+output_root: artifacts/deployment/yolo_segmentation/tensorrt_int8/engine
+
+source:
+  quantization_id: c5_4a_yolo11n_seg_tensorrt_int8_qdq_ptq
+  qdq_onnx_sha256: d7c9af3ab3c2f71e88de26be71abe80f113f2e1c359d2a532a24079fa9b4dd00
+  qdq_metadata_sha256: 8c3b215082ba111d4f932f4e021a9bc11866c49ecec788a52f20b2f9fe244fa7
+  qdq_evidence_zip_sha256: 00f925d0ce5f6106d441822e419a039a736831c0d2c13835cfd01b62fad50990
+  qdq_run_summary_sha256: c6b4dd790ae9a2ff312b9336d46c87f0efc03f3a2364ddda0b014a3f4405a60c
+  qdq_run_commit: 8e489c80ef9527a044b100cc96172d179947e051
+  qdq_int8_contract_sha256: 18309302e45855e506628bb5e262886fc2cb366f8758fc100c55aaf6dbf3c37a
+  qdq_opset: 19
+  quantize_linear_count: 211
+  dequantize_linear_count: 211
+  calibration_sample_count: 84
+  validation_used: false
+  test_used: false
+  test_split_used: false
+
+build:
+  explicit_quantization: true
+  strongly_typed_network: true
+  builder_int8_flag: false
+  builder_fp16_flag: false
+  legacy_calibrator: false

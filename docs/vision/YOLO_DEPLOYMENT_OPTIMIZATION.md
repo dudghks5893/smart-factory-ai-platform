@@ -16,8 +16,8 @@ C5는 C4에서 확정한 YOLO11n-seg candidate를 다시 학습하거나 선택�
 | C5-3C TensorRT FP16 acceptance policy v1 | `EXECUTED / PARITY_ACCEPTED` |
 | C5-3 TensorRT FP16 parity | `CLOSED` |
 | C5-4A INT8 explicit-Q/DQ PTQ contract | `FROZEN / CONTRACT_COMMITTED` |
-| C5-4B1 ModelOpt INT8 Q/DQ ONNX | `FOUNDATION / RUNTIME FIX LOCAL VALIDATION PASSED` |
-| C5-4B2 TensorRT INT8 engine | `NOT STARTED` |
+| C5-4B1 ModelOpt INT8 Q/DQ ONNX | `EXECUTED / INT8_QDQ_ONNX_QUANTIZED` |
+| C5-4B2 TensorRT INT8 engine | `FOUNDATION / LOCAL VALIDATION PENDING` |
 | C5-4C INT8 validation characterization | `NOT STARTED` |
 | C5-4D INT8 acceptance policy v1 | `NOT STARTED` |
 | C5-4E INT8 prospective verification | `NOT STARTED` |
@@ -575,3 +575,44 @@ ModelOpt version과 clean repository commit을 기록한다.
 
 C5-4B1에서 생성된 exact Q/DQ ONNX가 별도 evidence로 고정된 뒤에만 C5-4B2 TensorRT INT8
 engine build의 source로 사용한다.
+
+### 10.2 C5-4B1 actual ModelOpt INT8 Q/DQ result
+
+Runtime-fix commit `8e489c80ef9527a044b100cc96172d179947e051`의 clean Kaggle state에서 C5-4B1을 재실행했다.
+Exact accepted FP32 ONNX와 frozen train 84장만 사용했고 ModelOpt `0.46.0` entropy calibration은
+`CPUExecutionProvider`에서 수행했다. `val`과 final-test는 사용하지 않았다.
+
+- State: `INT8_QDQ_ONNX_QUANTIZED`
+- INT8 contract SHA-256: `18309302e45855e506628bb5e262886fc2cb366f8758fc100c55aaf6dbf3c37a`
+- Q/DQ ONNX SHA-256: `d7c9af3ab3c2f71e88de26be71abe80f113f2e1c359d2a532a24079fa9b4dd00`
+- Q/DQ metadata SHA-256: `8c3b215082ba111d4f932f4e021a9bc11866c49ecec788a52f20b2f9fe244fa7`
+- Run summary SHA-256: `c6b4dd790ae9a2ff312b9336d46c87f0efc03f3a2364ddda0b014a3f4405a60c`
+- Evidence ZIP SHA-256: `00f925d0ce5f6106d441822e419a039a736831c0d2c13835cfd01b62fad50990`
+- ONNX opset: `19`
+- `QuantizeLinear`: `211`
+- `DequantizeLinear`: `211`
+- Calibration samples: `84`
+- `validation_used=false`
+- `test_used=false`
+- `test_split_used=false`
+
+### 10.3 C5-4B2 TensorRT INT8 engine foundation
+
+C5-4B2 source는 위 C5-4B1의 exact Q/DQ ONNX와 metadata bytes로 고정한다. TensorRT engine build는
+Q/DQ graph를 다시 calibration하지 않고 explicit quantization으로 해석한다.
+
+- TensorRT network: `STRONGLY_TYPED`
+- Workspace: `4 GiB`
+- Static input: `1×3×640×640`
+- `BuilderFlag.INT8`: 사용하지 않음
+- `BuilderFlag.FP16`: 사용하지 않음
+- Legacy INT8 calibrator: 사용하지 않음
+- Source Q/DQ ONNX를 build 전후 SHA-256으로 재검증
+- Ultralytics-compatible segmentation metadata header 보존
+- Engine deserialize 후 input/output names/shapes와 device-memory observation 기록
+- `validation_used=false`
+- `test_used=false`
+- `test_split_used=false`
+
+실제 TensorRT engine은 이 foundation을 별도 clean commit으로 고정한 뒤 Kaggle Tesla T4에서 생성한다.
+C5-4B2는 engine build만 수행하며 validation characterization은 C5-4C까지 시작하지 않는다.
