@@ -19,7 +19,7 @@ C5는 C4에서 확정한 YOLO11n-seg candidate를 다시 학습하거나 선택�
 | C5-4B1 ModelOpt INT8 Q/DQ ONNX | `EXECUTED / INT8_QDQ_ONNX_QUANTIZED` |
 | C5-4B2 TensorRT INT8 engine | `EXECUTED / TENSORRT_INT8_ENGINE_BUILT` |
 | C5-4C INT8 validation characterization | `EXECUTED / CHARACTERIZATION_COMPLETED` |
-| C5-4D INT8 acceptance policy v1 | `NOT STARTED` |
+| C5-4D INT8 acceptance policy v1 | `FOUNDATION / LOCAL VALIDATION PENDING` |
 | C5-4E INT8 prospective verification | `NOT STARTED` |
 
 C5-1과 첫 C5-2 characterization은 clean detached Git commit
@@ -760,3 +760,77 @@ C5-4C evidence는 Git 밖
 `smart-factory-ai-platform-evidence/C5/C5-4C/c5_4c_tensorrt_int8_characterization_evidence.zip`
 에 보존한다. 다음 C5-4D에서 관측 결과를 근거로 INT8 acceptance policy v1을 별도 clean commit으로
 freeze한 뒤 C5-4E prospective verification을 수행한다.
+
+### 10.7 C5-4D TensorRT INT8 acceptance policy v1 foundation
+
+C5-4C characterization을 완료한 뒤, 그 run을 retrospective PASS로 재분류하지 않고
+C5-4E의 **새 prospective validation run**에 적용할 INT8 acceptance policy v1을 정의한다.
+
+Policy:
+
+`configs/deployment/yolo_tensorrt_int8_parity_acceptance.yaml`
+
+Exact deployment identity:
+
+- frozen source model SHA-256:
+  `e3fd10cdd708d31421feacfc5d694cb638e0ea60672e08796391b33aecf67155`
+- INT8 quantization contract SHA-256:
+  `18309302e45855e506628bb5e262886fc2cb366f8758fc100c55aaf6dbf3c37a`
+- TensorRT INT8 engine SHA-256:
+  `4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971`
+- engine metadata SHA-256:
+  `d44de78cc89fea67d6b351c2ba92f76dda0242386f4b6f14e216740ca682461e`
+- engine config SHA-256:
+  `63eebcac04d11c9247bf7543fe18d0798758ab20cc734d2b18bfbece4eaf6b41`
+- engine build commit:
+  `7835291c8fb123eba6acfa839977f94093c2f3ac`
+
+Runtime identity:
+
+- TensorRT `10.13.3.9.post1`
+- CUDA runtime `12.8`
+- Tesla T4 / compute capability `7.5`
+- PyTorch `2.10.0+cu128`
+- Ultralytics `8.4.128`
+
+Structural requirements:
+
+- `split=val`
+- validation samples `28`
+- `test_used=false`
+- `test_split_used=false`
+- structural gates passed
+- PyTorch / TensorRT INT8 prediction count 동일
+- unmatched prediction `0 / 0`
+- class agreement rate `1.0`
+- backend tensors finite
+- prospective evidence repository가 clean
+- prospective evidence commit이 frozen policy commit과 동일
+
+C5-4C 관측값은 confidence max `0.109782...`, box IoU min `0.938144...`,
+mask IoU min `0.940599...`였다. Exact observed 값을 threshold로 복사하지 않고
+INT8 quantization variation을 위한 modest rounded headroom을 둔다.
+
+Approved numeric tolerance proposal:
+
+- confidence absolute error max `<= 0.12`
+- box IoU min `>= 0.93`
+- mask IoU min `>= 0.93`
+
+이 tolerance는 GT 기반 model-quality threshold가 아니라 **exact frozen FP32 model과 INT8 runtime의
+deployment parity budget**이다. C4 final-test metric이나 candidate selection 기준을 다시 열지 않는다.
+
+Performance requirement:
+
+- benchmark scope: `ultralytics_end_to_end_single_image`
+- warmup `10`
+- measured `50`
+- TensorRT INT8 mean latency가 PyTorch FP32 GPU보다 빨라야 함
+- same-session speedup ratio `>= 1.05`
+
+C5-4C에서 same-session speedup은 `1.120738...x`였으며, `1.05x` floor는 관측값을 그대로 복사하지 않고
+기존 C5-3 FP16 deployment policy와 같은 최소 meaningful speedup 기준을 유지한다.
+
+C5-4C evidence commit은 policy보다 이전이므로 C5-4E acceptance input으로 재사용할 수 없다.
+Policy를 clean commit으로 freeze한 뒤 그 **동일 policy commit**에서 exact B2 engine을 rebuild 없이 복원해
+validation-only characterization을 새로 실행하고, 새 evidence에 policy v1을 적용한다.

@@ -1,0 +1,45 @@
+schema_version: 1
+policy_id: c5_4_yolo_tensorrt_int8_parity_v1
+backend:
+  reference: pytorch_fp32_gpu
+  candidate: tensorrt_int8_gpu
+identity:
+  source_experiment_id: c4_2c_yolo11n_seg_crop350_nomosaic_maskratio2_seed42
+  frozen_manifest_sha256: 2a26b1bc03a1876f828e12a625c69c76af5e8c5713e3f64be699feffe2e8aa09
+  source_model_sha256: e3fd10cdd708d31421feacfc5d694cb638e0ea60672e08796391b33aecf67155
+  int8_quantization_config_sha256: 18309302e45855e506628bb5e262886fc2cb366f8758fc100c55aaf6dbf3c37a
+  engine_export_id: c5_4b2_yolo11n_seg_tensorrt_int8_qdq
+  engine_sha256: 4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971
+  engine_metadata_sha256: d44de78cc89fea67d6b351c2ba92f76dda0242386f4b6f14e216740ca682461e
+  engine_config_sha256: 63eebcac04d11c9247bf7543fe18d0798758ab20cc734d2b18bfbece4eaf6b41
+  engine_evidence_zip_sha256: 0cba556981b12a95b25feb324d0ff02b9cadeda6bde056b46e27eb7698f66b00
+  engine_build_repository_commit: 7835291c8fb123eba6acfa839977f94093c2f3ac
+runtime:
+  tensorrt_version: 10.13.3.9.post1
+  cuda_runtime_version: "12.8"
+  gpu_name: Tesla T4
+  gpu_compute_capability: "7.5"
+  torch_version: 2.10.0+cu128
+  ultralytics_version: 8.4.128
+structural:
+  required_split: val
+  required_sample_count: 28
+  require_test_used_false: true
+  require_test_split_used_false: true
+  require_structural_gates_passed: true
+  require_prediction_count_match: true
+  require_zero_unmatched: true
+  require_class_agreement_rate: 1.0
+  require_all_tensors_finite: true
+  require_evidence_commit_match_policy: true
+numeric:
+  max_confidence_abs_error: 0.12
+  min_box_iou: 0.93
+  min_mask_iou: 0.93
+performance:
+  benchmark_scope: ultralytics_end_to_end_single_image
+  required_warmup_iterations: 10
+  required_measured_iterations: 50
+  require_candidate_faster: true
+  min_speedup_ratio: 1.05
+output_root: outputs/deployment/yolo_segmentation/tensorrt_int8_parity_acceptance
