@@ -22,7 +22,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 |---|---|
 | C6-1 GStreamer ingress contract | `FROZEN / CONTRACT_COMMITTED` |
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
-| C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `FROZEN / POLICY_COMMITTED_PROSPECTIVE_RUN_PENDING` |
+| C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
 | C6-4 RTSP reconnect/backpressure/observability | `NOT STARTED` |
 | C6-5 DeepStream GPU/NVMM integration | `NOT STARTED` |
 | C6-6 Service integration and closure | `NOT STARTED` |
@@ -418,3 +418,75 @@ C6-3C policy identity:
   `6279cbfbbdcf2a57a1c69ad69158a45f73ea7be604bb255fbefddd9e9e78cd76`
 - state: `FROZEN / POLICY_COMMITTED_PROSPECTIVE_RUN_PENDING`
 - prospective C6-3D execution performed at policy-freeze time: `false`
+
+## 16. C6-3D Prospective TensorRT INT8 streaming acceptance result
+
+C6-3D는 C6-3C policy를 먼저 commit한 뒤, docs-only closure commit
+`35f2405ec66257595f8b15b56253f0afa9556324`의 clean working tree에서 fresh prospective
+streaming characterization을 다시 실행했다. C6-3B metrics는 threshold 설계에만 사용했고,
+C6-3D acceptance에는 재사용하지 않았다.
+
+Frozen policy identity:
+
+- policy freeze commit:
+  `ec72151bc595759f2de01671b487028fb8de74e1`
+- policy config SHA-256:
+  `6279cbfbbdcf2a57a1c69ad69158a45f73ea7be604bb255fbefddd9e9e78cd76`
+
+Prospective runtime/backend identity:
+
+- repository commit:
+  `35f2405ec66257595f8b15b56253f0afa9556324`
+- TensorRT INT8 engine SHA-256:
+  `4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971`
+- TensorRT: `10.13.3.9.post1`
+- CUDA runtime: `12.8`
+- PyTorch: `2.10.0+cu128`
+- Ultralytics: `8.4.128`
+- GPU: `Tesla T4`, compute capability `7.5`
+- engine rebuilt: `false`
+- dataset / validation / test / final test / DeepStream used: `false`
+
+Fresh prospective result:
+
+- source: `180` buffers, `640×640`, `30 FPS`, `BGR`
+- processed frames: `180`
+- dropped frames: `0`
+- drop rate: `0.0`
+- observed processed FPS: `30.07497976161947`
+- frame adapter mean / p95:
+  `0.8436739444530557 / 1.0077304500100581 ms`
+- inference mean / p95:
+  `10.90899682778349 / 11.662175400113028 ms`
+- processing mean / p95:
+  `11.752670772236545 / 12.534434399981365 ms`
+- processing capacity from mean:
+  `85.08704271392595 FPS`
+- source frame period:
+  `33.333333333333336 ms`
+- acceptance gates: `31 / 31`
+- failed gates: `0`
+- state: `TENSORRT_INT8_STREAMING_ACCEPTED`
+
+C6-3D evidence identity:
+
+- prospective characterization SHA-256:
+  `6e8b0162c287ff27c9d9d7315328ade2cc1944f24ac0e31c8f3aa67bf8b0be19`
+- acceptance SHA-256:
+  `23b0717b114a579290de56babc5afdd09f6e71c3873b32e1547511c6e251a35e`
+- runtime preflight SHA-256:
+  `7d3a997c01e186121ccd5171400b83912c25ae5075e3a5ac1a56be632f54331a`
+- run summary SHA-256:
+  `65b07ea2cacc9fb1b9bb48b19a9b5b8bda81f7f63e4d78630ae4b48b0f34c281`
+- external evidence archive:
+  `smart-factory-ai-platform-evidence/C6/C6-3/C6-3D/c6_3d_tensorrt_int8_streaming_acceptance_evidence.zip`
+- external evidence archive SHA-256:
+  `c519af4f861a80df735cbc66f06660aa842321a689e8eb17ae1e3203736bf679`
+
+C6-3의 목적이었던 accepted C5-4 TensorRT INT8 backend의 GStreamer appsink streaming 연결과
+30 FPS prospective latency/throughput acceptance가 완료됐다. 따라서 C6-3 lifecycle은
+`CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED`로 종료한다.
+
+다음 단계 C6-4에서 실제 RTSP source를 추가하고 reconnect, timeout, stale-frame/backpressure,
+stream health observability를 별도 contract와 runtime evidence로 검증한다. C6-3 acceptance는
+C6-4에서 threshold를 다시 조정하기 위한 근거로 소급 변경하지 않는다.
