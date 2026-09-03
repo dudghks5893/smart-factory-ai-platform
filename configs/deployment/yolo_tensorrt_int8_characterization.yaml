@@ -1,0 +1,51 @@
+schema_version: 1
+characterization_id: c5_4c_yolo11n_seg_tensorrt_int8_validation
+output_root: outputs/deployment/yolo_segmentation/tensorrt_int8_characterization
+
+source:
+  int8_quantization_config_sha256: 18309302e45855e506628bb5e262886fc2cb366f8758fc100c55aaf6dbf3c37a
+  engine_export_id: c5_4b2_yolo11n_seg_tensorrt_int8_qdq
+  engine_sha256: 4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971
+  engine_metadata_sha256: d44de78cc89fea67d6b351c2ba92f76dda0242386f4b6f14e216740ca682461e
+  engine_run_summary_sha256: a5de13fc8e616b6071eebc0d76f0f88cdff32181e8d49db5cdd143113aef113f
+  engine_config_sha256: 63eebcac04d11c9247bf7543fe18d0798758ab20cc734d2b18bfbece4eaf6b41
+  engine_evidence_zip_sha256: 0cba556981b12a95b25feb324d0ff02b9cadeda6bde056b46e27eb7698f66b00
+  engine_build_repository_commit: 7835291c8fb123eba6acfa839977f94093c2f3ac
+  engine_tensorrt_version: 10.13.3.9.post1
+  engine_cuda_runtime_version: "12.8"
+  engine_gpu_name: Tesla T4
+  engine_gpu_compute_capability: "7.5"
+  engine_torch_version: 2.10.0+cu128
+  engine_ultralytics_version: 8.4.128
+
+characterization:
+  split: val
+  sample_count: 28
+  test_used: false
+  test_split_used: false
+  reference_backend: pytorch_fp32_gpu
+  candidate_backend: tensorrt_int8
+  comparison_baseline: accepted_tensorrt_fp16
+  diagnostic_confidence: 0.25
+  numeric_acceptance: PENDING_TENSORRT_INT8_TOLERANCE_APPROVAL
+  numeric_thresholds: null
+  benchmark:
+    warmup_iterations: 10
+    measured_iterations: 50
+    sample_selector: first_validation_sample
+    scope: ultralytics_end_to_end_single_image
+
+historical_fp16:
+  comparison_mode: historical_context_only_runtime_mismatch
+  acceptance_state: TENSORRT_FP16_PARITY_ACCEPTED
+  engine_sha256: 9bbbe5297e6cc55bcea877a79f45485ee7e1e5e6a831ad5276aedc8e3d904037
+  policy_sha256: 4f8f81a70417e380062358a9f3888d4fe0fa236fdfbc7b04da2616356833bfd9
+  tensorrt_version: 10.13.3.9.post1
+  cuda_runtime_version: "13.0"
+  gpu_name: Tesla T4
+  gpu_compute_capability: "7.5"
+  torch_version: 2.13.0+cu130
+  ultralytics_version: 8.4.128
+  pytorch_mean_latency_ms: 31.130911420002576
+  tensorrt_fp16_mean_latency_ms: 25.844023020001714
+  speedup_ratio: 1.2045690949860681

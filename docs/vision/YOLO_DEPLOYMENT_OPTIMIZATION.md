@@ -18,7 +18,7 @@ C5는 C4에서 확정한 YOLO11n-seg candidate를 다시 학습하거나 선택�
 | C5-4A INT8 explicit-Q/DQ PTQ contract | `FROZEN / CONTRACT_COMMITTED` |
 | C5-4B1 ModelOpt INT8 Q/DQ ONNX | `EXECUTED / INT8_QDQ_ONNX_QUANTIZED` |
 | C5-4B2 TensorRT INT8 engine | `EXECUTED / TENSORRT_INT8_ENGINE_BUILT` |
-| C5-4C INT8 validation characterization | `NOT STARTED` |
+| C5-4C INT8 validation characterization | `FOUNDATION / LOCAL VALIDATION PENDING` |
 | C5-4D INT8 acceptance policy v1 | `NOT STARTED` |
 | C5-4E INT8 prospective verification | `NOT STARTED` |
 
@@ -657,3 +657,37 @@ C5-4C validation-only characterization에서 별도로 측정한다.
 C5-4B2 evidence는 Git 밖
 `smart-factory-ai-platform-evidence/C5/C5-4B2/c5_4b2_tensorrt_int8_engine_evidence.zip`
 에 보존한다. C5-4C는 이 exact engine을 rebuild하지 않고 복원해 사용해야 한다.
+
+### 10.5 C5-4C INT8 validation characterization foundation
+
+C5-4C는 C5-4B2에서 보존한 exact TensorRT INT8 engine을 **rebuild하지 않고** 복원해
+PyTorch FP32 GPU reference와 validation-only parity/latency metrics를 수집한다.
+
+- INT8 engine SHA-256:
+  `4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971`
+- INT8 engine metadata SHA-256:
+  `d44de78cc89fea67d6b351c2ba92f76dda0242386f4b6f14e216740ca682461e`
+- C5-4B2 config SHA-256:
+  `63eebcac04d11c9247bf7543fe18d0798758ab20cc734d2b18bfbece4eaf6b41`
+- C5-4B2 evidence ZIP SHA-256:
+  `0cba556981b12a95b25feb324d0ff02b9cadeda6bde056b46e27eb7698f66b00`
+- Evaluated split: `val`
+- Validation samples: `28`
+- Final-test: sealed / not used
+- Reference backend: `pytorch_fp32_gpu`
+- Candidate backend: `tensorrt_int8`
+- Diagnostic confidence: `0.25`
+- Association/normalization: C5-3 및 frozen C5-4A contract와 동일
+- Latency: first validation sample, warmup `10`, measured `50`
+- Acceptance state: `PENDING_TENSORRT_INT8_TOLERANCE_APPROVAL`
+- Numeric thresholds: 없음
+
+C5-3에서 accepted된 TensorRT FP16 결과는 comparison context로 보존하지만, 당시 CUDA runtime은
+`13.0`이고 C5-4B2 exact INT8 engine build runtime은 `12.8`이다. 따라서 기존 FP16 latency를
+C5-4C의 same-runtime INT8 speedup denominator로 직접 사용하지 않는다. C5-4C에서 직접 측정하는 성능 비교는
+동일 session의 PyTorch FP32 GPU ↔ exact TensorRT INT8이며, FP16 수치는 historical accepted baseline으로
+별도 표시한다.
+
+C5-4C actual metrics를 관측하기 전에는 INT8 numeric tolerance를 정의하지 않는다. 관측 이후 C5-4D에서
+acceptance policy v1을 별도 clean commit으로 freeze하고, C5-4E에서 exact engine prospective verification을
+수행한다.
