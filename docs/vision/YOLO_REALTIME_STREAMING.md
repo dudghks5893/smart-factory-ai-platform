@@ -22,7 +22,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 |---|---|
 | C6-1 GStreamer ingress contract | `FROZEN / CONTRACT_COMMITTED` |
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
-| C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `FOUNDATION / PYTHON_FRAME_ACCEPTED_TRT_PENDING` |
+| C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `FOUNDATION / TRT_STREAM_CHARACTERIZATION_PENDING` |
 | C6-4 RTSP reconnect/backpressure/observability | `NOT STARTED` |
 | C6-5 DeepStream GPU/NVMM integration | `NOT STARTED` |
 | C6-6 Service integration and closure | `NOT STARTED` |
@@ -284,3 +284,61 @@ Evidence identity:
 
 Python frame validation은 C5 model quality/parity acceptance를 다시 열지 않으며,
 TensorRT streaming latency/throughput acceptance를 의미하지 않는다.
+
+## 13. C6-3B TensorRT INT8 streaming characterization foundation
+
+C6-3B는 accepted C5-4 TensorRT INT8 engine을 **rebuild하지 않고** exact bytes로 복원한 뒤,
+accepted Python `appsink → NumPy` boundary를 NVIDIA T4 runtime에 연결하는 첫 streaming
+characterization 단계다.
+
+Frozen backend identity:
+
+- C5 state: `TENSORRT_INT8_PARITY_ACCEPTED`
+- engine SHA-256:
+  `4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971`
+- engine metadata SHA-256:
+  `d44de78cc89fea67d6b351c2ba92f76dda0242386f4b6f14e216740ca682461e`
+- engine config SHA-256:
+  `63eebcac04d11c9247bf7543fe18d0798758ab20cc734d2b18bfbece4eaf6b41`
+- engine build commit: `7835291c8fb123eba6acfa839977f94093c2f3ac`
+- engine rebuild: `forbidden`
+
+Required TensorRT runtime:
+
+- TensorRT: `10.13.3.9.post1`
+- CUDA runtime: `12.8`
+- GPU: `Tesla T4`, compute capability `7.5`
+- PyTorch: `2.10.0+cu128`
+- Ultralytics: `8.4.128`
+- device: `cuda:0`
+
+Streaming characterization source:
+
+- `videotestsrc`, `pattern=ball`
+- `is-live=true`, `do-timestamp=true`
+- `180` source buffers
+- `640×640`, `30 FPS`, `BGR`
+- queue/appsink: `max-buffers=1`, latest-frame-wins
+- warmup: `10` TensorRT predictions before the measured streaming window
+
+Measured scope:
+
+`GStreamer appsink → owned NumPy BGR frame → Ultralytics TensorRT INT8 predict`
+
+Evidence will separately record:
+
+- frame adapter latency
+- TensorRT/Ultralytics inference latency
+- combined processing latency
+- source / processed / dropped frame counts and drop rate
+- observed processed FPS
+- mean-processing-derived capacity FPS
+- exact GPU/TensorRT/CUDA/PyTorch/Ultralytics/GStreamer runtime identity
+
+This first run is **metrics-only characterization**. Numeric streaming acceptance thresholds are deliberately
+`null` until the first clean T4 run is observed. Dataset, validation split, test split, final test, and
+DeepStream are not used.
+
+C6-3B expected post-run state:
+
+`TENSORRT_INT8_STREAMING_METRICS_COLLECTED_ACCEPTANCE_PENDING`

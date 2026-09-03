@@ -1,0 +1,67 @@
+schema_version: 1
+characterization_id: c6_3b_yolo11n_seg_tensorrt_int8_streaming_v1
+output_root: outputs/streaming/yolo_gstreamer/c6_3_tensorrt_int8_characterization
+
+python_frame_boundary:
+  acceptance_commit: 1a7419ef4c074d4ac1e49fd3deba23922dd8504d
+  validation_sha256: 83db8f1d40bd03ab457ded7829e576e189dbbc1d3fb1fb8384be4976e71929fc
+  config_sha256: 4c20bfc683e0e20a6bdd015ddfd8ef6d24fceab3f102e390ad55facef8320fe8
+  frame_sha256: e1851d821c8e04ae3f7e07e546e50a5b055b2a0ea38be00b9b4e2deac2bc852d
+  evidence_archive_sha256: c63860141627e2e0aa44a7cc897acb478352728fa22f7fd01f4ecd2ea087232a
+
+backend:
+  acceptance_state: TENSORRT_INT8_PARITY_ACCEPTED
+  c5_closure_commit: 88e9b0b2440e99b6dfd2594bdc9a4947eff75187
+  acceptance_policy_sha256: 938c06a099b681de9ac48d95132f423f5255ba4527f05d3f27f75d9eae5ad56c
+  engine_export_id: c5_4b2_yolo11n_seg_tensorrt_int8_qdq
+  engine_sha256: 4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971
+  engine_metadata_sha256: d44de78cc89fea67d6b351c2ba92f76dda0242386f4b6f14e216740ca682461e
+  engine_config_sha256: 63eebcac04d11c9247bf7543fe18d0798758ab20cc734d2b18bfbece4eaf6b41
+  engine_evidence_zip_sha256: 0cba556981b12a95b25feb324d0ff02b9cadeda6bde056b46e27eb7698f66b00
+  engine_build_commit: 7835291c8fb123eba6acfa839977f94093c2f3ac
+  engine_rebuild_allowed: false
+
+runtime:
+  tensorrt_version: 10.13.3.9.post1
+  cuda_runtime_version: "12.8"
+  gpu_name: Tesla T4
+  gpu_compute_capability: "7.5"
+  torch_version: 2.10.0+cu128
+  ultralytics_version: 8.4.128
+  device: 0
+
+stream:
+  source: videotestsrc
+  pattern: ball
+  is_live: true
+  do_timestamp: true
+  num_buffers: 180
+  width: 640
+  height: 640
+  framerate: 30
+  pixel_format: BGR
+  appsink_name: framesink
+  queue_max_buffers: 1
+  queue_leaky: downstream
+  appsink_max_buffers: 1
+  appsink_drop: true
+  appsink_sync: false
+
+inference:
+  imgsz: 640
+  conf: 0.001
+  iou: 0.7
+  max_det: 300
+  retina_masks: false
+  warmup_iterations: 10
+
+characterization:
+  scope: gstreamer_appsink_numpy_to_ultralytics_tensorrt_int8
+  metrics_only: true
+  numeric_thresholds: null
+  acceptance_state: PENDING_TENSORRT_STREAMING_TOLERANCE_APPROVAL
+  dataset_used: false
+  validation_used: false
+  test_used: false
+  final_test_used: false
+  deepstream_used: false
