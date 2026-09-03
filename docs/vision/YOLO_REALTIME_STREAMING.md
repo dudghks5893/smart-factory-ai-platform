@@ -22,7 +22,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 |---|---|
 | C6-1 GStreamer ingress contract | `FROZEN / CONTRACT_COMMITTED` |
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
-| C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `FOUNDATION / CANONICAL_FRAME_RUN_PENDING` |
+| C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `FOUNDATION / PYTHON_FRAME_ACCEPTED_TRT_PENDING` |
 | C6-4 RTSP reconnect/backpressure/observability | `NOT STARTED` |
 | C6-5 DeepStream GPU/NVMM integration | `NOT STARTED` |
 | C6-6 Service integration and closure | `NOT STARTED` |
@@ -231,3 +231,56 @@ runtime, GstVideo row stride, frame shape/dtype/ownership/contiguity, and frame 
 이 validation은 TensorRT engine을 load하지 않고 final test도 사용하지 않는다. Canonical frame
 boundary를 먼저 고정한 뒤 NVIDIA GPU runtime에서 accepted C5-4 INT8 backend streaming inference를
 별도 stage로 시작한다.
+
+## 12. C6-3 Canonical Python frame validation result
+
+Canonical Python frame validation은 foundation commit
+`bd7a59628afa2db13bfe96d3a2c64ad67e0869a6`의 clean working tree에서 실행했다.
+
+Runtime:
+
+- platform: `Darwin arm64`
+- Python: `3.12.14`
+- NumPy: `2.5.2`
+- PyGObject: `3.58.0`
+- PyCairo: `1.29.1`
+- GStreamer: `1.28.6`
+
+Canonical frame result:
+
+- source: `videotestsrc`, `pattern=ball`, `num-buffers=1`
+- caps: `BGR`, `320×240`
+- GstVideo stride: `960 bytes`
+- appsink: `framesink`
+- backpressure: `latest_frame_wins`
+- NumPy shape: `[240, 320, 3]`
+- dtype: `uint8`
+- frame bytes: `230400`
+- C-contiguous: `true`
+- owned memory: `true`
+- frame contract: `BGR/uint8/HWC/C-contiguous/owned`
+- state: `PYTHON_GSTREAMER_FRAME_ADAPTER_COMPLETED`
+- TensorRT inference used: `false`
+- DeepStream used: `false`
+- final test used: `false`
+
+Evidence identity:
+
+- canonical `validation.json` SHA-256:
+  `83db8f1d40bd03ab457ded7829e576e189dbbc1d3fb1fb8384be4976e71929fc`
+- C6-3 Python frame config SHA-256:
+  `4c20bfc683e0e20a6bdd015ddfd8ef6d24fceab3f102e390ad55facef8320fe8`
+- canonical frame SHA-256:
+  `e1851d821c8e04ae3f7e07e546e50a5b055b2a0ea38be00b9b4e2deac2bc852d`
+- external evidence archive:
+  `smart-factory-ai-platform-evidence/C6/C6-3/c6_3_python_gstreamer_frame_evidence.zip`
+- external evidence archive SHA-256:
+  `c63860141627e2e0aa44a7cc897acb478352728fa22f7fd01f4ecd2ea087232a`
+
+이 결과로 C6-3의 Python `appsink → NumPy` frame boundary는 accepted 상태로 고정한다.
+다만 C6-3 전체는 아직 종료하지 않는다. accepted C5-4 TensorRT INT8 engine을 NVIDIA GPU runtime에
+연결한 streaming inference와 end-to-end benchmark가 남아 있으므로 다음 상태는
+`FOUNDATION / PYTHON_FRAME_ACCEPTED_TRT_PENDING`이다.
+
+Python frame validation은 C5 model quality/parity acceptance를 다시 열지 않으며,
+TensorRT streaming latency/throughput acceptance를 의미하지 않는다.
