@@ -19,8 +19,9 @@ C5는 C4에서 확정한 YOLO11n-seg candidate를 다시 학습하거나 선택�
 | C5-4B1 ModelOpt INT8 Q/DQ ONNX | `EXECUTED / INT8_QDQ_ONNX_QUANTIZED` |
 | C5-4B2 TensorRT INT8 engine | `EXECUTED / TENSORRT_INT8_ENGINE_BUILT` |
 | C5-4C INT8 validation characterization | `EXECUTED / CHARACTERIZATION_COMPLETED` |
-| C5-4D INT8 acceptance policy v1 | `FOUNDATION / LOCAL VALIDATION PENDING` |
-| C5-4E INT8 prospective verification | `NOT STARTED` |
+| C5-4D INT8 acceptance policy v1 | `FROZEN / POLICY_COMMITTED` |
+| C5-4E INT8 prospective verification | `EXECUTED / PARITY_ACCEPTED` |
+| C5-4 TensorRT INT8 parity | `CLOSED` |
 
 C5-1과 첫 C5-2 characterization은 clean detached Git commit
 `643ed9386a61bd2bf0c041f92a10b809b6d52c3e`에서 Kaggle로 실행했다. 첫 parity run은
@@ -761,7 +762,7 @@ C5-4C evidence는 Git 밖
 에 보존한다. 다음 C5-4D에서 관측 결과를 근거로 INT8 acceptance policy v1을 별도 clean commit으로
 freeze한 뒤 C5-4E prospective verification을 수행한다.
 
-### 10.7 C5-4D TensorRT INT8 acceptance policy v1 foundation
+### 10.7 C5-4D TensorRT INT8 acceptance policy v1
 
 C5-4C characterization을 완료한 뒤, 그 run을 retrospective PASS로 재분류하지 않고
 C5-4E의 **새 prospective validation run**에 적용할 INT8 acceptance policy v1을 정의한다.
@@ -811,7 +812,7 @@ C5-4C 관측값은 confidence max `0.109782...`, box IoU min `0.938144...`,
 mask IoU min `0.940599...`였다. Exact observed 값을 threshold로 복사하지 않고
 INT8 quantization variation을 위한 modest rounded headroom을 둔다.
 
-Approved numeric tolerance proposal:
+Approved numeric tolerances:
 
 - confidence absolute error max `<= 0.12`
 - box IoU min `>= 0.93`
@@ -834,3 +835,65 @@ C5-4C에서 same-session speedup은 `1.120738...x`였으며, `1.05x` floor는 �
 C5-4C evidence commit은 policy보다 이전이므로 C5-4E acceptance input으로 재사용할 수 없다.
 Policy를 clean commit으로 freeze한 뒤 그 **동일 policy commit**에서 exact B2 engine을 rebuild 없이 복원해
 validation-only characterization을 새로 실행하고, 새 evidence에 policy v1을 적용한다.
+
+### 10.8 C5-4E prospective verification 결과와 C5-4 closure
+
+C5-4D acceptance policy v1을 repository commit
+`f9369f475b955fafb3ee990e2b2de63d04aa651f`에서 먼저 freeze한 뒤,
+같은 clean detached commit에서 C5-4B2 exact TensorRT INT8 engine을 rebuild 없이 복원해
+validation-only prospective characterization을 새로 실행했다. C5-4C pre-policy evidence는
+acceptance input으로 재사용하지 않았다.
+
+Frozen policy identity:
+
+- Policy ID: `c5_4_yolo_tensorrt_int8_parity_v1`
+- Policy SHA-256:
+  `938c06a099b681de9ac48d95132f423f5255ba4527f05d3f27f75d9eae5ad56c`
+- Policy repository commit:
+  `f9369f475b955fafb3ee990e2b2de63d04aa651f`
+- TensorRT INT8 engine SHA-256:
+  `4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971`
+- engine rebuild: `false`
+
+Prospective validation result:
+
+- validation samples: `28`
+- PyTorch / TensorRT INT8 predictions: `19 / 19`
+- matched instances: `19`
+- unmatched PyTorch / INT8: `0 / 0`
+- class agreement rate: `1.0`
+- confidence absolute error max:
+  `0.10978221893310547` (`<= 0.12`)
+- box IoU min / mean:
+  `0.9381443298969072 / 0.9718233538884476` (`min >= 0.93`)
+- mask IoU min / mean:
+  `0.9405993578308954 / 0.975080122673965` (`min >= 0.93`)
+- PyTorch FP32 GPU mean latency:
+  `32.65692755999339 ms`
+- TensorRT INT8 mean latency:
+  `28.274256820004666 ms`
+- same-session speedup:
+  `1.1550056918520981x` (`>= 1.05x`)
+- acceptance checks: `39 / 39 PASS`
+- final state: `TENSORRT_INT8_PARITY_ACCEPTED`
+- `test_used=false`
+- `test_split_used=false`
+
+Prospective artifact identity:
+
+- fresh characterization JSON SHA-256:
+  `4d70580a1f49442daea44c278ee051585c914cc006e1bc85b11b14bf4d6cbb6a`
+- acceptance JSON SHA-256:
+  `7652a0b2301e09cdac01593aadb01951ef46325beeb14ca857e0194829b6aecd`
+- run summary SHA-256:
+  `047e80e04702c1f8911f4ac96c3fe37bd890fce9b53a8440fe41635f44cee24c`
+- evidence ZIP SHA-256:
+  `ef4a4f1123a63ffe35ed12917bf6ae829b2c4a5892f4eaac43f9732c8e3ee638`
+
+Evidence archive는 Git 밖 아래 경로에 보존한다.
+
+`smart-factory-ai-platform-evidence/C5/C5-4E/c5_4e_tensorrt_int8_prospective_acceptance_evidence.zip`
+
+이번 prospective run도 final-test split을 열지 않았고 C4 candidate selection이나 model-quality gate를
+재평가하지 않았다. 따라서 C5-4는 exact frozen FP32 model과 TensorRT INT8 deployment backend 사이의
+validation-only parity lifecycle로서 `CLOSED`다.
