@@ -22,7 +22,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 |---|---|
 | C6-1 GStreamer ingress contract | `FROZEN / CONTRACT_COMMITTED` |
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
-| C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `FOUNDATION / PYTHON_FRAME_ADAPTER_PENDING` |
+| C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `FOUNDATION / CANONICAL_FRAME_RUN_PENDING` |
 | C6-4 RTSP reconnect/backpressure/observability | `NOT STARTED` |
 | C6-5 DeepStream GPU/NVMM integration | `NOT STARTED` |
 | C6-6 Service integration and closure | `NOT STARTED` |
@@ -199,3 +199,35 @@ C6-3 frame adapter foundation은 `GstBuffer → NumPy` 경계를 다음처럼 �
 이 foundation은 아직 TensorRT engine을 load하거나 inference하지 않는다. C5-4 accepted INT8 engine
 identity와 final-test seal은 그대로 유지하며, Python frame boundary가 canonical runtime validation을
 통과한 뒤 NVIDIA GPU 환경에서 TensorRT streaming inference를 별도 시작한다.
+
+## 11. C6-3 Canonical Python frame validation foundation
+
+Canonical Python frame validation은 clean repository commit에서 real PyGObject `appsink` sample을
+pull하고 `GstBuffer → NumPy` adapter의 실제 runtime result를 JSON evidence로 기록한다.
+
+Frozen validation source:
+
+- source: `videotestsrc`
+- buffers: `1`
+- pattern: `ball`
+- caps: `BGR`, `320×240`
+- appsink: `framesink`
+- backpressure: `latest_frame_wins`
+- expected NumPy boundary: `BGR/uint8/HWC/C-contiguous/owned`
+
+Canonical runner:
+
+```bash
+./scripts/run_streaming_uv.sh   python -m pipelines.run_yolo_gstreamer_python_frame
+```
+
+Evidence output root:
+
+`outputs/streaming/yolo_gstreamer/c6_3_python_frame/`
+
+Canonical evidence records the exact clean Git commit, local Python/PyGObject/PyCairo/NumPy/GStreamer
+runtime, GstVideo row stride, frame shape/dtype/ownership/contiguity, and frame SHA-256.
+
+이 validation은 TensorRT engine을 load하지 않고 final test도 사용하지 않는다. Canonical frame
+boundary를 먼저 고정한 뒤 NVIDIA GPU runtime에서 accepted C5-4 INT8 backend streaming inference를
+별도 stage로 시작한다.
