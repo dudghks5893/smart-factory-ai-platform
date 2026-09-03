@@ -1,0 +1,58 @@
+schema_version: 1
+policy_id: c6_3c_yolo11n_seg_tensorrt_int8_streaming_acceptance_v1
+output_root: outputs/streaming/yolo_gstreamer/c6_3_tensorrt_int8_streaming_acceptance
+
+characterization_source:
+  characterization_id: c6_3b_yolo11n_seg_tensorrt_int8_streaming_v1
+  state: TENSORRT_INT8_STREAMING_METRICS_COLLECTED_ACCEPTANCE_PENDING
+  repository_commit: 8e982aeb011f6d1d92a90ad53e0a9541cd3c441a
+  characterization_sha256: 97a4c1b233354ed362d40499e9a8e4af1b678385a6ed63a3bb394d963eb5f627
+  config_sha256: 594acd505cf9ab1bdc8fbaf4028a50a8e3f475ded1f147783e844397fa3b3f8c
+  runtime_preflight_sha256: 7d3a997c01e186121ccd5171400b83912c25ae5075e3a5ac1a56be632f54331a
+  run_summary_sha256: f1c03e4c73a5c4dd75eb80158c5a565ace045bd1d81bdf5a1d8187e2fddad042
+  evidence_archive_sha256: f6a9f994c2efa7e38954a256fdfcdaef4792edfe46ba7c0580add59130677bb7
+
+backend:
+  engine_sha256: 4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971
+  engine_metadata_sha256: d44de78cc89fea67d6b351c2ba92f76dda0242386f4b6f14e216740ca682461e
+  engine_config_sha256: 63eebcac04d11c9247bf7543fe18d0798758ab20cc734d2b18bfbece4eaf6b41
+  engine_build_commit: 7835291c8fb123eba6acfa839977f94093c2f3ac
+  engine_rebuild_required_false: true
+
+runtime:
+  tensorrt_version: 10.13.3.9.post1
+  cuda_runtime_version: "12.8"
+  gpu_name: Tesla T4
+  gpu_compute_capability: "7.5"
+  torch_version: 2.10.0+cu128
+  ultralytics_version: 8.4.128
+
+stream:
+  source_buffers: 180
+  framerate: 30
+  width: 640
+  height: 640
+  pixel_format: BGR
+  latest_frame_wins: true
+
+structural:
+  require_clean_repository: true
+  require_evidence_commit_match_current_repository: true
+  require_dataset_used_false: true
+  require_validation_used_false: true
+  require_test_used_false: true
+  require_final_test_used_false: true
+  require_deepstream_used_false: true
+  require_engine_rebuilt_false: true
+
+performance:
+  max_drop_rate: 0.01
+  min_processed_frames: 179
+  min_observed_processed_fps: 29.0
+  max_frame_adapter_p95_ms: 1.5
+  max_inference_mean_ms: 13.0
+  max_inference_p95_ms: 15.0
+  max_processing_mean_ms: 14.0
+  max_processing_p95_ms: 16.0
+  min_processing_capacity_fps: 70.0
+  require_processing_p95_below_source_period: true

@@ -22,7 +22,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 |---|---|
 | C6-1 GStreamer ingress contract | `FROZEN / CONTRACT_COMMITTED` |
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
-| C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `FOUNDATION / TRT_STREAM_CHARACTERIZATION_PENDING` |
+| C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CHARACTERIZED / STREAMING_POLICY_FREEZE_PENDING` |
 | C6-4 RTSP reconnect/backpressure/observability | `NOT STARTED` |
 | C6-5 DeepStream GPU/NVMM integration | `NOT STARTED` |
 | C6-6 Service integration and closure | `NOT STARTED` |
@@ -342,3 +342,71 @@ DeepStream are not used.
 C6-3B expected post-run state:
 
 `TENSORRT_INT8_STREAMING_METRICS_COLLECTED_ACCEPTANCE_PENDING`
+
+## 14. C6-3B TensorRT INT8 streaming characterization result
+
+Canonical C6-3B run executed on foundation commit
+`8e982aeb011f6d1d92a90ad53e0a9541cd3c441a` with the exact accepted C5-4 INT8 engine.
+
+Result:
+
+- state: `TENSORRT_INT8_STREAMING_METRICS_COLLECTED_ACCEPTANCE_PENDING`
+- source: `180` buffers, `640×640`, `30 FPS`, `BGR`
+- processed: `180`
+- dropped: `0`
+- drop rate: `0.0`
+- observed processed FPS: `30.067046090149177`
+- frame adapter mean / p95: `0.578469111115333 / 0.6632636999825081 ms`
+- inference mean / p95: `10.586373727777401 / 11.002993050067289 ms`
+- processing mean / p95: `11.164842838892733 / 11.591202700094527 ms`
+- processing capacity from mean: `89.56686757080894 FPS`
+- source frame period: `33.333333333333336 ms`
+- engine rebuilt: `false`
+- dataset / validation / test / final test / DeepStream used: `false`
+
+Evidence identity:
+
+- characterization SHA-256:
+  `97a4c1b233354ed362d40499e9a8e4af1b678385a6ed63a3bb394d963eb5f627`
+- config SHA-256:
+  `594acd505cf9ab1bdc8fbaf4028a50a8e3f475ded1f147783e844397fa3b3f8c`
+- runtime preflight SHA-256:
+  `7d3a997c01e186121ccd5171400b83912c25ae5075e3a5ac1a56be632f54331a`
+- run summary SHA-256:
+  `f1c03e4c73a5c4dd75eb80158c5a565ace045bd1d81bdf5a1d8187e2fddad042`
+- external evidence ZIP SHA-256:
+  `f6a9f994c2efa7e38954a256fdfcdaef4792edfe46ba7c0580add59130677bb7`
+
+## 15. C6-3C Prospective streaming acceptance policy v1
+
+C6-3B was deliberately threshold-free. The following policy is defined **after** characterization and must
+be committed before a fresh prospective C6-3D run. C6-3B itself is not retroactively accepted by these
+thresholds.
+
+Performance gates:
+
+- drop rate `<= 0.01`
+- processed frames `>= 179 / 180`
+- observed processed FPS `>= 29.0`
+- frame adapter p95 `<= 1.5 ms`
+- inference mean `<= 13.0 ms`
+- inference p95 `<= 15.0 ms`
+- processing mean `<= 14.0 ms`
+- processing p95 `<= 16.0 ms`
+- processing capacity from mean `>= 70 FPS`
+- processing p95 must remain below the `33.333... ms` 30 FPS source frame period
+
+These thresholds retain explicit headroom from the first C6-3B observation while still requiring
+30 FPS real-time viability. At most one of the fixed 180 source frames may be dropped under the
+`0.01` drop-rate gate.
+
+Structural gates additionally require:
+
+- a fresh clean repository run after this policy is committed
+- prospective characterization commit equals the current policy repository commit
+- exact accepted C5-4 INT8 engine and T4 runtime identity
+- `engine_rebuilt=false`
+- dataset / validation / test / final test / DeepStream all unused
+
+The next stage is C6-3D prospective execution. Acceptance or rejection must be based only on that
+fresh run, not on the C6-3B characterization used to design this policy.
