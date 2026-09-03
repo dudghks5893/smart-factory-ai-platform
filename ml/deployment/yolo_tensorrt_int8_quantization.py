@@ -190,6 +190,20 @@ class Int8CalibrationDataReader:
         self._index = 0
 
     # ADD 2026-09-02: Manifest sample_id 순서대로 train image 한 장씩 calibration batch로 제공한다.
+    # MODIFY 2026-09-03: ModelOpt 0.46.0의 사전 inference가 요구하는
+    # non-consuming get_first contract를 지원한다.
+    def get_first(self) -> dict[str, NDArray[np.float32]]:
+        if not self._records:
+            raise ValueError("C5-4B1 calibration reader has no train records.")
+        record = self._records[0]
+        image_path = self._dataset_root / record.image_path
+        return {
+            self._config.calibration.input_name: preprocess_calibration_image(
+                image_path,
+                imgsz=self._config.imgsz,
+            )
+        }
+
     def get_next(self) -> dict[str, NDArray[np.float32]] | None:
         if self._index >= len(self._records):
             return None

@@ -16,7 +16,7 @@ C5는 C4에서 확정한 YOLO11n-seg candidate를 다시 학습하거나 선택�
 | C5-3C TensorRT FP16 acceptance policy v1 | `EXECUTED / PARITY_ACCEPTED` |
 | C5-3 TensorRT FP16 parity | `CLOSED` |
 | C5-4A INT8 explicit-Q/DQ PTQ contract | `FROZEN / CONTRACT_COMMITTED` |
-| C5-4B1 ModelOpt INT8 Q/DQ ONNX | `FOUNDATION / LOCAL VALIDATION PENDING` |
+| C5-4B1 ModelOpt INT8 Q/DQ ONNX | `FOUNDATION / RUNTIME FIX LOCAL VALIDATION PASSED` |
 | C5-4B2 TensorRT INT8 engine | `NOT STARTED` |
 | C5-4C INT8 validation characterization | `NOT STARTED` |
 | C5-4D INT8 acceptance policy v1 | `NOT STARTED` |
@@ -552,6 +552,7 @@ Implementation boundary:
 - Calibration method: `entropy`
 - Calibration execution provider: `cpu`
 - Calibration reader: one image per batch, manifest `sample_id` ascending
+- ModelOpt reader API: non-consuming `get_first()` + sequential `get_next()` + `rewind()`
 - Preprocess: static `640×640` letterbox, BGR→RGB, NCHW, FP32, `/255`
 - High precision dtype: `fp16`
 - ONNX simplify: `false`
@@ -559,6 +560,14 @@ Implementation boundary:
 - Source/candidate external input and output names/shapes must remain identical
 - Validation used: `false`
 - Final-test used: `false`
+
+첫 clean Kaggle runtime attempt는 foundation commit
+`4c9d01a59c89f63217be71453ec45ff0405e3250`에서 exact source/dataset identity와 ModelOpt `0.46.0`
+preflight를 통과하고 source ONNX를 opset 19 clone까지 진행했지만, ModelOpt 내부 사전 inference가
+calibration reader의 `get_first()`를 요구해 calibration 시작 전에 `AttributeError`로 중단됐다.
+이 실행에서는 Q/DQ ONNX와 evidence package를 생성하지 않았으며 C5-4B2도 시작하지 않았다.
+Runtime fix는 `get_first()`를 non-consuming으로 추가해 subsequent `get_next()`가 첫 train sample부터
+84장 전체를 그대로 소비하도록 하고, 이 계약을 unit test로 고정한다.
 
 C5-4B1 output은 ignored artifact namespace에 quantized ONNX와 deterministic provenance metadata로
 보존한다. Metadata에는 source/config/dataset SHA-256, calibration sample ID digest, Q/DQ node count,

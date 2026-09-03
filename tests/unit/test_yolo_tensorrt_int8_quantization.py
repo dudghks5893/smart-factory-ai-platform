@@ -5,10 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import onnx
 import pytest
 from onnx import TensorProto, helper
 
+import ml.deployment.yolo_tensorrt_int8_quantization as int8_quantization
 from ml.datasets.yolo_segmentation_manifest import DerivedManifestRecord
 from ml.deployment.yolo_tensorrt_int8 import (
     DEFAULT_TENSORRT_INT8_CONFIG,
@@ -16,6 +18,7 @@ from ml.deployment.yolo_tensorrt_int8 import (
 )
 from ml.deployment.yolo_tensorrt_int8_quantization import (
     CALIBRATION_EXECUTION_PROVIDERS,
+    Int8CalibrationDataReader,
     QdqGraphContract,
     calibration_sample_ids_sha256,
     inspect_qdq_graph,
@@ -68,6 +71,47 @@ def test_calibration_sample_ids_digest_is_deterministic() -> None:
     assert first == second
     assert first != reversed_digest
     assert len(first) == 64
+
+
+# ADD 2026-09-03: ModelOpt 0.46.0용 get_first가 iterator를 소비하지 않는지 검증한다.
+def test_calibration_reader_get_first_is_non_consuming(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = load_yolo_tensorrt_int8_config(DEFAULT_TENSORRT_INT8_CONFIG)
+    records = (_record(0), _record(1))
+    observed: list[str] = []
+
+    def fake_preprocess(image_path: Path, *, imgsz: int) -> np.ndarray:
+        observed.append(image_path.name)
+        assert imgsz == 640
+        return np.zeros((1, 3, 640, 640), dtype=np.float32)
+
+    monkeypatch.setattr(
+        int8_quantization,
+        "preprocess_calibration_image",
+        fake_preprocess,
+    )
+    reader = Int8CalibrationDataReader(
+        dataset_root=Path("/dataset"),
+        records=records,
+        config=config,
+    )
+
+    first = reader.get_first()
+    first_again = reader.get_first()
+    next_first = reader.get_next()
+    next_second = reader.get_next()
+
+    assert first[config.calibration.input_name].shape == (1, 3, 640, 640)
+    assert first_again[config.calibration.input_name].shape == (1, 3, 640, 640)
+    assert next_first is not None
+    assert next_second is not None
+    assert observed == [
+        "sample-000.png",
+        "sample-000.png",
+        "sample-000.png",
+        "sample-001.png",
+    ]
 
 
 # ADD 2026-09-02: ModelOpt 호출 kwargs가 frozen INT8 PTQ contract와 일치하는지 검증한다.
