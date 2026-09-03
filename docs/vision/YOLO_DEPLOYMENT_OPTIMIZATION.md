@@ -17,7 +17,7 @@ C5는 C4에서 확정한 YOLO11n-seg candidate를 다시 학습하거나 선택�
 | C5-3 TensorRT FP16 parity | `CLOSED` |
 | C5-4A INT8 explicit-Q/DQ PTQ contract | `FROZEN / CONTRACT_COMMITTED` |
 | C5-4B1 ModelOpt INT8 Q/DQ ONNX | `EXECUTED / INT8_QDQ_ONNX_QUANTIZED` |
-| C5-4B2 TensorRT INT8 engine | `FOUNDATION / LOCAL VALIDATION PENDING` |
+| C5-4B2 TensorRT INT8 engine | `EXECUTED / TENSORRT_INT8_ENGINE_BUILT` |
 | C5-4C INT8 validation characterization | `NOT STARTED` |
 | C5-4D INT8 acceptance policy v1 | `NOT STARTED` |
 | C5-4E INT8 prospective verification | `NOT STARTED` |
@@ -614,5 +614,46 @@ Q/DQ graph를 다시 calibration하지 않고 explicit quantization으로 해석
 - `test_used=false`
 - `test_split_used=false`
 
-실제 TensorRT engine은 이 foundation을 별도 clean commit으로 고정한 뒤 Kaggle Tesla T4에서 생성한다.
-C5-4B2는 engine build만 수행하며 validation characterization은 C5-4C까지 시작하지 않는다.
+이 foundation을 clean commit으로 고정한 뒤 Kaggle Tesla T4에서 exact Q/DQ artifact로
+TensorRT INT8 engine build를 실행했다. C5-4B2는 engine build까지만 수행했으며
+validation characterization은 C5-4C까지 시작하지 않았다.
+
+### 10.4 C5-4B2 actual TensorRT INT8 engine result
+
+Foundation commit `7835291c8fb123eba6acfa839977f94093c2f3ac`을 clean detached checkout한
+Kaggle Tesla T4 환경에서 exact C5-4B1 Q/DQ ONNX를 source로 TensorRT INT8 engine을 생성했다.
+
+- State: `TENSORRT_INT8_ENGINE_BUILT`
+- TensorRT: `10.13.3.9.post1`
+- GPU: `Tesla T4`, compute capability `7.5`
+- PyTorch runtime observation: `2.10.0+cu128`
+- CUDA runtime observation: `12.8`
+- Source Q/DQ ONNX SHA-256: `d7c9af3ab3c2f71e88de26be71abe80f113f2e1c359d2a532a24079fa9b4dd00`
+- C5-4B2 config SHA-256: `63eebcac04d11c9247bf7543fe18d0798758ab20cc734d2b18bfbece4eaf6b41`
+- Engine SHA-256: `4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971`
+- Engine size: `7,607,387` bytes
+- TensorRT device memory observation: `19,061,760` bytes
+- Engine metadata SHA-256: `d44de78cc89fea67d6b351c2ba92f76dda0242386f4b6f14e216740ca682461e`
+- Run summary SHA-256: `a5de13fc8e616b6071eebc0d76f0f88cdff32181e8d49db5cdd143113aef113f`
+- Evidence ZIP SHA-256: `0cba556981b12a95b25feb324d0ff02b9cadeda6bde056b46e27eb7698f66b00`
+- Input `images`: `DataType.FLOAT`, `(1, 3, 640, 640)`
+- Output `output0`: `DataType.FLOAT`, `(1, 39, 8400)`
+- Output `output1`: `DataType.FLOAT`, `(1, 32, 160, 160)`
+- `explicit_quantization=true`
+- `strongly_typed_network=true`
+- `builder_int8_flag=false`
+- `builder_fp16_flag=false`
+- `legacy_calibrator=false`
+- `validation_used=false`
+- `test_used=false`
+- `test_split_used=false`
+
+TensorRT tactic search 중 일부 Myelin dequantization tactic에서
+`No matching rules found for input operand types` 진단이 출력됐지만 해당 tactic들이 skip된 뒤
+serialized engine build, engine deserialization, frozen external I/O contract 검증이 모두 성공했다.
+따라서 이 메시지를 C5-4B2 build failure로 분류하지 않는다. 다만 실제 INT8 품질과 latency 효과는
+C5-4C validation-only characterization에서 별도로 측정한다.
+
+C5-4B2 evidence는 Git 밖
+`smart-factory-ai-platform-evidence/C5/C5-4B2/c5_4b2_tensorrt_int8_engine_evidence.zip`
+에 보존한다. C5-4C는 이 exact engine을 rebuild하지 않고 복원해 사용해야 한다.
