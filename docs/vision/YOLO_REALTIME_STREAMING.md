@@ -24,7 +24,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
 | C6-4 RTSP reconnect/backpressure/observability | `CLOSED / RTSP_RELIABILITY_ACCEPTED` |
-| C6-5 DeepStream GPU/NVMM integration | `NOT STARTED` |
+| C6-5 DeepStream GPU/NVMM integration | `C6-5A CLOSED / C6-5B NVMM_SMOKE_PENDING` |
 | C6-6 Service integration and closure | `NOT STARTED` |
 
 ## 3. Why GStreamer first
@@ -737,3 +737,80 @@ C6-4 closure:
 
 따라서 C6-4 RTSP reconnect/backpressure/observability stage를
 `CLOSED / RTSP_RELIABILITY_ACCEPTED`로 종료한다. 다음 단계는 C6-5 DeepStream GPU/NVMM integration이다.
+
+## 22. C6-5A DeepStream runtime compatibility observation
+
+C6-5A에서는 C5에서 acceptance가 끝난 exact TensorRT INT8 engine을 변경하거나
+재빌드하지 않고, GCP NVIDIA L4의 DeepStream 9.1 runtime에서 deserialize-only
+compatibility를 확인했다.
+
+Canonical foundation:
+
+- foundation/run commit:
+  `09722a7ee79e4120df37a8cc0a79d8d08ccc099a`
+- C5 closure commit:
+  `88e9b0b2440e99b6dfd2594bdc9a4947eff75187`
+- C5 engine build commit:
+  `7835291c8fb123eba6acfa839977f94093c2f3ac`
+- exact C5 engine SHA-256:
+  `4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971`
+- engine file bytes:
+  `7607387`
+- Ultralytics container header length:
+  `155`
+- serialized TensorRT plan bytes:
+  `7607228`
+
+Canonical runtime:
+
+- GPU: `NVIDIA L4`
+- compute capability: `8.9`
+- NVIDIA driver: `595.84`
+- DeepStream: `9.1.0`
+- TensorRT Python: `10.16.1.11`
+- DeepStream image:
+  `nvcr.io/nvidia/deepstream:9.1-samples-multiarch`
+- exact image digest:
+  `nvcr.io/nvidia/deepstream@sha256:4f80b374e4a5086552825fe0f5bdd015c8cfd3dbe430cdde5ce9572e80e01583`
+
+Canonical observation:
+
+- state:
+  `C5_ENGINE_DEEPSTREAM_RUNTIME_INCOMPATIBLE`
+- compatibility:
+  `incompatible`
+- reason:
+  `TENSORRT_VERSION_INCOMPATIBLE`
+- TensorRT reported that the engine plan file is not compatible with the
+  current TensorRT version.
+- current evidence supports TensorRT plan version incompatibility; it does not
+  establish hardware incompatibility.
+- inference executed: `false`
+- engine rebuilt: `false`
+- dataset used: `false`
+- validation used: `false`
+- test used: `false`
+- final test used: `false`
+
+Evidence identity:
+
+- compatibility config SHA-256:
+  `293f4f401929058ec10015112e3aa4657dc64eec46263b175e6d8d1b53f1ab38`
+- canonical compatibility JSON SHA-256:
+  `e21e698203d45dbafc439cbc6491d8a7dbb7c1826bd6681bbca7931617260ba9`
+- canonical `run_summary.json` SHA-256:
+  `aa333ce1885f0a41cb75f5843ee68009a8bb7ce27cf78e6d239c47ecfde9fab3`
+- deterministic evidence archive SHA-256:
+  `7e6f9389932e7c4db1011360fe2a31b88746a7da8439b980142e7bd1f4a6dd81`
+- archive bytes:
+  `3507`
+
+C6-5A는 기존 C5 engine을 DeepStream/L4 runtime에 맞춰 재빌드하는 단계가 아니다.
+따라서 accepted C5 artifact는 immutable하게 유지한다.
+
+이 observation에 따라 이후 DeepStream inference에서 필요하다면 C5 accepted Q/DQ ONNX
+lineage를 사용해 별도의 DeepStream/L4 deployment artifact를 생성한다. 기존 C5 engine을
+덮어쓰거나 C5 acceptance identity를 변경하지 않는다.
+
+다음 단계인 C6-5B에서는 inference를 연결하기 전에 NVIDIA hardware decode와 NVMM
+GPU-memory path를 독립적으로 검증한다.
