@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "decoder_id": "c6_5d_yolo11n_seg_deepstream_decoder_v1",
+  "c6_5c_closure_commit": "44f7802e89cf138f7db1160125b98180dadaef8e",
+  "engine": {
+    "relative_path": "artifacts/deployment/yolo_segmentation/deepstream_l4/tensorrt_int8/c6_5c_deepstream_l4_yolo11n_seg_int8_qdq_v1/model.plan",
+    "sha256": "97acd724809f4817ad4a95525a1bafae6294b1a7c99e04c12d451eeda878866e",
+    "size_bytes": 4940452,
+    "immutable": true
+  },
+  "model": {
+    "network_width": 640,
+    "network_height": 640,
+    "classes": {
+      "0": "bent",
+      "1": "color",
+      "2": "scratch"
+    },
+    "output0": {
+      "name": "output0",
+      "channels": 39,
+      "anchors": 8400,
+      "layout": "channel_major"
+    },
+    "output1": {
+      "name": "output1",
+      "channels": 32,
+      "height": 160,
+      "width": 160,
+      "layout": "chw"
+    }
+  },
+  "postprocess": {
+    "confidence_threshold": 0.25,
+    "nms_iou_threshold": 0.7,
+    "max_detections": 300,
+    "mask_threshold": 0.5,
+    "class_agnostic_nms": false,
+    "mask_representation": "bbox_local_sigmoid_probability",
+    "mask_sampling": "bilinear_half_pixel"
+  },
+  "deepstream": {
+    "network_type": 3,
+    "cluster_mode": 4,
+    "output_instance_mask": true,
+    "output_tensor_meta": true,
+    "maintain_aspect_ratio": true,
+    "symmetric_padding": true,
+    "parser_symbol": "NvDsInferParseYolo11Seg",
+    "parser_library": "/work/libc6_5d_yolo11_seg_parser.so",
+    "label_file": "/work/c6_5d_labels.txt",
+    "segmentation_threshold": 0.5
+  },
+  "policy": {
+    "network_allowed": false,
+    "engine_rebuild_allowed": false,
+    "segmentation_decode_allowed": true,
+    "instance_metadata_allowed": true,
+    "overlay_allowed": false,
+    "annotated_video_allowed": false,
+    "dataset_used": false,
+    "validation_used": false,
+    "test_used": false,
+    "final_test_used": false
+  }
+}

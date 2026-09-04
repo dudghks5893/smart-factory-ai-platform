@@ -1,0 +1,56 @@
+# syntax=docker/dockerfile:1.7
+
+ARG CUDA_DEVEL_IMAGE=nvidia/cuda@sha256:d266e59b88c295bc5fa0e4cef9064eaff84939381b09e2c3d76a5532a303e42d
+ARG DEEPSTREAM_IMAGE=nvcr.io/nvidia/deepstream@sha256:4f80b374e4a5086552825fe0f5bdd015c8cfd3dbe430cdde5ce9572e80e01583
+
+FROM ${CUDA_DEVEL_IMAGE} AS cuda-devel
+
+FROM ${DEEPSTREAM_IMAGE} AS parser-builder
+
+COPY --from=cuda-devel \
+    /usr/local/cuda-13.2/targets/x86_64-linux/include \
+    /opt/cuda-13.2/include
+
+WORKDIR /build
+
+COPY services/streaming/deepstream/yolo11_seg_parser.cpp ./yolo11_seg_parser.cpp
+
+RUN set -eux; \
+    DS=/opt/nvidia/deepstream/deepstream; \
+    mkdir -p /out; \
+    g++ \
+        -std=c++17 \
+        -O2 \
+        -fPIC \
+        -shared \
+        -Wall \
+        -Wextra \
+        -I"${DS}/sources/includes" \
+        -I/opt/cuda-13.2/include \
+        yolo11_seg_parser.cpp \
+        -o /out/libc6_5d_yolo11_seg_parser.so; \
+    nm -D --defined-only /out/libc6_5d_yolo11_seg_parser.so \
+        | awk '{print $3}' \
+        | grep -Fx 'NvDsInferParseYolo11Seg'; \
+    g++ \
+        -std=c++17 \
+        -O2 \
+        -Wall \
+        -Wextra \
+        -DC6_5D_PARSER_SELF_TEST \
+        -I"${DS}/sources/includes" \
+        -I/opt/cuda-13.2/include \
+        yolo11_seg_parser.cpp \
+        -o /tmp/c6_5d_yolo11_seg_parser_self_test; \
+    /tmp/c6_5d_yolo11_seg_parser_self_test; \
+    rm -f /tmp/c6_5d_yolo11_seg_parser_self_test; \
+    test -s /out/libc6_5d_yolo11_seg_parser.so; \
+    echo C6_5D_REPRODUCIBLE_PARSER_BUILD=PASS
+
+FROM ${DEEPSTREAM_IMAGE} AS parser-runtime
+
+COPY --from=parser-builder \
+    /out/libc6_5d_yolo11_seg_parser.so \
+    /work/libc6_5d_yolo11_seg_parser.so
+COPY configs/streaming/yolo_deepstream_segmentation_labels.txt \
+    /work/c6_5d_labels.txt
