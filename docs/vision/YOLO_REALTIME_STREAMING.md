@@ -23,7 +23,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-1 GStreamer ingress contract | `FROZEN / CONTRACT_COMMITTED` |
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
-| C6-4 RTSP reconnect/backpressure/observability | `C6-4C FOUNDATION / EXHAUSTION_SMOKE_PENDING` |
+| C6-4 RTSP reconnect/backpressure/observability | `CLOSED / RTSP_RELIABILITY_ACCEPTED` |
 | C6-5 DeepStream GPU/NVMM integration | `NOT STARTED` |
 | C6-6 Service integration and closure | `NOT STARTED` |
 
@@ -667,3 +667,73 @@ Scope:
 - TensorRT inference used: `false`
 - DeepStream used: `false`
 - final test used: `false`
+
+## 21. C6-4C canonical reconnect-exhaustion acceptance and C6-4 closure
+
+C6-4C canonical reconnect-exhaustion smoke는 clean foundation commit
+`6343caf639a46a3d49d923bb7b7ad70649b914b4`에서 실행했다. C6-4B와 동일한 localhost
+H264/TCP RTSP fixture에서 initial healthy streaming을 확인한 뒤 fixture process를 종료하고,
+동일 endpoint를 계속 offline 상태로 유지해 frozen reconnect budget 전체를 실제 GStreamer
+connection failure로 소진했다.
+
+Canonical acceptance:
+
+- state: `RTSP_RECONNECT_EXHAUSTION_COMPLETED`
+- foundation/run commit: `6343caf639a46a3d49d923bb7b7ad70649b914b4`
+- canonical `smoke.json` SHA256:
+  `731dfab79569c61313550fd4cf080af7ae9044871bbb809c4f28452d1b404427`
+- evidence archive SHA256:
+  `70f9f59d90e62f28a5a4b40fa608a8b0cf0ae9cc6f8a6db64a71af5f504b0a56`
+- injected fault: fixture server process termination
+- detected interruption event: `eos`
+- fault detection: `2.1394584327936172 ms`
+- reconnect attempts: `5 / 5`
+- requested backoff:
+  `500 -> 1000 -> 2000 -> 4000 -> 8000 ms`
+- actual backoff:
+  `503.2402500510216 -> 1001.8141246400774 -> 2005.0355838611722 -> 4005.108500365168 -> 8005.17808413133 ms`
+- reconnect failure events:
+  `gst_error`, `gst_error`, `gst_error`, `gst_error`, `gst_error`
+- reconnect failure detection:
+  `2.2741248831152916`, `2.306167036294937`, `1.589207910001278`,
+  `4.7699580900371075`, `3.894250374287367 ms`
+- reconnect budget exhausted: `true`
+- reconnect attempts since healthy reset: `5`
+- healthy frames since reconnect: `0`
+- state transitions:
+  `DISCONNECTED -> CONNECTING -> STREAMING -> RECONNECTING -> FAILED`
+- final state: `FAILED`
+- connection attempts: `6` (`1` initial + `5` reconnect)
+- reconnects: `5`
+- frames received / processed / dropped: `10 / 10 / 0`
+- errors / EOS / stale events: `5 / 1 / 0`
+- `rtsp_stream_up`: `0`
+- `rtsp_seconds_since_last_frame`: `15.633049707859755`
+- `rtsp_current_backoff_seconds`: `0.0`
+- client pipeline active after exhaustion: `false`
+- fixture server active after exhaustion: `false`
+- fixture port open after exhaustion: `false`
+- additional reconnect attempts after exhaustion: `0`
+- external camera used: `false`
+- TensorRT inference used: `false`
+- DeepStream used: `false`
+- final test used: `false`
+
+macOS에서 `GStreamer-GL-WARNING`이 출력됐지만 canonical exhaustion gate는 PASS했고,
+evidence 생성과 packaging 이후 repository working tree도 clean 상태를 유지했다.
+
+C6-4 closure:
+
+- C6-4A에서 RTSP H264/TCP source, timeout/stale boundary, credential redaction,
+  `latest_frame_wins` backpressure, reconnect/backoff, fail-closed, observability contract를 frozen했다.
+- C6-4B에서 실제 localhost RTSP interruption 후 first backoff, reconnect, 30 healthy-frame recovery,
+  reconnect budget reset, 최종 `STREAMING`을 acceptance했다.
+- C6-4C에서 fixture를 offline으로 유지한 채 전체 `5`회 reconnect budget과 exponential backoff를
+  실제 GStreamer connection failure로 소진하고 최종 `FAILED` fail-closed를 acceptance했다.
+- C6-4A의 `latest_frame_wins` queue/appsink backpressure contract는 C6-4B/C의 RTSP client pipeline에서도
+  동일하게 유지된다. 별도 overload-stress benchmark를 C6-4 acceptance 범위로 확장하지 않는다.
+- deterministic C6-4 acceptance scope는 localhost RTSP reliability path이며 external camera는 사용하지 않았다.
+- TensorRT inference, DeepStream, sealed final test는 C6-4에서 사용하지 않았다.
+
+따라서 C6-4 RTSP reconnect/backpressure/observability stage를
+`CLOSED / RTSP_RELIABILITY_ACCEPTED`로 종료한다. 다음 단계는 C6-5 DeepStream GPU/NVMM integration이다.
