@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "probe_id": "c6_5a_c5_engine_deepstream_compatibility_v1",
+  "source_bundle": {
+    "c5_closure_commit": "88e9b0b2440e99b6dfd2594bdc9a4947eff75187",
+    "engine_build_commit": "7835291c8fb123eba6acfa839977f94093c2f3ac",
+    "evidence_zip_sha256": "0cba556981b12a95b25feb324d0ff02b9cadeda6bde056b46e27eb7698f66b00",
+    "engine_size_bytes": 7607387,
+    "header_length": 155,
+    "files": {
+      "model.engine": "4f397d59741f4efb7832087030b890a0fe059a657d074a3b07cdeb54493e8971",
+      "metadata.json": "d44de78cc89fea67d6b351c2ba92f76dda0242386f4b6f14e216740ca682461e",
+      "run_summary.json": "a5de13fc8e616b6071eebc0d76f0f88cdff32181e8d49db5cdd143113aef113f",
+      "yolo_segmentation_tensorrt_int8_engine.yaml": "63eebcac04d11c9247bf7543fe18d0798758ab20cc734d2b18bfbece4eaf6b41"
+    },
+    "rebuild_allowed": false
+  },
+  "runtime": {
+    "image_tag": "nvcr.io/nvidia/deepstream:9.1-samples-multiarch",
+    "image_id": "sha256:4f80b374e4a5086552825fe0f5bdd015c8cfd3dbe430cdde5ce9572e80e01583",
+    "repo_digest": "nvcr.io/nvidia/deepstream@sha256:4f80b374e4a5086552825fe0f5bdd015c8cfd3dbe430cdde5ce9572e80e01583",
+    "gpu_name": "NVIDIA L4",
+    "gpu_compute_capability": "8.9",
+    "driver_version": "595.84",
+    "deepstream_version": "9.1.0",
+    "tensorrt_python_version": "10.16.1.11"
+  },
+  "policy": {
+    "mode": "deserialize_only",
+    "require_clean_repository": true,
+    "inference_allowed": false,
+    "dataset_used": false,
+    "validation_used": false,
+    "test_used": false,
+    "final_test_used": false
+  }
+}
