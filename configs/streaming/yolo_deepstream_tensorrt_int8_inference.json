@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "inference_id": "c6_5c_deepstream_l4_tensorrt_int8_inference_v1",
+  "engine_build_foundation_commit": "9fbb9bac9c35c74b6d0a8fe54fdfebc7b1e37e92",
+  "build_config_sha256": "4a5ec9e5eb3ede384247ad46d0d4e90be732cf5b34b066ca71f469d7f5128fd5",
+  "gstreamer_version": "1.24.2",
+  "engine": {
+    "relative_path": "artifacts/deployment/yolo_segmentation/deepstream_l4/tensorrt_int8/c6_5c_deepstream_l4_yolo11n_seg_int8_qdq_v1/model.plan",
+    "sha256": "97acd724809f4817ad4a95525a1bafae6294b1a7c99e04c12d451eeda878866e",
+    "size_bytes": 4940452,
+    "immutable": true
+  },
+  "source": {
+    "path": "/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.h264",
+    "sha256": "5f29353a6ec4727bd49fb523efc207d643e6638f4e5c56f060e1b61291aa6ea2",
+    "size_bytes": 14759548,
+    "codec": "h264"
+  },
+  "pipeline": {
+    "required_plugins": [
+      "filesrc",
+      "h264parse",
+      "nvv4l2decoder",
+      "queue",
+      "nvstreammux",
+      "nvinfer",
+      "identity",
+      "fakesink"
+    ],
+    "streammux_width": 1280,
+    "streammux_height": 720,
+    "batch_size": 1,
+    "live_source": false,
+    "batched_push_timeout_us": 40000,
+    "target_frames": 30,
+    "sink_sync": false,
+    "sink_async": false,
+    "timeout_seconds": 180
+  },
+  "nvinfer": {
+    "gpu_id": 0,
+    "net_scale_factor": "0.00392156862745098",
+    "model_color_format": 0,
+    "batch_size": 1,
+    "network_mode": 1,
+    "process_mode": 1,
+    "interval": 0,
+    "gie_unique_id": 1,
+    "network_type": 100,
+    "output_tensor_meta": true,
+    "maintain_aspect_ratio": true,
+    "symmetric_padding": true
+  },
+  "policy": {
+    "require_clean_repository": true,
+    "network_allowed": false,
+    "engine_rebuild_allowed": false,
+    "application_inference": true,
+    "segmentation_decode_allowed": false,
+    "overlay_allowed": false,
+    "dataset_used": false,
+    "validation_used": false,
+    "test_used": false,
+    "final_test_used": false
+  }
+}
