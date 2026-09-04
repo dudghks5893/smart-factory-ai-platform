@@ -14,7 +14,6 @@ from services.streaming import (
 )
 from services.streaming.yolo_deepstream_nvmm_smoke import (
     CONTAINER_RESULT_PREFIX,
-    EXPECTED_CDI_SPEC_SHA256,
     EXPECTED_REPO_DIGEST,
     EXPECTED_SAMPLE_SHA256,
     build_container_probe_source,
@@ -28,13 +27,16 @@ from shared.hashing import sha256_bytes
 
 
 # ADD 2026-09-05: Frozen config가 exact C6-5B runtime/sample/CDI contract를 로드하는지 검증한다.
+# MODIFY 2026-09-05: CDI generated-file SHA 대신 stable path/required entry contract를 검증한다.
 def test_load_deepstream_nvmm_smoke_config() -> None:
     config = load_deepstream_nvmm_smoke_config()
 
     assert config.smoke_id == "c6_5b_deepstream_nvdec_nvmm_v1"
     assert config.runtime.repo_digest == EXPECTED_REPO_DIGEST
     assert config.sample.sha256 == EXPECTED_SAMPLE_SHA256
-    assert config.host_dependency.cdi_spec_sha256 == EXPECTED_CDI_SPEC_SHA256
+    assert str(config.host_dependency.cdi_spec_path) == "/var/run/cdi/nvidia.yaml"
+    assert config.host_dependency.cdi_required_entry == "libnvcuvid.so.595.84"
+    assert not hasattr(config.host_dependency, "cdi_spec_sha256")
     assert config.host_dependency.cdi_refresh_required is True
     assert config.policy.inference_allowed is False
     assert config.policy.final_test_used is False

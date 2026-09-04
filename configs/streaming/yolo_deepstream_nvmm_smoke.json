@@ -18,7 +18,6 @@
     "package_version": "595.84-0ubuntu0.24.04.1",
     "required_library": "libnvcuvid.so.1",
     "cdi_spec_path": "/var/run/cdi/nvidia.yaml",
-    "cdi_spec_sha256": "7e803d06c447d2322fa5a17c22a5149173d596f3eb3b68b3238850dc74704739",
     "cdi_required_entry": "libnvcuvid.so.595.84",
     "cdi_refresh_required": true
   },

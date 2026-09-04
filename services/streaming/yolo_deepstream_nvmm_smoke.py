@@ -35,7 +35,6 @@ EXPECTED_NVDEC_PACKAGE = "libnvidia-decode-595"
 EXPECTED_NVDEC_PACKAGE_VERSION = "595.84-0ubuntu0.24.04.1"
 EXPECTED_REQUIRED_LIBRARY = "libnvcuvid.so.1"
 EXPECTED_CDI_SPEC = Path("/var/run/cdi/nvidia.yaml")
-EXPECTED_CDI_SPEC_SHA256 = "7e803d06c447d2322fa5a17c22a5149173d596f3eb3b68b3238850dc74704739"
 EXPECTED_CDI_ENTRY = "libnvcuvid.so.595.84"
 
 EXPECTED_SAMPLE_PATH = "/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.h264"
@@ -97,25 +96,21 @@ class NvdecHostDependency:
     package_version: str
     required_library: str
     cdi_spec_path: Path
-    cdi_spec_sha256: str
     cdi_required_entry: str
     cdi_refresh_required: bool
 
     # ADD 2026-09-05: NVDEC host package와 canonical CDI observation을 검증한다.
+    # MODIFY 2026-09-05: 재생성되는 CDI SHA 대신 path/required entry를 안정 invariant로 검증한다.
     def validate(self) -> None:
         if (
             self.package != EXPECTED_NVDEC_PACKAGE
             or self.package_version != EXPECTED_NVDEC_PACKAGE_VERSION
             or self.required_library != EXPECTED_REQUIRED_LIBRARY
             or self.cdi_spec_path != EXPECTED_CDI_SPEC
-            or self.cdi_spec_sha256 != EXPECTED_CDI_SPEC_SHA256
             or self.cdi_required_entry != EXPECTED_CDI_ENTRY
             or self.cdi_refresh_required is not True
         ):
             raise ValueError("C6-5B NVDEC host dependency identity changed.")
-
-        if not is_sha256_digest(self.cdi_spec_sha256):
-            raise ValueError("C6-5B CDI SHA-256 is invalid.")
 
 
 @dataclass(frozen=True)
@@ -322,6 +317,7 @@ def _integer(value: object, *, label: str) -> int:
 
 
 # ADD 2026-09-05: Frozen C6-5B JSON config를 typed contract로 로드한다.
+# MODIFY 2026-09-05: Generated CDI SHA를 config invariant에서 제거한다.
 def load_deepstream_nvmm_smoke_config(
     path: Path = DEFAULT_DEEPSTREAM_NVMM_CONFIG,
 ) -> DeepStreamNvmmSmokeConfig:
@@ -373,7 +369,6 @@ def load_deepstream_nvmm_smoke_config(
             "package_version",
             "required_library",
             "cdi_spec_path",
-            "cdi_spec_sha256",
             "cdi_required_entry",
             "cdi_refresh_required",
         },
@@ -479,10 +474,6 @@ def load_deepstream_nvmm_smoke_config(
                     host["cdi_spec_path"],
                     label="host_dependency.cdi_spec_path",
                 )
-            ),
-            cdi_spec_sha256=_string(
-                host["cdi_spec_sha256"],
-                label="host_dependency.cdi_spec_sha256",
             ),
             cdi_required_entry=_string(
                 host["cdi_required_entry"],
@@ -666,6 +657,7 @@ def inspect_deepstream_image(
 
 
 # ADD 2026-09-05: Host NVDEC package, L4 identity, CDI spec와 libnvcuvid를 fail-closed 검증한다.
+# MODIFY 2026-09-05: CDI SHA는 관찰값으로 기록하고 required entry를 검증한다.
 def validate_host_dependencies(
     config: DeepStreamNvmmSmokeConfig,
 ) -> dict[str, object]:
@@ -738,8 +730,8 @@ def validate_host_dependencies(
         capture_output=True,
         text=True,
     ).stdout.split()[0]
-    if cdi_sha != host.cdi_spec_sha256:
-        raise RuntimeError("C6-5B CDI spec SHA-256 changed.")
+    if not is_sha256_digest(cdi_sha):
+        raise RuntimeError("C6-5B observed CDI spec SHA-256 is invalid.")
 
     cdi_entry = subprocess.run(
         (
