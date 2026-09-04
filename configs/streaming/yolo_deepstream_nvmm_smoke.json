@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "smoke_id": "c6_5b_deepstream_nvdec_nvmm_v1",
+  "c6_5a_closure_commit": "28b5eab7f23d08bd8c50caa09b2a74f4fabc9236",
+  "runtime": {
+    "image_tag": "nvcr.io/nvidia/deepstream:9.1-samples-multiarch",
+    "image_id": "sha256:4f80b374e4a5086552825fe0f5bdd015c8cfd3dbe430cdde5ce9572e80e01583",
+    "repo_digest": "nvcr.io/nvidia/deepstream@sha256:4f80b374e4a5086552825fe0f5bdd015c8cfd3dbe430cdde5ce9572e80e01583",
+    "gpu_name": "NVIDIA L4",
+    "gpu_compute_capability": "8.9",
+    "driver_version": "595.84",
+    "deepstream_version": "9.1.0",
+    "gstreamer_version": "1.24.2",
+    "container_toolkit_version": "1.20.0"
+  },
+  "host_dependency": {
+    "package": "libnvidia-decode-595",
+    "package_version": "595.84-0ubuntu0.24.04.1",
+    "required_library": "libnvcuvid.so.1",
+    "cdi_spec_path": "/var/run/cdi/nvidia.yaml",
+    "cdi_spec_sha256": "7e803d06c447d2322fa5a17c22a5149173d596f3eb3b68b3238850dc74704739",
+    "cdi_required_entry": "libnvcuvid.so.595.84",
+    "cdi_refresh_required": true
+  },
+  "sample": {
+    "path": "/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.h264",
+    "sha256": "5f29353a6ec4727bd49fb523efc207d643e6638f4e5c56f060e1b61291aa6ea2",
+    "size_bytes": 14759548,
+    "codec": "h264"
+  },
+  "plugins": {
+    "nvv4l2decoder": {
+      "version": "1.14.0",
+      "filename": "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/deepstream/libgstnvvideo4linux2.so"
+    },
+    "nvvideoconvert": {
+      "version": "1.2.3",
+      "filename": "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/deepstream/libgstnvvideoconvert.so"
+    }
+  },
+  "pipeline": {
+    "decoder": "nvv4l2decoder",
+    "decoder_output_memory": "NVMM",
+    "decoder_output_format": "NV12",
+    "converter": "nvvideoconvert",
+    "converter_output_memory": "NVMM",
+    "converter_output_format": "RGBA",
+    "sink": "fakesink",
+    "sync": false,
+    "async": false,
+    "timeout_seconds": 60
+  },
+  "policy": {
+    "require_clean_repository": true,
+    "network_allowed": false,
+    "inference_allowed": false,
+    "tensorrt_engine_used": false,
+    "dataset_used": false,
+    "validation_used": false,
+    "test_used": false,
+    "final_test_used": false
+  }
+}
