@@ -24,7 +24,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
 | C6-4 RTSP reconnect/backpressure/observability | `CLOSED / RTSP_RELIABILITY_ACCEPTED` |
-| C6-5 DeepStream GPU/NVMM integration | `C6-5A CLOSED / C6-5B NVMM_SMOKE_PENDING` |
+| C6-5 DeepStream GPU/NVMM integration | `C6-5A CLOSED / C6-5B CLOSED / C6-5C INFERENCE_PENDING` |
 | C6-6 Service integration and closure | `NOT STARTED` |
 
 ## 3. Why GStreamer first
@@ -814,3 +814,130 @@ lineage를 사용해 별도의 DeepStream/L4 deployment artifact를 생성한다
 
 다음 단계인 C6-5B에서는 inference를 연결하기 전에 NVIDIA hardware decode와 NVMM
 GPU-memory path를 독립적으로 검증한다.
+
+## 23. C6-5B DeepStream NVDEC/NVMM canonical smoke result
+
+C6-5B에서는 GCP NVIDIA L4와 DeepStream 9.1 환경에서 H264 decode부터
+NVMM GPU-memory conversion까지의 실제 GPU video path를 canonical smoke로 검증했다.
+
+Canonical foundation:
+
+- repository commit:
+  `9d77d4ff4c619bdc7d50f23c4911f9b7eed9cdfd`
+- repository working tree:
+  `clean`
+- DeepStream image:
+  `nvcr.io/nvidia/deepstream@sha256:4f80b374e4a5086552825fe0f5bdd015c8cfd3dbe430cdde5ce9572e80e01583`
+- GPU:
+  `NVIDIA L4`
+- compute capability:
+  `8.9`
+- NVIDIA driver:
+  `595.84`
+- DeepStream:
+  `9.1.0`
+- GStreamer:
+  `1.24.2`
+- NVIDIA Container Toolkit:
+  `1.20.0`
+
+Host NVDEC dependency:
+
+- package:
+  `libnvidia-decode-595`
+- package version:
+  `595.84-0ubuntu0.24.04.1`
+- required library:
+  `libnvcuvid.so.1`
+- CDI required entry:
+  `libnvcuvid.so.595.84`
+- canonical-run observed CDI SHA-256:
+  `03561f4545bea8f2c0252c58f00868efb4c178b8a406290146834faa64f51cfc`
+
+`/var/run/cdi/nvidia.yaml`은 VM restart 시 다시 생성될 수 있으므로 파일 전체 SHA를
+stable runtime invariant로 사용하지 않는다. 대신 canonical evidence에는 실행 시점의
+observed SHA-256을 기록하고, `libnvcuvid.so.595.84` required entry와 실제
+`libnvcuvid.so.1` load 가능 여부를 fail-closed로 검증한다.
+
+Canonical source:
+
+- DeepStream sample:
+  `/opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.h264`
+- sample SHA-256:
+  `5f29353a6ec4727bd49fb523efc207d643e6638f4e5c56f060e1b61291aa6ea2`
+- sample bytes:
+  `14759548`
+- codec:
+  `H264`
+
+Canonical GPU path:
+
+`filesrc → h264parse → nvv4l2decoder → NVMM/NV12 → nvvideoconvert → NVMM/RGBA → fakesink`
+
+Canonical result:
+
+- `libnvcuvid.so.1` dynamic load:
+  `PASS`
+- `nvv4l2decoder`:
+  `PASS`
+- decoder output:
+  `NVMM / NV12 / 1280×720 / 30 FPS`
+- `nvvideoconvert`:
+  `PASS`
+- converter output:
+  `NVMM / RGBA / 1280×720 / 30 FPS`
+- GPU memory type:
+  `nvbuf-mem-cuda-device`
+- GPU id:
+  `0`
+- pipeline exit code:
+  `0`
+- EOS:
+  `true`
+- fatal runtime diagnostics:
+  `none`
+- state:
+  `DEEPSTREAM_NVDEC_NVMM_SMOKE_COMPLETED`
+
+Evidence identity:
+
+- C6-5B config SHA-256:
+  `161ee82b6a0c710943ee79a1350faa78099b8170198c68eefea8da594eba3ddd`
+- canonical JSON SHA-256:
+  `08bbad118a6c9ccada49dd4f992db0356ad386bee32c191d88ac16c34443d2f9`
+- canonical JSON bytes:
+  `17318`
+- external evidence archive:
+  `smart-factory-ai-platform-evidence/C6/C6-5B/c6_5b_deepstream_nvmm_evidence.zip`
+- external evidence archive SHA-256:
+  `7aef5de10d3197592b043da4643ca8dd200d5d1a42396208b46cf3492bdccf43`
+- external evidence archive bytes:
+  `17701`
+
+C6-5B scope:
+
+- network used:
+  `false`
+- TensorRT inference executed:
+  `false`
+- TensorRT engine used:
+  `false`
+- dataset used:
+  `false`
+- validation split used:
+  `false`
+- test split used:
+  `false`
+- sealed final test used:
+  `false`
+
+따라서 C6-5B는 NVIDIA hardware decoder와 NVMM GPU-memory path가 실제
+DeepStream/L4 runtime에서 동작함을 확인한 단계로 종료한다.
+
+C6-5B final state:
+
+`CLOSED / DEEPSTREAM_NVMM_SMOKE_ACCEPTED`
+
+다음 C6-5C에서는 accepted C5 Q/DQ ONNX lineage를 기반으로
+DeepStream/L4용 TensorRT inference artifact를 별도로 구성한다.
+C5에서 accepted 된 T4 TensorRT engine은 변경하거나 덮어쓰지 않는다.
