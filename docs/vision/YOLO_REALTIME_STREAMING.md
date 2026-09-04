@@ -24,7 +24,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
 | C6-4 RTSP reconnect/backpressure/observability | `CLOSED / RTSP_RELIABILITY_ACCEPTED` |
-| C6-5 DeepStream GPU/NVMM integration | `C6-5A CLOSED / C6-5B CLOSED / C6-5C INFERENCE_PENDING` |
+| C6-5 DeepStream GPU/NVMM integration | `C6-5A CLOSED / C6-5B CLOSED / C6-5C CLOSED / C6-5D SEGMENTATION_PENDING` |
 | C6-6 Service integration and closure | `NOT STARTED` |
 
 ## 3. Why GStreamer first
@@ -941,3 +941,113 @@ C6-5B final state:
 다음 C6-5C에서는 accepted C5 Q/DQ ONNX lineage를 기반으로
 DeepStream/L4용 TensorRT inference artifact를 별도로 구성한다.
 C5에서 accepted 된 T4 TensorRT engine은 변경하거나 덮어쓰지 않는다.
+
+## 27. C6-5C DeepStream TensorRT INT8 inference result
+
+C6-5C는 C6-5A에서 확인한 C5 T4 TensorRT plan-version incompatibility를
+C5 engine rebuild로 해결하지 않았다. Accepted C5-4B1 explicit Q/DQ ONNX
+lineage에서 DeepStream 9.1 / NVIDIA L4 runtime용 raw TensorRT plan을 별도로
+생성하고, 원래 C5 T4 engine은 immutable artifact로 유지했다.
+
+C6-5C build foundation commit:
+
+`9fbb9bac9c35c74b6d0a8fe54fdfebc7b1e37e92`
+
+Canonical L4 TensorRT plan:
+
+- TensorRT: `10.16.1.11`
+- GPU: `NVIDIA L4`, compute capability `8.9`
+- DeepStream: `9.1.0`
+- source: accepted C5-4B1 explicit Q/DQ ONNX
+- strongly typed: `true`
+- external engine I/O:
+  - `images`: `FLOAT [1,3,640,640]`
+  - `output0`: `FLOAT [1,39,8400]`
+  - `output1`: `FLOAT [1,32,160,160]`
+- plan SHA-256:
+  `97acd724809f4817ad4a95525a1bafae6294b1a7c99e04c12d451eeda878866e`
+- plan bytes: `4940452`
+
+Build preservation evidence:
+
+- external archive:
+  `smart-factory-ai-platform-evidence/C6/C6-5C/c6_5c_deepstream_l4_tensorrt_int8_evidence.zip`
+- archive SHA-256:
+  `86b881a815d8dcd742128e627191ee60ac3aa66a9efab1671b49c4dfd1617fd8`
+- archive bytes: `4974421`
+
+Build 단계에서는 application inference, segmentation decode, overlay,
+dataset, validation, test, sealed final test를 사용하지 않았다.
+
+C6-5C inference foundation commit:
+
+`d78b9a0e440d1ef81a3e60463df2c7baa6d413f1`
+
+Canonical DeepStream inference path:
+
+```text
+sample_720p.h264
+    ↓
+h264parse
+    ↓
+nvv4l2decoder
+    ↓
+NVMM / CUDA-device memory
+    ↓
+nvstreammux
+    ↓
+nvinfer
+    ↓
+sealed L4 TensorRT INT8 model.plan
+    ↓
+30 post-inference buffers
+    ↓
+fakesink
+```
+
+Canonical inference result:
+
+- source SHA-256:
+  `5f29353a6ec4727bd49fb523efc207d643e6638f4e5c56f060e1b61291aa6ea2`
+- source bytes: `14759548`
+- target frames: `30`
+- pipeline exit: `0`
+- TensorRT engine deserialized: `true`
+- deserialized engine used by `nvinfer`: `true`
+- NVMM CUDA-device caps observed: `true`
+- EOS after post-inference frame boundary: `true`
+- application inference executed: `true`
+- segmentation decode executed: `false`
+- overlay executed: `false`
+- dataset used: `false`
+- validation split used: `false`
+- test split used: `false`
+- sealed final test used: `false`
+- state: `DEEPSTREAM_TENSORRT_INT8_INFERENCE_COMPLETED`
+
+Canonical inference evidence:
+
+- JSON SHA-256:
+  `d95abfe294f9cc4b6e193fd047d49c6bcef25a5608e059a7e77b4504f8173ce9`
+- JSON bytes: `31121`
+- external archive:
+  `smart-factory-ai-platform-evidence/C6/C6-5C/c6_5c_deepstream_l4_tensorrt_int8_inference_evidence.zip`
+- archive SHA-256:
+  `da38bf0bb3f9b52acc743f9cb93e95889ac91703afe14dbd8f9ab88274dace20`
+- archive bytes: `90512`
+
+Build archive와 inference archive는 GCP와 local macOS evidence root에서
+SHA-256과 byte size가 동일함을 확인했다.
+
+C6-5C acceptance boundary는 raw TensorRT output tensor가 실제
+DeepStream GPU/NVMM path에서 실행되는 것이다. `output0`/`output1`의
+YOLO segmentation decode, instance metadata, mask rendering과 annotated
+video는 C6-5D에서 별도로 구현한다.
+
+C6-5C final state:
+
+`CLOSED / DEEPSTREAM_TENSORRT_INT8_INFERENCE_ACCEPTED`
+
+다음 상태:
+
+`C6-5D SEGMENTATION_PENDING`
