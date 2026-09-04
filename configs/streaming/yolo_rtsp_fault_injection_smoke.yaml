@@ -1,0 +1,31 @@
+schema_version: 1
+smoke_id: c6_4b_rtsp_fault_injection_smoke_v1
+required_c6_4a_commit: 47d782e0f33f218f5bd10508840c2126837f1ca5
+
+fixture_server:
+  host: 127.0.0.1
+  mount: /inspection
+  pattern: ball
+  width: 320
+  height: 240
+  framerate: 30
+  encoder: x264enc
+  bitrate_kbps: 500
+  key_int_max: 30
+
+runtime:
+  initial_healthy_frames: 10
+  recovery_healthy_frames: 30
+  server_ready_timeout_ms: 5000
+  sample_timeout_ms: 5000
+  fault_detection_timeout_ms: 5000
+  fault_kind: terminate_fixture_server_process
+
+output_root: outputs/streaming/yolo_gstreamer/c6_4_rtsp_fault_injection
+
+scope:
+  localhost_rtsp_used: true
+  external_camera_used: false
+  tensorrt_inference_used: false
+  deepstream_used: false
+  final_test_used: false

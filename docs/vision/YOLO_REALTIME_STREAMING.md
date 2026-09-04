@@ -23,7 +23,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-1 GStreamer ingress contract | `FROZEN / CONTRACT_COMMITTED` |
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
-| C6-4 RTSP reconnect/backpressure/observability | `FOUNDATION / RTSP_RELIABILITY_CONTRACT_VALIDATION_PENDING` |
+| C6-4 RTSP reconnect/backpressure/observability | `FOUNDATION / RTSP_FAULT_INJECTION_SMOKE_PENDING` |
 | C6-5 DeepStream GPU/NVMM integration | `NOT STARTED` |
 | C6-6 Service integration and closure | `NOT STARTED` |
 
@@ -548,3 +548,45 @@ Minimum stream-health observability:
 These values are an operational reliability contract, not a new model-accuracy acceptance policy.
 C6-4B will exercise the frozen contract with a deterministic RTSP runtime/fault-injection smoke test before
 a real external camera endpoint is considered.
+
+## 18. C6-4B deterministic localhost RTSP fault-injection smoke foundation
+
+C6-4A reliability contract commit
+`47d782e0f33f218f5bd10508840c2126837f1ca5`를 기준으로 실제 RTSP protocol path가 localhost에서
+동작하는 것을 preflight로 확인했다. Synthetic `ball` source를 H264/TCP RTSP로 송출하고
+accepted BGR/appsink boundary에서 10개의 owned NumPy frame을 수신했다.
+
+Preflight result:
+
+- localhost `GstRtspServer`: available
+- `rtspsrc`, `rtph264depay`, `h264parse`, `avdec_h264`: available
+- `x264enc`, `rtph264pay`: available
+- received frames: `10 / 10`
+- frame shape: `240×320×3`
+- frame dtype: `uint8`
+- frame contract: `BGR / HWC / C-contiguous / owned`
+- external camera used: `false`
+- TensorRT inference used: `false`
+- DeepStream used: `false`
+- final test used: `false`
+
+C6-4B canonical smoke는 RTSP server를 client와 같은 process에 두지 않는다. Fixture server를 child
+process로 격리하고 process termination을 실제 TCP/network interruption으로 사용한다. 이 구조는
+ad-hoc preflight 종료 시 발생한 macOS GLib teardown warning을 canonical fault injection path와
+분리한다.
+
+Frozen canonical scenario:
+
+1. localhost RTSP fixture server 시작
+2. client가 `10` healthy frames 수신 후 `STREAMING`
+3. fixture server process 강제 종료
+4. `gst_error`, `eos`, `frame_timeout` 중 하나로 interruption 감지
+5. `RECONNECTING` 전환
+6. frozen first backoff `500 ms` 적용
+7. 동일 endpoint의 fixture server 재시작
+8. client pipeline 재생성
+9. `30` consecutive healthy frames 수신
+10. reconnect budget reset 후 최종 `STREAMING`
+
+C6-4B foundation 단계에서는 canonical smoke code/config/test만 commit한다. 실제 canonical evidence
+run은 이 foundation이 clean commit이 된 뒤 별도 gate에서 수행한다.
