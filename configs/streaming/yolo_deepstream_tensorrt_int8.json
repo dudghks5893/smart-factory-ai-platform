@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "build_id": "c6_5c_deepstream_l4_yolo11n_seg_int8_qdq_v1",
+  "c6_5b_closure_commit": "3fc791f4ef1919099f61d40e49f8033882beab6c",
+  "source": {
+    "evidence_zip_sha256": "00f925d0ce5f6106d441822e419a039a736831c0d2c13835cfd01b62fad50990",
+    "evidence_zip_size_bytes": 5352519,
+    "qdq_run_commit": "8e489c80ef9527a044b100cc96172d179947e051",
+    "qdq_opset": 19,
+    "quantize_linear_count": 211,
+    "dequantize_linear_count": 211,
+    "calibration_sample_count": 84,
+    "files": {
+      "SHA256SUMS.txt": {
+        "sha256": "39b0d5b2bc139f74dfedeb052c86fc22f4dd281705c16e6702a905534144bc53",
+        "size_bytes": 352
+      },
+      "metadata.json": {
+        "sha256": "8c3b215082ba111d4f932f4e021a9bc11866c49ecec788a52f20b2f9fe244fa7",
+        "size_bytes": 1517
+      },
+      "model.int8.qdq.onnx": {
+        "sha256": "d7c9af3ab3c2f71e88de26be71abe80f113f2e1c359d2a532a24079fa9b4dd00",
+        "size_bytes": 6195984
+      },
+      "run_summary.json": {
+        "sha256": "c6b4dd790ae9a2ff312b9336d46c87f0efc03f3a2364ddda0b014a3f4405a60c",
+        "size_bytes": 847
+      },
+      "yolo_segmentation_tensorrt_int8.yaml": {
+        "sha256": "18309302e45855e506628bb5e262886fc2cb366f8758fc100c55aaf6dbf3c37a",
+        "size_bytes": 2098
+      }
+    }
+  },
+  "runtime": {
+    "image_tag": "nvcr.io/nvidia/deepstream:9.1-samples-multiarch",
+    "image_id": "sha256:4f80b374e4a5086552825fe0f5bdd015c8cfd3dbe430cdde5ce9572e80e01583",
+    "repo_digest": "nvcr.io/nvidia/deepstream@sha256:4f80b374e4a5086552825fe0f5bdd015c8cfd3dbe430cdde5ce9572e80e01583",
+    "gpu_name": "NVIDIA L4",
+    "gpu_compute_capability": "8.9",
+    "driver_version": "595.84",
+    "deepstream_version": "9.1.0",
+    "tensorrt_python_version": "10.16.1.11"
+  },
+  "build": {
+    "strongly_typed": true,
+    "explicit_quantization": true,
+    "builder_int8_flag": false,
+    "builder_fp16_flag": false,
+    "legacy_calibrator": false,
+    "workspace_bytes": 4294967296,
+    "plan_filename": "model.plan",
+    "output_root": "artifacts/deployment/yolo_segmentation/deepstream_l4/tensorrt_int8/c6_5c_deepstream_l4_yolo11n_seg_int8_qdq_v1",
+    "persist_raw_plan": true
+  },
+  "engine_io": [
+    {
+      "name": "images",
+      "mode": "INPUT",
+      "dtype": "FLOAT",
+      "shape": [1, 3, 640, 640]
+    },
+    {
+      "name": "output0",
+      "mode": "OUTPUT",
+      "dtype": "FLOAT",
+      "shape": [1, 39, 8400]
+    },
+    {
+      "name": "output1",
+      "mode": "OUTPUT",
+      "dtype": "FLOAT",
+      "shape": [1, 32, 160, 160]
+    }
+  ],
+  "diagnostics": {
+    "record_tensorrt_stderr": true,
+    "error_line_is_automatic_failure": false,
+    "fatal_conditions": [
+      "parser_failure",
+      "serialized_plan_build_failure",
+      "deserialize_failure",
+      "engine_io_contract_mismatch",
+      "container_nonzero_exit"
+    ]
+  },
+  "policy": {
+    "require_clean_repository": true,
+    "network_allowed": false,
+    "overwrite_allowed": false,
+    "c5_engine_rebuild_allowed": false,
+    "application_inference_during_engine_build": false,
+    "dataset_used": false,
+    "validation_used": false,
+    "test_used": false,
+    "final_test_used": false,
+    "segmentation_decode_allowed": false,
+    "overlay_allowed": false
+  }
+}
