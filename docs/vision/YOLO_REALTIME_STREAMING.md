@@ -23,7 +23,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-1 GStreamer ingress contract | `FROZEN / CONTRACT_COMMITTED` |
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
-| C6-4 RTSP reconnect/backpressure/observability | `C6-4B ACCEPTED / EXHAUSTION_VALIDATION_PENDING` |
+| C6-4 RTSP reconnect/backpressure/observability | `C6-4C FOUNDATION / EXHAUSTION_SMOKE_PENDING` |
 | C6-5 DeepStream GPU/NVMM integration | `NOT STARTED` |
 | C6-6 Service integration and closure | `NOT STARTED` |
 
@@ -635,3 +635,35 @@ C6-4B는 successful reconnect/recovery path를 acceptance했다. C6-4A에서 fro
 그리고 exhaustion 이후 `FAILED` fail-closed 동작은 아직 runtime evidence로 검증하지 않았다.
 따라서 C6-4 전체는 아직 CLOSED가 아니며 다음 C6-4C에서 reconnect exhaustion/fail-closed path를
 별도 deterministic fault-injection gate로 검증한다.
+
+## 20. C6-4C reconnect exhaustion / fail-closed foundation
+
+C6-4B successful reconnect/recovery acceptance commit
+`028c86264aef6859ca4b68cf5d561f26fa341f95` 이후 C6-4A에서 아직 runtime evidence로
+검증하지 않은 reconnect exhaustion/fail-closed path를 C6-4C에서 다룬다.
+
+Frozen C6-4C scenario:
+
+1. localhost H264/TCP RTSP fixture 시작
+2. `10` healthy frames 수신 후 `STREAMING`
+3. fixture server process 종료
+4. interruption event 감지
+5. fixture는 이후 계속 offline 유지
+6. reconnect attempt `1..5`를 수행
+7. attempt별 backoff `500 -> 1000 -> 2000 -> 4000 -> 8000 ms` 적용
+8. 각 attempt는 실제 GStreamer RTSP connection failure를 확인
+9. reconnect budget `5 / 5` 소진
+10. healthy reset 없이 최종 `FAILED`
+11. `rtsp_stream_up = 0`, active client pipeline 없음, fixture server 없음
+12. 추가 reconnect를 수행하지 않고 fail-closed
+
+C6-4C foundation 단계에서는 config/runtime/runner/unit test와 이 문서만 commit한다.
+실제 canonical exhaustion evidence run은 foundation이 clean commit이 된 뒤 별도 gate에서 수행한다.
+
+Scope:
+
+- localhost RTSP used: `true`
+- external camera used: `false`
+- TensorRT inference used: `false`
+- DeepStream used: `false`
+- final test used: `false`

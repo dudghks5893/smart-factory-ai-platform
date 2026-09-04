@@ -1,0 +1,27 @@
+schema_version: 1
+smoke_id: c6_4c_rtsp_reconnect_exhaustion_v1
+required_c6_4b_acceptance_commit: 028c86264aef6859ca4b68cf5d561f26fa341f95
+required_c6_4b_smoke_sha256: f6f140bfee3ac6cf71ab71f5e03c8043ad539f9a775cce6146f593f6b209683e
+required_c6_4b_archive_sha256: a6497cf91438981c9fbf23f65e391f030d1b19cfc09815d918e32dc163b1ab17
+
+runtime:
+  initial_healthy_frames: 10
+  expected_max_reconnect_attempts: 5
+  expected_backoff_ms:
+    - 500
+    - 1000
+    - 2000
+    - 4000
+    - 8000
+  connection_failure_timeout_ms: 5000
+  fault_kind: terminate_fixture_server_process_and_keep_offline
+  keep_fixture_offline_after_fault: true
+
+output_root: outputs/streaming/yolo_gstreamer/c6_4_rtsp_exhaustion
+
+scope:
+  localhost_rtsp_used: true
+  external_camera_used: false
+  tensorrt_inference_used: false
+  deepstream_used: false
+  final_test_used: false
