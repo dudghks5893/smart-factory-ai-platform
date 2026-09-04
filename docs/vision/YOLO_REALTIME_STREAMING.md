@@ -23,7 +23,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-1 GStreamer ingress contract | `FROZEN / CONTRACT_COMMITTED` |
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
-| C6-4 RTSP reconnect/backpressure/observability | `FOUNDATION / RTSP_FAULT_INJECTION_SMOKE_PENDING` |
+| C6-4 RTSP reconnect/backpressure/observability | `C6-4B ACCEPTED / EXHAUSTION_VALIDATION_PENDING` |
 | C6-5 DeepStream GPU/NVMM integration | `NOT STARTED` |
 | C6-6 Service integration and closure | `NOT STARTED` |
 
@@ -588,5 +588,50 @@ Frozen canonical scenario:
 9. `30` consecutive healthy frames 수신
 10. reconnect budget reset 후 최종 `STREAMING`
 
-C6-4B foundation 단계에서는 canonical smoke code/config/test만 commit한다. 실제 canonical evidence
-run은 이 foundation이 clean commit이 된 뒤 별도 gate에서 수행한다.
+C6-4B foundation 단계에서는 canonical smoke code/config/test만 commit했고, 실제 canonical evidence
+run은 이후 clean foundation commit에서 별도 gate로 수행했다.
+
+## 19. C6-4B canonical RTSP fault-injection acceptance
+
+C6-4B canonical fault-injection smoke는 clean foundation commit
+`66b210164ea4ff7593bc1a29947438343684d7d8`에서 실행했고,
+localhost H264/TCP RTSP fixture를 실제로 중단한 뒤 reconnect/recovery를 검증했다.
+
+Canonical acceptance:
+
+- state: `RTSP_FAULT_INJECTION_SMOKE_COMPLETED`
+- foundation/run commit: `66b210164ea4ff7593bc1a29947438343684d7d8`
+- canonical `smoke.json` SHA256:
+  `f6f140bfee3ac6cf71ab71f5e03c8043ad539f9a775cce6146f593f6b209683e`
+- evidence archive SHA256:
+  `a6497cf91438981c9fbf23f65e391f030d1b19cfc09815d918e32dc163b1ab17`
+- injected fault: fixture server process termination
+- detected event: `eos`
+- fault detection: `0.9928750805556774 ms`
+- requested first backoff: `500 ms`
+- actual first backoff: `502.7117501012981 ms`
+- recovery healthy frames: `30`
+- reconnect budget reset: `true`
+- reconnect attempts since healthy reset: `0`
+- state transitions:
+  `DISCONNECTED -> CONNECTING -> STREAMING -> RECONNECTING -> STREAMING`
+- final state: `STREAMING`
+- connection attempts: `2`
+- reconnects: `1`
+- frames received / processed / dropped: `40 / 40 / 0`
+- `rtsp_stream_up`: `1`
+- `rtsp_seconds_since_last_frame`: `0.00042512500658631325`
+- `rtsp_current_backoff_seconds`: `0.0`
+- external camera used: `false`
+- TensorRT inference used: `false`
+- DeepStream used: `false`
+- final test used: `false`
+
+macOS에서 GStreamer GL warning이 출력됐지만 canonical RTSP fault/reconnect/recovery gate는 PASS했고,
+evidence 생성 후 repository working tree도 clean 상태를 유지했다.
+
+C6-4B는 successful reconnect/recovery path를 acceptance했다. C6-4A에서 frozen한
+`max_reconnect_attempts = 5`, exponential backoff `500 -> 1000 -> 2000 -> 4000 -> 8000 ms`,
+그리고 exhaustion 이후 `FAILED` fail-closed 동작은 아직 runtime evidence로 검증하지 않았다.
+따라서 C6-4 전체는 아직 CLOSED가 아니며 다음 C6-4C에서 reconnect exhaustion/fail-closed path를
+별도 deterministic fault-injection gate로 검증한다.
