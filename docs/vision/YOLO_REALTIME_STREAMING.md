@@ -25,7 +25,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
 | C6-4 RTSP reconnect/backpressure/observability | `CLOSED / RTSP_RELIABILITY_ACCEPTED` |
 | C6-5 DeepStream GPU/NVMM integration | `CLOSED / DEEPSTREAM_GPU_NVMM_SEGMENTATION_ACCEPTED` |
-| C6-6 Service integration and closure | `C6-6B1 API_SOURCE_COMMITTED / API_RUNTIME_PENDING` |
+| C6-6 Service integration and closure | `C6-6B2 API_RUNTIME_ACCEPTED / WORKER_PUBLISHER_PENDING` |
 
 ## 3. Why GStreamer first
 
@@ -1338,8 +1338,61 @@ C6-6B1 scope:
 
 C6-6B1 final state:
 
-`API_SOURCE_COMMITTED / API_RUNTIME_PENDING`
+`C6-6B1 API_SOURCE_COMMITTED / API_RUNTIME_PENDING`
 
 다음 상태:
 
 `C6-6B2 SERVICE_BRIDGE_API_RUNTIME`
+
+## 31. C6-6B2 Service bridge API runtime
+
+C6-6B2는 C6-6B1에서 구현한 canonical streaming router와 dedicated broadcaster를
+실제 loopback HTTP/WebSocket runtime으로 실행해 service bridge 동작을 검증한다.
+전체 serving app의 PatchCore/SQL persistence lifecycle은 이 smoke의 대상이 아니므로
+minimal FastAPI app에 canonical streaming router와 broadcaster만 등록한다.
+
+Runtime path:
+
+```text
+real loopback WebSocket client
+    ↓ connect
+WS /v1/ws/streaming-known-defects
+
+real loopback HTTP client
+    ↓ POST validated observation
+/internal/v1/streaming/known-defects
+    ↓ 202 accepted
+FastAPI BackgroundTasks
+    ↓
+StreamingKnownDefectEventBroadcaster
+    ↓
+connected WebSocket client receives exact event
+```
+
+C6-6B2 runtime acceptance:
+
+- actual loopback HTTP used: `true`
+- actual loopback WebSocket used: `true`
+- valid streaming observation accepted with HTTP 202: `true`
+- acknowledgement observation UUID preserved: `true`
+- exact `streaming_known_defect.observed` event received over WebSocket: `true`
+- sealed decoder/engine/parser/labels identity validated: `true`
+- RTSP URI/credential-like source ID rejected with HTTP 422: `true`
+- raw frame transported: `false`
+- raw mask transported: `false`
+- image SHA fabricated: `false`
+- persistence used: `false`
+- re-inference used: `false`
+- actual RTSP used: `false`
+- DeepStream runtime used: `false`
+- worker publisher implemented: `false`
+- sealed final test used: `false`
+- durable runtime evidence artifact written: `false`
+
+C6-6B2 final state:
+
+`API_RUNTIME_ACCEPTED / WORKER_PUBLISHER_PENDING`
+
+다음 상태:
+
+`C6-6C WORKER_PUBLISHER`
