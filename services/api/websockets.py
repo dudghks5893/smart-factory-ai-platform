@@ -14,6 +14,7 @@ from services.api.schemas import (
     InspectionCreatedEvent,
     KnownDefectCreatedEvent,
 )
+from services.api.streaming_schemas import StreamingKnownDefectObservedEvent
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_SEND_TIMEOUT_SECONDS = 1.0
@@ -116,3 +117,8 @@ class KnownDefectEventBroadcaster(EventBroadcaster[KnownDefectCreatedEvent]):
 
 class CombinedInspectionEventBroadcaster(EventBroadcaster[CombinedInspectionCreatedEvent]):
     """Manufacturing-level channel for committed combined decisions."""
+
+
+# ADD 2026-09-06: Durable known-defect와 분리된 live streaming channel을 제공한다.
+class StreamingKnownDefectEventBroadcaster(EventBroadcaster[StreamingKnownDefectObservedEvent]):
+    """Independent channel for non-persisted DeepStream live observations."""

@@ -12,10 +12,12 @@ from fastapi.staticfiles import StaticFiles
 from services.api.config import ServingSettings
 from services.api.errors import install_exception_handlers
 from services.api.routes import router
+from services.api.streaming_routes import router as streaming_router
 from services.api.websockets import (
     CombinedInspectionEventBroadcaster,
     InspectionEventBroadcaster,
     KnownDefectEventBroadcaster,
+    StreamingKnownDefectEventBroadcaster,
 )
 from services.inference.runtime import ModelRuntime, PatchCoreRuntimeConfig, load_patchcore_runtime
 from services.inference.yolo_segmentation_runtime import (
@@ -69,12 +71,7 @@ def load_combined_inspection_repository(
     return SqlAlchemyCombinedInspectionRepository(database.session_factory)
 
 
-# ADD 2026-08-19: Lifespan startup과 injectable runtime loader를 가진 FastAPI app을 생성한다.
-# MODIFY 2026-08-25: WebSocket lifecycle과 optional browser monitor static mount를 추가한다.
-# MODIFY 2026-08-26: Optional enabled YOLO singleton을 startup/readiness lifecycle에 추가한다.
-# MODIFY 2026-08-26: Known-defect repository와 별도 event channel을 lifecycle에 추가한다.
-# MODIFY 2026-08-26: Combined correlation repository를 required persistence lifecycle에 추가한다.
-# MODIFY 2026-08-26: Combined decision WebSocket channel을 process lifecycle에 추가한다.
+# MODIFY 2026-08-26: Combined WS lifecycle → MODIFY 2026-09-06: C6-6B1 streaming lifecycle 추가.
 def create_app(
     *,
     settings: ServingSettings | None = None,
@@ -89,6 +86,7 @@ def create_app(
     inspection_event_broadcaster: InspectionEventBroadcaster | None = None,
     known_defect_event_broadcaster: KnownDefectEventBroadcaster | None = None,
     combined_inspection_event_broadcaster: CombinedInspectionEventBroadcaster | None = None,
+    streaming_known_defect_event_broadcaster: StreamingKnownDefectEventBroadcaster | None = None,
     live_monitor_dir: Path = DEFAULT_LIVE_MONITOR_DIR,
 ) -> FastAPI:
     """Create an app that requires database and model readiness during startup."""
@@ -98,6 +96,9 @@ def create_app(
     known_defect_broadcaster = known_defect_event_broadcaster or KnownDefectEventBroadcaster()
     combined_broadcaster = (
         combined_inspection_event_broadcaster or CombinedInspectionEventBroadcaster()
+    )
+    streaming_broadcaster = (
+        streaming_known_defect_event_broadcaster or StreamingKnownDefectEventBroadcaster()
     )
 
     # ADD 2026-08-19: Startup load가 완료된 뒤에만 ready 상태로 전환한다.
@@ -142,6 +143,7 @@ def create_app(
             await event_broadcaster.close_all()
             await known_defect_broadcaster.close_all()
             await combined_broadcaster.close_all()
+            await streaming_broadcaster.close_all()
             application.state.yolo_segmentation_runtime = None
             application.state.serving_runtime = None
             application.state.inspection_repository = None
@@ -165,6 +167,7 @@ def create_app(
     app.state.inspection_event_broadcaster = event_broadcaster
     app.state.known_defect_event_broadcaster = known_defect_broadcaster
     app.state.combined_inspection_event_broadcaster = combined_broadcaster
+    app.state.streaming_known_defect_event_broadcaster = streaming_broadcaster
     app.state.monitoring_metrics = monitoring_metrics
     app.add_middleware(HttpMetricsMiddleware, metrics=monitoring_metrics)
     install_exception_handlers(app)
@@ -175,6 +178,7 @@ def create_app(
         include_in_schema=False,
     )
     app.include_router(router)
+    app.include_router(streaming_router)
 
     # API와 같은 origin에서 REST/WebSocket을 사용하도록 available asset만 mount한다.
     if live_monitor_dir.is_dir():

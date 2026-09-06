@@ -25,7 +25,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
 | C6-4 RTSP reconnect/backpressure/observability | `CLOSED / RTSP_RELIABILITY_ACCEPTED` |
 | C6-5 DeepStream GPU/NVMM integration | `CLOSED / DEEPSTREAM_GPU_NVMM_SEGMENTATION_ACCEPTED` |
-| C6-6 Service integration and closure | `C6-6A CONTRACT_COMMITTED / SERVICE_BRIDGE_PENDING` |
+| C6-6 Service integration and closure | `C6-6B1 API_SOURCE_COMMITTED / API_RUNTIME_PENDING` |
 
 ## 3. Why GStreamer first
 
@@ -1293,3 +1293,53 @@ C6-6A final state:
 다음 상태:
 
 `C6-6B SERVICE_BRIDGE_API`
+
+## 30. C6-6B1 Service bridge API source
+
+C6-6B1은 C6-6A에서 예약한 DeepStream-to-service boundary를 FastAPI source에
+구현한다. 현재 VM의 lean `.venv`에는 FastAPI/SQLAlchemy runtime dependency가
+설치되어 있지 않으므로, 이 단계는 source/contract 검증까지만 수행하고 실제 HTTP/WebSocket
+runtime smoke는 C6-6B2에서 별도 환경으로 검증한다.
+
+Implemented boundary:
+
+```text
+DeepStream worker
+    ↓
+POST /internal/v1/streaming/known-defects
+    ↓ 202 accepted
+process-local StreamingKnownDefectEventBroadcaster
+    ↓
+WS /v1/ws/streaming-known-defects
+```
+
+API behavior:
+
+- request body는 `streaming_known_defect.observed` version 1 event만 허용한다.
+- sealed C6-5 decoder/engine/parser/labels identity가 다르면 validation에서 거부한다.
+- source ID는 opaque identifier만 허용하고 RTSP URI/credential을 받지 않는다.
+- bbox/mask geometry와 class ID/name mapping을 source image dimensions에 맞춰 검증한다.
+- internal POST는 re-inference, upload decode, database persistence를 수행하지 않는다.
+- validated event broadcast는 response 이후 FastAPI background task로 예약한다.
+- 기존 `/v1/known-defects`, `/v1/ws/known-defects`, `known_defect.created` semantics는 변경하지 않는다.
+
+C6-6B1 scope:
+
+- service endpoint implemented: `true`
+- dedicated streaming WebSocket implemented: `true`
+- process-local streaming broadcaster implemented: `true`
+- worker publisher implemented: `false`
+- API runtime smoke executed: `false`
+- actual network used: `false`
+- actual RTSP used: `false`
+- DeepStream runtime used: `false`
+- persistence used: `false`
+- sealed final test used: `false`
+
+C6-6B1 final state:
+
+`API_SOURCE_COMMITTED / API_RUNTIME_PENDING`
+
+다음 상태:
+
+`C6-6B2 SERVICE_BRIDGE_API_RUNTIME`
