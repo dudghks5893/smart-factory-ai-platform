@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "contract_id": "c6_6a_deepstream_service_integration_v1",
+  "c6_5_identity": {
+    "closure_commit": "3491730c3854997bbe6640ac58b3ab1daf971e85",
+    "final_state": "DEEPSTREAM_GPU_NVMM_SEGMENTATION_ACCEPTED",
+    "engine_sha256": "97acd724809f4817ad4a95525a1bafae6294b1a7c99e04c12d451eeda878866e",
+    "parser_sha256": "5cc5f9accc465b1c8dc5b8dd59a5983db85bbd39da89dd1322a7bcd910ad2728",
+    "labels_sha256": "8b305d45726151909e68c165f5e29321e50bcb2e700ae034780c51b9d16c1559",
+    "decoder_id": "c6_5d_yolo11n_seg_deepstream_decoder_v1"
+  },
+  "process_boundary": {
+    "deepstream_worker": "separate_gpu_process",
+    "service_process": "fastapi",
+    "transport": "http_json",
+    "direction": "deepstream_to_service",
+    "internal_endpoint": "/internal/v1/streaming/known-defects",
+    "websocket_endpoint": "/v1/ws/streaming-known-defects",
+    "reuse_image_upload_endpoint": false,
+    "reuse_persisted_known_defect_event": false
+  },
+  "event": {
+    "schema_version": "1",
+    "event_type": "streaming_known_defect.observed",
+    "classes": {
+      "0": "bent",
+      "1": "color",
+      "2": "scratch"
+    },
+    "diagnostic_confidence": 0.25,
+    "max_instances": 300,
+    "include_raw_frame": false,
+    "include_raw_mask": false,
+    "include_rtsp_uri": false
+  },
+  "delivery": {
+    "semantics": "best_effort_live_observation",
+    "queue_mode": "latest_event_wins",
+    "queue_max_events": 1,
+    "request_timeout_ms": 1000,
+    "max_retries": 3,
+    "initial_backoff_ms": 100,
+    "multiplier": 2.0,
+    "max_backoff_ms": 1000,
+    "fail_pipeline_on_delivery_exhaustion": false
+  },
+  "observability": {
+    "counters": [
+      "stream_service_events_generated_total",
+      "stream_service_events_delivered_total",
+      "stream_service_events_dropped_total",
+      "stream_service_delivery_errors_total",
+      "stream_service_delivery_retries_total"
+    ],
+    "gauges": [
+      "stream_service_bridge_up",
+      "stream_service_pending_events",
+      "stream_service_seconds_since_delivery"
+    ],
+    "redact_source_credentials": true
+  },
+  "security": {
+    "internal_only": true,
+    "send_rtsp_uri": false,
+    "send_credentials": false,
+    "authentication": "none_internal_network_only"
+  },
+  "foundation": {
+    "contract_only": true,
+    "service_endpoint_implemented": false,
+    "worker_publisher_implemented": false,
+    "websocket_channel_implemented": false,
+    "actual_rtsp_used": false,
+    "deepstream_runtime_used": false,
+    "persistence_used": false,
+    "network_used": false,
+    "final_test_used": false
+  }
+}

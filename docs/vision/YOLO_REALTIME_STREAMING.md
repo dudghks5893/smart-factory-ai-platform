@@ -25,7 +25,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
 | C6-4 RTSP reconnect/backpressure/observability | `CLOSED / RTSP_RELIABILITY_ACCEPTED` |
 | C6-5 DeepStream GPU/NVMM integration | `CLOSED / DEEPSTREAM_GPU_NVMM_SEGMENTATION_ACCEPTED` |
-| C6-6 Service integration and closure | `NOT STARTED` |
+| C6-6 Service integration and closure | `C6-6A CONTRACT_COMMITTED / SERVICE_BRIDGE_PENDING` |
 
 ## 3. Why GStreamer first
 
@@ -1206,3 +1206,90 @@ C6-5 전체 final state:
 다음 상태:
 
 `C6-6 SERVICE_INTEGRATION_PENDING`
+
+## 29. C6-6A Service integration contract foundation
+
+C6-6A는 sealed C6-5 DeepStream segmentation runtime을 기존 FastAPI service
+layer에 연결하기 전에 process boundary와 live-event semantics를 먼저 고정한다.
+이 단계에서는 service endpoint, worker publisher, WebSocket channel을 구현하거나
+실제 RTSP/DeepStream runtime을 실행하지 않는다.
+
+Inherited C6-5 identity:
+
+- C6-5 closure commit:
+  `3491730c3854997bbe6640ac58b3ab1daf971e85`
+- final state:
+  `DEEPSTREAM_GPU_NVMM_SEGMENTATION_ACCEPTED`
+- L4 TensorRT plan SHA-256:
+  `97acd724809f4817ad4a95525a1bafae6294b1a7c99e04c12d451eeda878866e`
+- parser SHA-256:
+  `5cc5f9accc465b1c8dc5b8dd59a5983db85bbd39da89dd1322a7bcd910ad2728`
+- labels SHA-256:
+  `8b305d45726151909e68c165f5e29321e50bcb2e700ae034780c51b9d16c1559`
+
+Service integration boundary:
+
+```text
+RTSP / video source
+    ↓
+separate DeepStream GPU worker
+    ↓
+normalized compact segmentation observation
+    ↓
+internal HTTP JSON bridge
+    ↓
+FastAPI service process
+    ↓
+dedicated streaming WebSocket channel
+```
+
+Reserved boundaries:
+
+- internal ingest:
+  `/internal/v1/streaming/known-defects`
+- live WebSocket:
+  `/v1/ws/streaming-known-defects`
+- event type:
+  `streaming_known_defect.observed`
+
+기존 `POST /v1/known-defects`는 multipart image를 받아 Ultralytics YOLO
+runtime을 다시 실행하는 API이므로 streaming ingest로 재사용하지 않는다.
+또한 기존 `known_defect.created` event는 durable persistence commit 이후에만
+발행되는 의미를 가지므로, 아직 persistence contract가 없는 DeepStream live
+observation에 그 event 이름을 재사용하지 않는다.
+
+현재 known-defect persistence는 source image SHA-256과 model/dataset provenance를
+필수로 요구한다. C6-6A에서는 RTSP URI, PTS 또는 임의 metadata를 image SHA-256으로
+위장하지 않는다. Streaming persistence가 필요하면 실제 frame-content identity와
+durability semantics를 별도 단계에서 정의한다.
+
+Live event는 opaque source ID, session/observation UUID, frame/PTS/UTC time,
+image dimensions, exact runtime identity, class/confidence/bbox와 compact mask
+pixel count/area ratio만 전달한다. Raw frame, raw mask, RTSP URI와 credential은
+payload에 포함하지 않는다.
+
+Delivery는 UI/API 장애가 GPU inference를 block하지 않는
+`best_effort_live_observation`으로 고정한다. `latest_event_wins`, queue size 1,
+1초 request timeout과 bounded retry를 사용하며 delivery exhaustion은
+DeepStream pipeline failure로 승격하지 않는다. 이 경계는 live observability용이며
+durable inspection traceability를 의미하지 않는다.
+
+C6-6A scope:
+
+- contract only: `true`
+- service endpoint implemented: `false`
+- worker publisher implemented: `false`
+- WebSocket channel implemented: `false`
+- actual RTSP used: `false`
+- DeepStream runtime used: `false`
+- persistence used: `false`
+- network used: `false`
+- sealed final test used: `false`
+
+C6-6A final state:
+
+`CONTRACT_COMMITTED / SERVICE_BRIDGE_PENDING`
+
+다음 상태:
+
+`C6-6B SERVICE_BRIDGE_API`
