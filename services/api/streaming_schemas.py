@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timedelta
-from typing import Literal, Self
+from typing import Literal, Self, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -150,7 +150,10 @@ class StreamingKnownDefectObservedEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["1"] = "1"
-    type: Literal["streaming_known_defect.observed"] = EXPECTED_EVENT_TYPE
+    type: Literal["streaming_known_defect.observed"] = cast(
+        Literal["streaming_known_defect.observed"],
+        EXPECTED_EVENT_TYPE,
+    )
     observation: StreamingKnownDefectObservationPayload
 
 
