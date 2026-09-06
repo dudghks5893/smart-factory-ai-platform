@@ -25,7 +25,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
 | C6-4 RTSP reconnect/backpressure/observability | `CLOSED / RTSP_RELIABILITY_ACCEPTED` |
 | C6-5 DeepStream GPU/NVMM integration | `CLOSED / DEEPSTREAM_GPU_NVMM_SEGMENTATION_ACCEPTED` |
-| C6-6 Service integration and closure | `C6-6B2 API_RUNTIME_ACCEPTED / WORKER_PUBLISHER_PENDING` |
+| C6-6 Service integration and closure | `C6-6C1 WORKER_PUBLISHER_SOURCE_COMMITTED / PUBLISHER_RUNTIME_PENDING` |
 
 ## 3. Why GStreamer first
 
@@ -1396,3 +1396,56 @@ C6-6B2 final state:
 다음 상태:
 
 `C6-6C WORKER_PUBLISHER`
+
+## 32. C6-6C1 Worker publisher source
+
+C6-6C1은 C6-6B2에서 실제 HTTP/WebSocket service bridge runtime이 accepted 된 상태를
+기준으로 DeepStream worker 쪽의 non-blocking publisher source를 추가한다. 실제 network
+runtime과 DeepStream GPU pipeline 결합은 다음 C6-6C2에서 검증한다.
+
+Publisher source boundary:
+
+```text
+compact DeepStream frame snapshot
+    ↓
+sealed runtime identity + live observation
+    ↓
+queue size 1 / latest_event_wins
+    ↓
+bounded HTTP delivery worker thread
+    ↓
+POST /internal/v1/streaming/known-defects
+```
+
+Source behavior:
+
+- raw frame/raw mask/RTSP URI/image SHA-256은 publisher payload에 포함하지 않는다.
+- source ID는 credential-free opaque identifier만 허용한다.
+- defect instance가 없는 frame은 `streaming_known_defect.observed`로 발행하지 않는다.
+- `submit()`은 network I/O를 수행하지 않고 pending slot 하나만 갱신한다.
+- pending event가 이미 있으면 newest event가 대체하고 dropped counter를 증가시킨다.
+- HTTP timeout/retry/backoff는 C6-6A의 `1000 ms / 3 retries / 100×2 ms` contract를 상속한다.
+- delivery exhaustion은 dropped/error metric으로 끝내고 GPU producer failure로 승격하지 않는다.
+- observability snapshot은 C6-6A에서 고정한 5 counters + 3 gauges를 그대로 사용한다.
+
+C6-6C1 scope:
+
+- worker publisher source implemented: `true`
+- DeepStream compact snapshot adapter implemented: `true`
+- latest-event-wins queue implemented: `true`
+- bounded retry/backoff implemented: `true`
+- actual publisher HTTP runtime executed: `false`
+- actual service bridge used: `false`
+- actual RTSP used: `false`
+- DeepStream GPU runtime used: `false`
+- persistence used: `false`
+- sealed final test used: `false`
+- durable runtime evidence artifact written: `false`
+
+C6-6C1 final state:
+
+`WORKER_PUBLISHER_SOURCE_COMMITTED / PUBLISHER_RUNTIME_PENDING`
+
+다음 상태:
+
+`C6-6C2 WORKER_PUBLISHER_RUNTIME`
