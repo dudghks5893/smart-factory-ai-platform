@@ -24,7 +24,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-2 Native GStreamer synthetic/file smoke test | `CLOSED / NATIVE_SMOKE_ACCEPTED` |
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
 | C6-4 RTSP reconnect/backpressure/observability | `CLOSED / RTSP_RELIABILITY_ACCEPTED` |
-| C6-5 DeepStream GPU/NVMM integration | `C6-5A CLOSED / C6-5B CLOSED / C6-5C CLOSED / C6-5D SEGMENTATION_PENDING` |
+| C6-5 DeepStream GPU/NVMM integration | `CLOSED / DEEPSTREAM_GPU_NVMM_SEGMENTATION_ACCEPTED` |
 | C6-6 Service integration and closure | `NOT STARTED` |
 
 ## 3. Why GStreamer first
@@ -1051,3 +1051,158 @@ C6-5C final state:
 다음 상태:
 
 `C6-5D SEGMENTATION_PENDING`
+
+## 28. C6-5D DeepStream segmentation result
+
+C6-5D는 C6-5C에서 고정한 DeepStream/L4 TensorRT INT8 inference path 위에
+YOLO11n-seg `output0`/`output1` decode, instance-mask metadata, `nvdsosd`
+mask rendering과 annotated-video evidence를 단계적으로 추가했다. C5/C6-5C
+accepted artifact를 rebuild하거나 model-quality acceptance를 다시 열지 않았다.
+
+C6-5D decoder foundation commit:
+
+`72d8f6e2a906fdfff4205a88fadbe874f73f909e`
+
+Decoder/parser contract:
+
+- parser symbol: `NvDsInferParseYolo11Seg`
+- parser SHA-256:
+  `5cc5f9accc465b1c8dc5b8dd59a5983db85bbd39da89dd1322a7bcd910ad2728`
+- parser bytes: `38208`
+- labels SHA-256:
+  `8b305d45726151909e68c165f5e29321e50bcb2e700ae034780c51b9d16c1559`
+- model input: `640x640`
+- `output0`: `FLOAT [1,39,8400]`
+- `output1`: `FLOAT [1,32,160,160]`
+- confidence threshold: `0.25`
+- class-aware NMS IoU: `0.7`
+- mask threshold: `0.5`
+- mask reconstruction: bbox-local sigmoid probability + bilinear half-pixel
+
+C6-5D instance metadata runtime commit:
+
+`54403926cf87ce9e984fe460ea4ebf504a2e3974`
+
+Instance metadata runtime은 `nvinfer` downstream에서 `NvDsBatchMeta`,
+object metadata와 `NvOSD_MaskParams`를 실제로 관측하고 mask probability,
+geometry, byte size와 object-to-mask coverage를 검증했다.
+
+C6-5D mask rendering runtime commit:
+
+`d84aee3177afc6fa942d14824b20d4180bc164a7`
+
+Mask rendering runtime은 `nvdsosd display-mask=1` 경계를 통과한 pre/post OSD
+frame과 instance mask metadata를 확인했다. 이 단계에서는 encoded annotated
+video를 생성하지 않았다.
+
+C6-5D annotated-video evidence commit:
+
+`0e0bdc32ac44d22aad33dffa347c02431ae3cfb0`
+
+Canonical annotated-video path:
+
+```text
+sample_720p.h264
+    ↓
+h264parse
+    ↓
+nvv4l2decoder
+    ↓
+NVMM / CUDA-device memory
+    ↓
+nvstreammux
+    ↓
+nvinfer
+    ↓
+sealed L4 TensorRT INT8 model.plan
+    ↓
+YOLO11n-seg instance decode / mask metadata
+    ↓
+nvvideoconvert (RGBA / NVMM)
+    ↓
+nvdsosd display-mask=1
+    ↓
+GPU-rendered annotated frames
+    ↓
+CPU I420 evidence boundary
+    ↓
+jpegenc
+    ↓
+avimux
+    ↓
+annotated AVI
+```
+
+GCP L4 환경에서는 `nvv4l2h264enc` plugin 자체는 존재했지만
+`/dev/v4l2-nvenc` device가 제공되지 않아 NVENC initialization이 실패했다.
+따라서 DeepStream inference, instance-mask handling과 `nvdsosd` rendering은
+GPU path를 유지하고, evidence 파일 압축 단계만 CPU MJPEG/AVI를 사용했다.
+이 fallback은 model inference 또는 mask rendering backend를 CPU로 변경하지 않는다.
+
+Canonical runtime result:
+
+- sealed TensorRT plan SHA-256:
+  `97acd724809f4817ad4a95525a1bafae6294b1a7c99e04c12d451eeda878866e`
+- sealed TensorRT plan bytes: `4940452`
+- source SHA-256:
+  `5f29353a6ec4727bd49fb523efc207d643e6638f4e5c56f060e1b61291aa6ea2`
+- source bytes: `14759548`
+- pre-OSD frames: `36`
+- post-OSD frames: `36`
+- observed objects: `55`
+- observed masks: `55`
+- mask elements: `150282`
+- EOS observed: `true`
+- batch metadata observed: `true`
+- mask metadata valid: `true`
+- masks cover objects: `true`
+- segmentation decode executed: `true`
+- instance metadata executed: `true`
+- mask rendering executed: `true`
+- overlay executed: `true`
+- annotated video written: `true`
+- annotated video decode check: `PASS`
+- evidence encoder boundary: `CPU_MJPEG_ONLY`
+- dataset used: `false`
+- validation split used: `false`
+- test split used: `false`
+- sealed final test used: `false`
+
+Annotated-video evidence identity:
+
+- AVI:
+  `c6_5d_deepstream_annotated_sample.avi`
+- AVI SHA-256:
+  `689158c742f0418a34745803bc75c5860a9045fabd3d9cc4a980f5499acacf34`
+- AVI bytes: `3570462`
+- JSON:
+  `c6_5d_deepstream_annotated_video_evidence.json`
+- JSON SHA-256:
+  `33cabd8a49601580a85210e4ad5e81d8efaa4ac8655a539b33798ef1f79ed62a`
+- JSON bytes: `2247`
+- external archive:
+  `smart-factory-ai-platform-evidence/C6/C6-5D/c6_5d_deepstream_annotated_video_evidence.zip`
+- archive SHA-256:
+  `3651c8884a62929e9cc1b411787a411bd611bfa14d86f75c0c704b382a5cd78a`
+- archive bytes: `3573049`
+
+GCP VM evidence와 local macOS evidence root
+`smart-factory-ai-platform-evidence/C6/C6-5D/`의 AVI, JSON, ZIP은
+각각 SHA-256과 byte size가 동일하고 archive integrity check도 통과했다.
+
+NVIDIA sample에서 관측된 object/mask count는 decoder, metadata, rendering과
+encoded-evidence path가 실제 실행됐음을 확인하기 위한 structural runtime
+evidence다. 이 수치를 제조 불량 탐지 정확도나 model-quality evidence로
+해석하지 않는다.
+
+C6-5D final state:
+
+`CLOSED / DEEPSTREAM_SEGMENTATION_ACCEPTED`
+
+C6-5 전체 final state:
+
+`CLOSED / DEEPSTREAM_GPU_NVMM_SEGMENTATION_ACCEPTED`
+
+다음 상태:
+
+`C6-6 SERVICE_INTEGRATION_PENDING`
