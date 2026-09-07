@@ -142,3 +142,15 @@ def test_demo_payload_contains_no_secret_or_raw_data_fields() -> None:
     assert not any(term in payload for term in ("password", "api_key", "access_token", "raw_image"))
     assert "/users/" not in payload
     assert "smartfactory-dashboard-demo" not in payload
+
+
+# ADD 2026-09-07: Dashboard container도 repository-root import 계약을 보존한다.
+def test_dashboard_container_preserves_repository_import_root() -> None:
+    root = Path(__file__).resolve().parents[2]
+    dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
+    stage = dockerfile.split("FROM application-base AS dashboard-runtime", maxsplit=1)[1].split(
+        "FROM application-base AS rag-runtime", maxsplit=1
+    )[0]
+    assert "ENV PYTHONPATH=/app" in stage
+    assert "COPY apps ./apps" in stage
+    assert "streamlit" in stage

@@ -76,6 +76,8 @@ USER app
 CMD ["python", "-m", "pytest"]
 
 FROM application-base AS dashboard-runtime
+# ADD 2026-09-07: Keep repository root importable for apps.dashboard absolute imports.
+ENV PYTHONPATH=/app
 COPY --from=dashboard-dependencies --chown=app:app /app/.venv /app/.venv
 COPY apps ./apps
 COPY shared ./shared
