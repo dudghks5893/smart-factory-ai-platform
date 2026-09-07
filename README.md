@@ -2,9 +2,9 @@
 
 시각 이상 탐지, 검사 이력, 실험 lineage, observability, drift 분석, 운영 대시보드, 근거 기반 SOP RAG assistant를 결합한 **production-oriented 스마트팩토리 AI 품질 플랫폼**입니다.
 
-> **상태:** STEP 0–16의 repository-scoped 구현과 local/static 검증을 완료했습니다.
+> **상태:** STEP 0–16의 repository-scoped 구현과 YOLO C4 model quality, C5 deployment optimization, C6 real-time streaming/service integration lifecycle을 완료했습니다.
 >
-> 실제 공장 데이터 검증, production GKE/Cloud SQL 배포, production LLM 및 private SOP 검증은 아직 수행하지 않았습니다.
+> C6는 NVIDIA L4에서 TensorRT INT8 + DeepStream GPU/NVMM + FastAPI/WebSocket service E2E runtime까지 검증했습니다. 실제 공장 데이터·live camera 검증, production GKE/Cloud SQL 배포, production LLM 및 private SOP 검증은 아직 수행하지 않았습니다.
 
 ## 1. 문제 정의와 목표
 
@@ -14,6 +14,8 @@
 
 - Normal-only PatchCore artifact 학습과 validation-only threshold calibration
 - Image/pixel 품질 평가와 명시적 boundary를 가진 성능 benchmark
+- YOLO11n-seg controlled experiment, final-test seal, ONNX/TensorRT INT8 deployment optimization
+- GStreamer/RTSP reliability, DeepStream GPU/NVMM segmentation, compact service E2E integration
 - FastAPI inference와 PostgreSQL inspection audit history
 - MLflow experiment/model lineage backfill
 - Docker, GitHub Actions CI, Prometheus/Grafana와 batch drift analysis
@@ -29,7 +31,8 @@ PatchCore는 알려진 defect class를 분류하지 않습니다. 현재 serving
 | 영역 | 구현 내용 |
 |---|---|
 | Data | MVTec 구조·이미지·mask 검증, deterministic split, manifest integrity |
-| Vision | Frozen WideResNet50-2 feature, PatchCore coreset memory bank, nearest-neighbor score |
+| Vision | Frozen WideResNet50-2 PatchCore + YOLO11n-seg known-defect segmentation lifecycle |
+| Real-time Vision | GStreamer/RTSP, TensorRT INT8, DeepStream GPU/NVMM, compact HTTP/WebSocket bridge |
 | Evaluation | Validation-only threshold, fixed-threshold image/pixel metric, defect별 diagnostics |
 | Serving | 실제 PatchCore artifact loading, strict threshold, bounded upload, 안정적인 FastAPI error contract |
 | Persistence | SQLAlchemy repository, PostgreSQL/psycopg, Alembic migration, inspection history/detail |
@@ -65,6 +68,13 @@ flowchart LR
     RAG --> Retriever["Exact cosine retriever"]
     Retriever --> Generator["Grounded generator"]
     Generator --> Citations["Answer / citations / abstention"]
+
+    Video["Video / RTSP input"] --> DeepStream["GStreamer + DeepStream GPU/NVMM"]
+    DeepStream --> TRT["TensorRT INT8 YOLO11n-seg"]
+    TRT --> Compact["Compact bbox + mask-grid metadata"]
+    Compact --> Publisher["Host latest-event-wins publisher"]
+    Publisher --> StreamAPI["FastAPI streaming ingest"]
+    StreamAPI --> StreamWS["Dedicated WebSocket"]
 ```
 
 Dashboard는 PostgreSQL에 직접 연결하지 않습니다. Grafana는 service telemetry용이며 inspection business UI가 아닙니다. Drift는 Prometheus anomaly ratio가 아니라 inspection history와 immutable reference를 비교하는 별도 batch pipeline입니다. RAG는 Vision API/PostgreSQL lifecycle과 분리된 독립 service입니다.
@@ -146,7 +156,7 @@ C5-4B1에서는 train 84장만 사용한 ModelOpt INT8 PTQ로 explicit Q/DQ ONNX
 자세한 C4 provenance와 quality/resource evidence는 [YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md),
 C5 export/parity contract와 test seal은 [YOLO Deployment Optimization](docs/vision/YOLO_DEPLOYMENT_OPTIMIZATION.md)에 기록되어 있습니다.
 
-**C6 real-time streaming**은 accepted TensorRT INT8 engine을 다시 최적화하지 않고 GStreamer 영상 ingress에 연결하는 단계입니다. C6-1에서는 `BGR uint8 HWC` appsink frame contract와 `latest_frame_wins` bounded backpressure를 먼저 고정하며, native GStreamer runtime, RTSP, TensorRT streaming inference와 DeepStream/NVMM은 후속 gate에서 분리해 검증합니다. 자세한 contract는 [YOLO Real-Time Streaming](docs/vision/YOLO_REALTIME_STREAMING.md)에 기록합니다.
+**C6 real-time streaming**은 accepted TensorRT INT8 engine을 다시 최적화하지 않고 GStreamer ingress → RTSP reliability → DeepStream GPU/NVMM segmentation → compact service integration까지 연결해 `CLOSED / REALTIME_STREAMING_ACCEPTED`로 종료했습니다. NVIDIA L4 corrected-semantics revalidation에서 DeepStream 34 frames, compact defect 32 frames / 54 instances, publisher 32 events, WebSocket 32 events를 확인했고 exact event match와 bbox-local mask grid → source-space area estimate 검증을 모두 통과했습니다. raw frame/raw mask는 Python/service boundary로 전송하지 않았으며, 이 runtime evidence는 구조·서비스 경로 검증용입니다. 실제 제조 불량 demo는 학습 모델과 별도 demo-only 입력으로 최종화 단계에서 구성합니다. 자세한 contract와 provenance는 [YOLO Real-Time Streaming](docs/vision/YOLO_REALTIME_STREAMING.md)에 기록되어 있습니다.
 
 ## 5. Serving과 inspection data
 
