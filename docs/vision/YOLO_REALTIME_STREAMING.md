@@ -25,7 +25,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
 | C6-4 RTSP reconnect/backpressure/observability | `CLOSED / RTSP_RELIABILITY_ACCEPTED` |
 | C6-5 DeepStream GPU/NVMM integration | `CLOSED / DEEPSTREAM_GPU_NVMM_SEGMENTATION_ACCEPTED` |
-| C6-6 Service integration and closure | `C6-6C1 WORKER_PUBLISHER_SOURCE_COMMITTED / PUBLISHER_RUNTIME_PENDING` |
+| C6-6 Service integration and closure | `C6-6C2 WORKER_PUBLISHER_RUNTIME_ACCEPTED / SERVICE_E2E_PENDING` |
 
 ## 3. Why GStreamer first
 
@@ -1449,3 +1449,55 @@ C6-6C1 final state:
 다음 상태:
 
 `C6-6C2 WORKER_PUBLISHER_RUNTIME`
+
+## 33. C6-6C2 Worker publisher runtime
+
+C6-6C2는 C6-6C1 worker publisher를 실제 loopback network에서 실행해 stdlib HTTP transport,
+canonical FastAPI streaming ingest, process-local broadcaster와 dedicated WebSocket까지
+연결되는지 검증한다. DeepStream GPU pipeline 자체는 아직 이 runtime smoke에 결합하지 않는다.
+
+Canonical success path:
+
+```text
+compact DeepStream frame snapshot
+    ↓
+StreamingKnownDefectObservation
+    ↓
+LatestEventWinsPublisher worker thread
+    ↓ actual stdlib HTTP POST
+/internal/v1/streaming/known-defects
+    ↓ HTTP 202
+FastAPI BackgroundTasks
+    ↓
+StreamingKnownDefectEventBroadcaster
+    ↓
+WS /v1/ws/streaming-known-defects
+    ↓
+actual loopback WebSocket client
+```
+
+Runtime acceptance:
+
+- actual publisher HTTP transport used: `true`
+- canonical FastAPI streaming bridge used: `true`
+- HTTP 202 accepted by publisher: `true`
+- exact live observation received over WebSocket: `true`
+- sealed runtime identity preserved: `true`
+- raw frame/raw mask/RTSP URI transported: `false`
+- image SHA fabricated: `false`
+- success metrics: generated `1`, delivered `1`, dropped `0`
+- actual connection-refused failure path exercised: `true`
+- delivery exhaustion attempts: initial + `3` retries
+- bounded backoff exercised: `100 → 200 → 400 ms`
+- exhausted delivery is isolated from the submitter/GPU producer: `true`
+- persistence/re-inference/actual RTSP/DeepStream GPU runtime used: `false`
+- sealed final test used: `false`
+- durable runtime evidence artifact written: `false`
+
+C6-6C2 final state:
+
+`WORKER_PUBLISHER_RUNTIME_ACCEPTED / SERVICE_E2E_PENDING`
+
+다음 상태:
+
+`C6-6 SERVICE_E2E_PENDING`
