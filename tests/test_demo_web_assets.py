@@ -49,10 +49,11 @@ def test_demo_web_is_packaged_and_mounted_same_origin() -> None:
     assert 'name="demo-web"' in api_app
 
 
-# ADD 2026-09-07: Demo Web style이 responsive decision states를 포함하게 한다.
+# ADD 2026-09-07: responsive decision UI → MODIFY 2026-09-07: hidden empty-state 계약 추가.
 def test_demo_web_styles_include_responsive_decision_ui() -> None:
     styles = STYLES.read_text(encoding="utf-8")
     assert ".workspace" in styles
     assert ".pill.accept" in styles
     assert ".pill.reject" in styles
+    assert ".empty[hidden]{display:none}" in styles
     assert "@media(max-width:980px)" in styles
