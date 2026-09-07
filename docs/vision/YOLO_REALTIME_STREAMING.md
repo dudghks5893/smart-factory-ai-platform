@@ -25,7 +25,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
 | C6-4 RTSP reconnect/backpressure/observability | `CLOSED / RTSP_RELIABILITY_ACCEPTED` |
 | C6-5 DeepStream GPU/NVMM integration | `CLOSED / DEEPSTREAM_GPU_NVMM_SEGMENTATION_ACCEPTED` |
-| C6-6 Service integration and closure | `C6-6C2 WORKER_PUBLISHER_RUNTIME_ACCEPTED / SERVICE_E2E_PENDING` |
+| C6-6 Service integration and closure | `C6-6 SERVICE_E2E_SOURCE_COMMITTED / GPU_RUNTIME_PENDING` |
 
 ## 3. Why GStreamer first
 
@@ -1501,3 +1501,60 @@ C6-6C2 final state:
 다음 상태:
 
 `C6-6 SERVICE_E2E_PENDING`
+
+## 34. C6-6 Service E2E source
+
+C6-6C2에서 worker publisher의 실제 HTTP/FastAPI/WebSocket runtime을 acceptance한 뒤,
+C6-6 전체 service E2E를 위해 DeepStream C++ metadata와 Python publisher 사이의 실제
+process boundary를 source로 고정한다.
+
+`pyds`를 새로 도입하지 않는다. C6-5D에서 검증한 C++ `NvDsBatchMeta` pad-probe가
+raw frame/raw mask를 Python으로 복사하는 대신 frame별 compact JSON line만 stdout으로
+내보내고, host worker adapter가 그 line을 `DeepStreamFrameSnapshot`으로 strict parse한다.
+
+Planned runtime path:
+
+```text
+NVIDIA sample H264
+    ↓
+nvv4l2decoder / NVMM
+    ↓
+nvinfer / sealed L4 TensorRT INT8 plan
+    ↓
+NvDsObjectMeta + NvOSD_MaskParams
+    ↓ C++ pad-probe
+compact stdout frame line
+    ↓ host worker adapter
+DeepStreamFrameSnapshot
+    ↓
+LatestEventWinsPublisher
+    ↓ actual HTTP POST
+FastAPI streaming ingest
+    ↓
+dedicated WebSocket
+```
+
+Source boundary:
+
+- DeepStream worker container network: `none`
+- worker/service transport: compact stdout metadata only
+- raw frame/raw mask transfer to Python: `false`
+- RTSP URI/credential transfer: `false`
+- image SHA fabrication: `false`
+- mask payload: thresholded pixel count only
+- exact class mapping: `bent / color / scratch`
+- source coordinate space: streammux `1280×720`
+- sealed TensorRT plan: read-only mount
+- `pyds` dependency: `false`
+- persistence/re-inference: `false`
+- dataset/validation/test/final-test use: `false`
+- actual GPU E2E execution in this source step: `false`
+- durable runtime evidence written in this source step: `false`
+
+C6-6 current state:
+
+`SERVICE_E2E_SOURCE_COMMITTED / GPU_RUNTIME_PENDING`
+
+다음 상태:
+
+`C6-6 SERVICE_E2E_GPU_RUNTIME`
