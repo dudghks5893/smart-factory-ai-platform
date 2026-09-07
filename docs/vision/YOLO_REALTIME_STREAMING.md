@@ -25,7 +25,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
 | C6-4 RTSP reconnect/backpressure/observability | `CLOSED / RTSP_RELIABILITY_ACCEPTED` |
 | C6-5 DeepStream GPU/NVMM integration | `CLOSED / DEEPSTREAM_GPU_NVMM_SEGMENTATION_ACCEPTED` |
-| C6-6 Service integration and closure | `C6-6 MASK_AREA_SEMANTICS_REPAIRED / GPU_REVALIDATION_PENDING` |
+| C6-6 Service integration and closure | `CLOSED / SERVICE_E2E_ACCEPTED` |
 
 ## 3. Why GStreamer first
 
@@ -1541,7 +1541,7 @@ Source boundary:
 - raw frame/raw mask transfer to Python: `false`
 - RTSP URI/credential transfer: `false`
 - image SHA fabrication: `false`
-- mask payload: thresholded pixel count only
+- mask payload: bbox-local mask grid dimensions + threshold-positive sample count
 - exact class mapping: `bent / color / scratch`
 - source coordinate space: streammux `1280×720`
 - sealed TensorRT plan: read-only mount
@@ -1591,3 +1591,91 @@ publisher와 C6-6B/C6-6C2 HTTP/FastAPI/WebSocket contract는 변경하지 않는
 다음 단계:
 
 `C6-6 SERVICE_E2E_GPU_REVALIDATION`
+
+## 36. C6-6 corrected GPU acceptance and C6 closure
+
+Mask-area semantic repair commit
+`04f3fa805825216aa41647734894290a6f8a4635`에서 bbox-local
+`NvOSD_MaskParams` grid를 source-space area estimate로 변환하도록 수정했고,
+GitHub Actions run #89가 success로 완료된 뒤 L4 GPU에서 service E2E를 재검증했다.
+
+Corrected GPU runtime path:
+
+```text
+NVIDIA sample H264
+    ↓
+nvv4l2decoder / NVMM
+    ↓
+sealed L4 TensorRT INT8 plan
+    ↓
+NvDsObjectMeta + bbox-local NvOSD_MaskParams
+    ↓ C++ pad-probe
+compact bbox + mask grid/sample summary
+    ↓ host Python adapter
+source-space estimated mask pixel count
+    ↓
+LatestEventWinsPublisher
+    ↓ actual HTTP POST / 202
+FastAPI streaming ingest
+    ↓
+dedicated WebSocket
+```
+
+Corrected-semantics runtime acceptance:
+
+- DeepStream frames observed: `34`
+- compact defect frames emitted: `32`
+- compact instances observed: `54`
+- mask semantic instances validated: `54 / 54`
+- mask semantic scaled instances: `54 / 54`
+- publisher delivered events: `32`
+- WebSocket events received: `32`
+- exact publisher/WebSocket event matches: `PASS`
+- bbox-local mask grid semantics: `PASS`
+- source-space mask area estimate semantics: `PASS`
+- full service path revalidation: `PASS`
+- security scope acceptance: `PASS`
+- DeepStream GPU boundary: `PASS`
+- raw frame transported to Python/service: `false`
+- raw mask transported to Python/service: `false`
+- DeepStream worker container network used: `false`
+- dataset/validation/test/final-test used: `false`
+- persistence/re-inference used: `false`
+
+Corrected runtime evidence:
+
+- JSON:
+  `smart-factory-ai-platform-evidence/C6/C6-6/c6_6_service_e2e_gpu_revalidation.json`
+- JSON SHA-256:
+  `d3f1ffd2e0f1dd0a5b24b5c3a56f6f68e1bb9a34862776889ccb2218a76fe13f`
+- JSON bytes: `6483`
+- ZIP:
+  `smart-factory-ai-platform-evidence/C6/C6-6/c6_6_service_e2e_gpu_revalidation_evidence.zip`
+- ZIP SHA-256:
+  `2a7502878f7462c0b7740ade0a1cc00345e6ed51a50ec16a0c43fb9c5b0b36c9`
+- ZIP bytes: `2016`
+- ZIP internal integrity: `PASS`
+- VM/Mac corrected evidence identity: `PASS`
+
+Pre-fix evidence policy:
+
+- 최초 C6-6 runtime evidence는 실행 이력 보존용으로 유지한다.
+- pre-fix evidence의 full service path 결과는 구조 검증 이력으로만 사용한다.
+- pre-fix `mask.area_ratio`는 source-space area acceptance로 사용하지 않는다.
+- C6-6 최종 mask semantics acceptance는 corrected revalidation evidence만 기준으로 한다.
+
+C6-6 final state:
+
+`CLOSED / SERVICE_E2E_ACCEPTED`
+
+C6 final state:
+
+`CLOSED / REALTIME_STREAMING_ACCEPTED`
+
+C6에서 고정한 실제 runtime boundary는
+GStreamer ingress → RTSP reliability → TensorRT streaming →
+DeepStream GPU/NVMM segmentation → compact service integration이다.
+C4/C5 model-quality acceptance와 sealed final-test boundary는 다시 열지 않았다.
+
+다음 작업은 C6의 새 runtime stage가 아니라 프로젝트 최종화 단계다.
+README, evidence index, 재현 가능한 trained-model demo와 portfolio-facing artifact를 정리한다.
