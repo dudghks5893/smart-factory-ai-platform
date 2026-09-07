@@ -410,3 +410,125 @@ export function combinedInspectionWebSocketUrl(locationValue) {
 export function combinedInspectionDetailUrl(combinedInspectionId) {
   return `/v1/combined-inspections/${encodeURIComponent(combinedInspectionId)}`;
 }
+
+// ADD 2026-09-07: Non-persisted DeepStream observation을 compact browser value로 strict하게 검증한다.
+export function normalizeStreamingObservation(value) {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    !INSPECTION_ID_PATTERN.test(value.observation_id ?? "") ||
+    !INSPECTION_ID_PATTERN.test(value.stream_session_id ?? "") ||
+    !isNonEmptyString(value.source_id) ||
+    !Number.isInteger(value.frame_number) ||
+    value.frame_number < 0 ||
+    !Number.isInteger(value.pts_ns) ||
+    value.pts_ns < 0 ||
+    !isNonEmptyString(value.observed_at) ||
+    !Number.isFinite(Date.parse(value.observed_at)) ||
+    !Number.isInteger(value.image?.width) ||
+    value.image.width <= 0 ||
+    !Number.isInteger(value.image?.height) ||
+    value.image.height <= 0 ||
+    !isFiniteNumber(value.diagnostic_confidence) ||
+    value.diagnostic_confidence !== 0.25 ||
+    !Array.isArray(value.instances) ||
+    !isNonEmptyString(value.runtime?.decoder_id)
+  ) {
+    return null;
+  }
+
+  const instances = [];
+  for (const instance of value.instances) {
+    const expectedClass = { 0: "bent", 1: "color", 2: "scratch" }[instance?.class_id];
+    if (
+      instance === null ||
+      typeof instance !== "object" ||
+      !Number.isInteger(instance.class_id) ||
+      instance.class_name !== expectedClass ||
+      !isFiniteNumber(instance.confidence) ||
+      instance.confidence < 0 ||
+      instance.confidence > 1 ||
+      !Number.isInteger(instance.mask?.pixel_count) ||
+      instance.mask.pixel_count <= 0 ||
+      !isFiniteNumber(instance.mask?.area_ratio) ||
+      instance.mask.area_ratio <= 0 ||
+      instance.mask.area_ratio > 1
+    ) {
+      return null;
+    }
+    instances.push({
+      class_id: instance.class_id,
+      class_name: instance.class_name,
+      confidence: instance.confidence,
+      mask_pixel_count: instance.mask.pixel_count,
+      mask_area_ratio: instance.mask.area_ratio,
+    });
+  }
+
+  return {
+    observation_id: value.observation_id,
+    source_id: value.source_id,
+    stream_session_id: value.stream_session_id,
+    frame_number: value.frame_number,
+    pts_ns: value.pts_ns,
+    observed_at: value.observed_at,
+    image_width: value.image.width,
+    image_height: value.image.height,
+    diagnostic_confidence: value.diagnostic_confidence,
+    decoder_id: value.runtime.decoder_id,
+    instances,
+  };
+}
+
+// ADD 2026-09-07: Persisted YOLO event와 분리된 streaming_known_defect.observed만 수용한다.
+export function parseStreamingObservationEvent(value) {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    value.schema_version !== "1" ||
+    value.type !== "streaming_known_defect.observed"
+  ) {
+    return null;
+  }
+  return normalizeStreamingObservation(value.observation);
+}
+
+// ADD 2026-09-07: Browser-memory streaming frame을 observation UUID로 dedupe하고 newest-first 100으로 제한한다.
+export function mergeStreamingObservations(...groups) {
+  const byId = new Map();
+  for (const group of groups) {
+    for (const candidate of group) {
+      const observation = normalizeStreamingObservation(candidate);
+      if (observation !== null) {
+        byId.set(observation.observation_id, observation);
+      }
+    }
+  }
+  return [...byId.values()]
+    .sort(
+      (left, right) =>
+        Date.parse(right.observed_at) - Date.parse(left.observed_at) ||
+        right.frame_number - left.frame_number ||
+        right.observation_id.localeCompare(left.observation_id),
+    )
+    .slice(0, MAX_VISIBLE_INSPECTIONS);
+}
+
+// ADD 2026-09-07: Non-persisted visible frame window의 defect-frame/instance/latest-frame KPI를 계산한다.
+export function calculateStreamingKpis(observations) {
+  return {
+    visible: observations.length,
+    defectFrames: observations.filter((observation) => observation.instances.length > 0).length,
+    totalInstances: observations.reduce(
+      (total, observation) => total + observation.instances.length,
+      0,
+    ),
+    latestFrame: observations.length === 0 ? null : observations[0].frame_number,
+  };
+}
+
+// ADD 2026-09-07: Browser location에서 dedicated live-only DeepStream ws/wss endpoint를 구성한다.
+export function streamingKnownDefectWebSocketUrl(locationValue) {
+  const protocol = locationValue.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${locationValue.host}/v1/ws/streaming-known-defects`;
+}

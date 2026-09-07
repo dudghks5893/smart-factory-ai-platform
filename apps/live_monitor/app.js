@@ -2,6 +2,7 @@ import {
   calculateCombinedKpis,
   calculateKpis,
   calculateKnownDefectKpis,
+  calculateStreamingKpis,
   combinedInspectionDetailUrl,
   combinedInspectionWebSocketUrl,
   decisionReasonLabel,
@@ -11,13 +12,16 @@ import {
   mergeCombinedInspections,
   mergeInspections,
   mergeKnownDefectInspections,
+  mergeStreamingObservations,
   parseCombinedInspectionEvent,
   parseCombinedInspectionHistory,
   parseInspectionEvent,
   parseInspectionHistory,
   parseKnownDefectEvent,
   parseKnownDefectHistory,
+  parseStreamingObservationEvent,
   reconnectDelayMs,
+  streamingKnownDefectWebSocketUrl,
 } from "./state.js";
 
 const elements = {
@@ -60,6 +64,15 @@ const elements = {
   combinedDetailBody: document.querySelector("#combined-detail-body"),
   combinedDetailTitle: document.querySelector("#combined-detail-title"),
   combinedDetailClose: document.querySelector("#combined-detail-close"),
+  streamingConnection: document.querySelector("#streaming-connection-state"),
+  streamingLastSync: document.querySelector("#streaming-last-sync"),
+  streamingVisible: document.querySelector("#streaming-kpi-visible"),
+  streamingDefectFrames: document.querySelector("#streaming-kpi-defect-frames"),
+  streamingInstanceCount: document.querySelector("#streaming-kpi-instances"),
+  streamingLatestFrame: document.querySelector("#streaming-kpi-latest-frame"),
+  streamingLatest: document.querySelector("#streaming-latest-observation"),
+  streamingFeed: document.querySelector("#streaming-observation-feed"),
+  streamingEmpty: document.querySelector("#streaming-empty-state"),
 };
 
 let inspections = [];
@@ -87,6 +100,11 @@ let combinedGeneration = 0;
 let bufferedCombinedInspections = [];
 let isCombinedSynchronizing = false;
 let combinedSyncAbortController = null;
+let streamingObservations = [];
+let streamingSocket = null;
+let streamingReconnectTimer = null;
+let streamingReconnectAttempt = 0;
+let streamingGeneration = 0;
 
 function setConnectionState(value) {
   elements.connection.textContent = value;
@@ -103,6 +121,12 @@ function setKnownConnectionState(value) {
 function setCombinedConnectionState(value) {
   elements.combinedConnection.textContent = value;
   elements.combinedConnection.dataset.state = value.toLowerCase();
+}
+
+// ADD 2026-09-07: Live-only DeepStream channel 상태를 persisted domains와 독립적으로 표시한다.
+function setStreamingConnectionState(value) {
+  elements.streamingConnection.textContent = value;
+  elements.streamingConnection.dataset.state = value.toLowerCase();
 }
 
 function formatScore(value) {
@@ -297,6 +321,94 @@ function renderCombinedInspections() {
   elements.combinedReject.textContent = String(kpis.reject);
   renderCombinedLatest();
   renderCombinedFeed();
+}
+
+// ADD 2026-09-07: Latest live frame을 persistence/decision 의미 없이 compact observation으로 표시한다.
+function renderStreamingLatest() {
+  elements.streamingLatest.replaceChildren();
+  const latest = streamingObservations[0];
+  if (latest === undefined) {
+    const message = document.createElement("p");
+    message.className = "muted";
+    message.textContent = "Waiting for the first live DeepStream observation.";
+    elements.streamingLatest.append(message);
+    return;
+  }
+
+  const hasDefect = latest.instances.length > 0;
+  const badge = document.createElement("span");
+  badge.className = `result-badge ${hasDefect ? "known" : "normal"}`;
+  badge.textContent = hasDefect ? "KNOWN DEFECTS" : "NO KNOWN DEFECT";
+  elements.streamingLatest.append(badge);
+
+  const classes = [...new Set(latest.instances.map((instance) => instance.class_name))].sort();
+  appendValue(elements.streamingLatest, "Frame", String(latest.frame_number));
+  appendValue(elements.streamingLatest, "Instances", String(latest.instances.length));
+  appendValue(
+    elements.streamingLatest,
+    "Classes",
+    classes.length === 0 ? "None observed" : classes.join(", "),
+  );
+  appendValue(elements.streamingLatest, "Source", latest.source_id);
+  appendValue(elements.streamingLatest, "Session", latest.stream_session_id);
+  appendValue(
+    elements.streamingLatest,
+    "Image",
+    `${latest.image_width} × ${latest.image_height}`,
+  );
+  appendValue(elements.streamingLatest, "Decoder", latest.decoder_id);
+  appendValue(elements.streamingLatest, "Observed", formatTimestamp(latest.observed_at));
+  appendNote(
+    elements.streamingLatest,
+    "Live-only best-effort observation. This frame is not persisted to PostgreSQL.",
+  );
+}
+
+// ADD 2026-09-07: Browser-visible live frame window를 compact newest-first feed로 렌더링한다.
+function renderStreamingFeed() {
+  elements.streamingFeed.replaceChildren();
+  elements.streamingEmpty.hidden = streamingObservations.length !== 0;
+  for (const observation of streamingObservations) {
+    const item = document.createElement("li");
+    item.className = `feed-item ${observation.instances.length > 0 ? "known" : "normal"}`;
+
+    const summary = document.createElement("div");
+    summary.className = "feed-summary";
+    const result = document.createElement("span");
+    result.className = "feed-result";
+    result.textContent = observation.instances.length > 0 ? "KNOWN DEFECT" : "CLEAR";
+    const time = document.createElement("time");
+    time.dateTime = observation.observed_at;
+    time.textContent = formatTimestamp(observation.observed_at);
+    summary.append(result, time);
+
+    const measurement = document.createElement("div");
+    measurement.className = "feed-measurement";
+    measurement.textContent = `Frame ${observation.frame_number} · ${
+      observation.instances.length
+    } instance${observation.instances.length === 1 ? "" : "s"}`;
+
+    const identity = document.createElement("div");
+    identity.className = "feed-identity";
+    identity.textContent = `${observation.source_id} · session …${observation.stream_session_id.slice(
+      -8,
+    )}`;
+
+    item.append(summary, measurement, identity);
+    elements.streamingFeed.append(item);
+  }
+}
+
+// ADD 2026-09-07: Non-persisted streaming visible window KPI와 frame feed를 갱신한다.
+function renderStreamingObservations() {
+  const kpis = calculateStreamingKpis(streamingObservations);
+  elements.streamingVisible.textContent = String(kpis.visible);
+  elements.streamingDefectFrames.textContent = String(kpis.defectFrames);
+  elements.streamingInstanceCount.textContent = String(kpis.totalInstances);
+  elements.streamingLatestFrame.textContent =
+    kpis.latestFrame === null ? "—" : String(kpis.latestFrame);
+  renderStreamingLatest();
+  renderStreamingFeed();
 }
 
 function renderLatest() {
@@ -918,6 +1030,74 @@ function connectKnownAndSynchronize() {
   });
 }
 
+// ADD 2026-09-07: Streaming frame event를 REST recovery 없이 browser-memory window에만 반영한다.
+function acceptStreamingLiveMessage(rawValue) {
+  let event;
+  try {
+    event = parseStreamingObservationEvent(JSON.parse(rawValue));
+  } catch {
+    return;
+  }
+  if (event === null) {
+    return;
+  }
+  streamingObservations = mergeStreamingObservations(streamingObservations, [event]);
+  elements.streamingLastSync.textContent = `Frame ${
+    event.frame_number
+  } · ${new Date().toLocaleTimeString()}`;
+  renderStreamingObservations();
+}
+
+// ADD 2026-09-07: Live-only video channel reconnect를 persisted REST-sync lifecycles와 격리한다.
+function scheduleStreamingReconnect() {
+  if (stopped || streamingReconnectTimer !== null) {
+    return;
+  }
+  if (!navigator.onLine) {
+    setStreamingConnectionState("OFFLINE");
+    return;
+  }
+  setStreamingConnectionState("RECONNECTING");
+  const delay = reconnectDelayMs(streamingReconnectAttempt);
+  streamingReconnectAttempt += 1;
+  streamingReconnectTimer = window.setTimeout(() => {
+    streamingReconnectTimer = null;
+    connectStreaming();
+  }, delay);
+}
+
+// ADD 2026-09-07: Dedicated streaming WebSocket만 연결하고 PostgreSQL history fetch는 의도적으로 수행하지 않는다.
+function connectStreaming() {
+  if (stopped) {
+    return;
+  }
+  streamingGeneration += 1;
+  const activeGeneration = streamingGeneration;
+  setStreamingConnectionState(
+    streamingReconnectAttempt === 0 ? "CONNECTING" : "RECONNECTING",
+  );
+
+  const connection = new WebSocket(streamingKnownDefectWebSocketUrl(window.location));
+  streamingSocket = connection;
+  connection.addEventListener("message", (message) => acceptStreamingLiveMessage(message.data));
+  connection.addEventListener("open", () => {
+    if (activeGeneration !== streamingGeneration || stopped) {
+      connection.close();
+      return;
+    }
+    streamingReconnectAttempt = 0;
+    elements.streamingLastSync.textContent = "LIVE · non-persisted";
+    setStreamingConnectionState("LIVE");
+  });
+  connection.addEventListener("error", () => connection.close());
+  connection.addEventListener("close", () => {
+    if (activeGeneration !== streamingGeneration) {
+      return;
+    }
+    scheduleStreamingReconnect();
+  });
+}
+
 // ADD 2026-08-26: Combined event를 initial/reconnect sync 중 buffer하고 이후 summary window에 반영한다.
 function acceptCombinedLiveMessage(rawValue) {
   let event;
@@ -1019,12 +1199,13 @@ function connectCombinedAndSynchronize() {
   });
 }
 
-// MODIFY 2026-08-26: Page teardown에서 세 domain의 socket, timer와 sync request를 모두 정리한다.
+// MODIFY 2026-08-26: 세 domain teardown 정리 → MODIFY 2026-09-07: live-only streaming socket/timer도 함께 정리한다.
 function stopConnections() {
   stopped = true;
   generation += 1;
   knownGeneration += 1;
   combinedGeneration += 1;
+  streamingGeneration += 1;
   syncAbortController?.abort();
   knownSyncAbortController?.abort();
   combinedSyncAbortController?.abort();
@@ -1040,9 +1221,14 @@ function stopConnections() {
     window.clearTimeout(combinedReconnectTimer);
     combinedReconnectTimer = null;
   }
+  if (streamingReconnectTimer !== null) {
+    window.clearTimeout(streamingReconnectTimer);
+    streamingReconnectTimer = null;
+  }
   socket?.close();
   knownSocket?.close();
   combinedSocket?.close();
+  streamingSocket?.close();
 }
 
 elements.detailClose.addEventListener("click", () => elements.detail.close());
@@ -1061,21 +1247,29 @@ window.addEventListener("offline", () => {
     window.clearTimeout(combinedReconnectTimer);
     combinedReconnectTimer = null;
   }
+  if (streamingReconnectTimer !== null) {
+    window.clearTimeout(streamingReconnectTimer);
+    streamingReconnectTimer = null;
+  }
   setConnectionState("OFFLINE");
   setKnownConnectionState("OFFLINE");
   setCombinedConnectionState("OFFLINE");
+  setStreamingConnectionState("OFFLINE");
   socket?.close();
   knownSocket?.close();
   combinedSocket?.close();
+  streamingSocket?.close();
 });
 window.addEventListener("online", () => {
   if (!stopped) {
     reconnectAttempt = 0;
     knownReconnectAttempt = 0;
     combinedReconnectAttempt = 0;
+    streamingReconnectAttempt = 0;
     connectAndSynchronize();
     connectKnownAndSynchronize();
     connectCombinedAndSynchronize();
+    connectStreaming();
   }
 });
 window.addEventListener("beforeunload", stopConnections);
@@ -1092,6 +1286,9 @@ Object.defineProperty(window, "__liveMonitorDebug", {
       combinedConnectionState: elements.combinedConnection.textContent,
       combinedInspections: structuredClone(combinedInspections),
       combinedReconnectAttempt,
+      streamingConnectionState: elements.streamingConnection.textContent,
+      streamingObservations: structuredClone(streamingObservations),
+      streamingReconnectAttempt,
     }),
   }),
   writable: false,
@@ -1100,6 +1297,8 @@ Object.defineProperty(window, "__liveMonitorDebug", {
 render();
 renderKnownDefects();
 renderCombinedInspections();
+renderStreamingObservations();
 connectCombinedAndSynchronize();
 connectAndSynchronize();
 connectKnownAndSynchronize();
+connectStreaming();

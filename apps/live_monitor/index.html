@@ -30,6 +30,11 @@
           <span id="known-connection-state" class="connection-state" data-state="connecting">CONNECTING</span>
           <span id="known-last-sync" class="sync-time">Awaiting initial sync</span>
         </div>
+        <div class="connection-row" aria-live="polite">
+          <span class="connection-label">VIDEO STREAM</span>
+          <span id="streaming-connection-state" class="connection-state" data-state="connecting">CONNECTING</span>
+          <span id="streaming-last-sync" class="sync-time">Live-only · no history</span>
+        </div>
       </div>
     </header>
 
@@ -128,6 +133,55 @@
         </div>
       </section>
 
+      <section class="model-domain known-defect-domain streaming-domain" aria-labelledby="streaming-domain-title">
+        <div class="domain-heading">
+          <div>
+            <p class="eyebrow">LIVE VIDEO OBSERVATIONS</p>
+            <h2 id="streaming-domain-title">DeepStream / TensorRT stream</h2>
+          </div>
+          <p>Best-effort frame metadata only · browser memory · no per-frame persistence.</p>
+        </div>
+
+        <section class="kpi-grid" aria-label="Latest 100 live DeepStream observation summary">
+          <article class="kpi-card"><span>VISIBLE FRAMES</span><strong id="streaming-kpi-visible">0</strong></article>
+          <article class="kpi-card known"><span>DEFECT FRAMES</span><strong id="streaming-kpi-defect-frames">0</strong></article>
+          <article class="kpi-card"><span>TOTAL INSTANCES</span><strong id="streaming-kpi-instances">0</strong></article>
+          <article class="kpi-card"><span>LATEST FRAME</span><strong id="streaming-kpi-latest-frame">—</strong></article>
+        </section>
+
+        <div class="monitor-grid">
+          <section class="panel latest-panel" aria-labelledby="streaming-latest-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">NON-PERSISTED FRAME OBSERVATION</p>
+                <h2 id="streaming-latest-title">Latest streaming frame</h2>
+              </div>
+              <span class="live-pulse known" aria-hidden="true"></span>
+            </div>
+            <div id="streaming-latest-observation" class="latest-inspection"></div>
+          </section>
+
+          <section class="panel feed-panel" aria-labelledby="streaming-feed-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">WEBSOCKET ONLY</p>
+                <h2 id="streaming-feed-title">Live frame feed</h2>
+              </div>
+              <span class="window-note">Browser memory · newest first · max 100</span>
+            </div>
+            <p id="streaming-empty-state" class="empty-state">
+              Waiting for DeepStream observations. Frames are not recovered from PostgreSQL.
+            </p>
+            <ol id="streaming-observation-feed" class="inspection-feed known-defect-feed" aria-live="polite"></ol>
+          </section>
+        </div>
+
+        <p class="semantic-note">
+          Streaming observations are best-effort operational metadata. Missing frames or reconnects do
+          not imply inference failure, and these frame observations are intentionally not stored in PostgreSQL.
+        </p>
+      </section>
+
       <section class="model-domain known-defect-domain" aria-labelledby="known-domain-title">
         <div class="domain-heading">
           <div>
@@ -196,7 +250,7 @@
     </dialog>
 
     <footer>
-      <span>Three independent best-effort WebSocket channels</span>
+      <span>Four isolated WebSocket channels · three persisted + one live-only</span>
       <span>PostgreSQL-backed REST recovery</span>
       <span>Backend decision source of truth · no browser recomputation</span>
     </footer>
