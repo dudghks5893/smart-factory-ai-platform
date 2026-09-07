@@ -1,0 +1,32 @@
+# ADD 2026-09-07: Pin the single-VM GCP L4 deployment to the restored runtime
+# artifacts, require NVIDIA GPU access for the API, and keep internal UIs local
+# until the HTTPS reverse-proxy stage exposes only intended public endpoints.
+
+services:
+  api:
+    environment:
+      MODEL_DEVICE: ${MODEL_DEVICE:-cuda}
+      YOLO_SEGMENTATION_ENABLED: ${YOLO_SEGMENTATION_ENABLED:-true}
+      YOLO_SEGMENTATION_DEVICE: ${YOLO_SEGMENTATION_DEVICE:-cuda}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities:
+                - gpu
+    ports: !override
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+
+  prometheus:
+    ports: !override
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+
+  grafana:
+    ports: !override
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+
+  dashboard:
+    ports: !override
+      - "127.0.0.1:${DASHBOARD_PORT:-8501}:8501"
