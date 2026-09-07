@@ -25,7 +25,7 @@ C6는 C5에서 acceptance가 끝난 YOLO11n-seg TensorRT backend를 실제 영�
 | C6-3 TensorRT INT8 streaming inference + end-to-end benchmark | `CLOSED / TENSORRT_INT8_STREAMING_ACCEPTED` |
 | C6-4 RTSP reconnect/backpressure/observability | `CLOSED / RTSP_RELIABILITY_ACCEPTED` |
 | C6-5 DeepStream GPU/NVMM integration | `CLOSED / DEEPSTREAM_GPU_NVMM_SEGMENTATION_ACCEPTED` |
-| C6-6 Service integration and closure | `C6-6 SERVICE_E2E_SOURCE_COMMITTED / GPU_RUNTIME_PENDING` |
+| C6-6 Service integration and closure | `C6-6 MASK_AREA_SEMANTICS_REPAIRED / GPU_REVALIDATION_PENDING` |
 
 ## 3. Why GStreamer first
 
@@ -1558,3 +1558,36 @@ C6-6 current state:
 다음 상태:
 
 `C6-6 SERVICE_E2E_GPU_RUNTIME`
+
+## 35. C6-6 mask area semantic repair
+
+첫 C6-6 GPU service E2E runtime은 DeepStream GPU → compact stdout → publisher →
+HTTP 202 → FastAPI → WebSocket 경로 자체를 통과했다. 후속 runtime 진단에서는
+`NvOSD_MaskParams.width/height`가 source frame pixel grid가 아니라 bbox-local
+low-resolution mask grid임을 실제 metadata에서 확인했다.
+
+따라서 첫 runtime에서 threshold-positive mask sample count를 그대로 source image area로
+나눈 값은 source-space mask area ratio로 acceptance하지 않는다. 해당 pre-fix evidence는
+실행 이력 보존용으로 외부 evidence root에 유지하지만 C6-6 최종 acceptance evidence로
+사용하지 않는다.
+
+수정된 compact C++ boundary는 raw mask를 전송하지 않고 다음 값만 전달한다.
+
+- source-space bbox geometry
+- bbox-local `mask_width` / `mask_height`
+- threshold 이상인 `mask_positive_sample_count`
+
+Python E2E adapter는 bbox-local occupancy를
+`mask_positive_sample_count / (mask_width * mask_height)`로 계산하고, 이를 source-space
+bbox area에 적용해 estimated source-space mask pixel count를 만든다. 기존 C6-6C1
+publisher와 C6-6B/C6-6C2 HTTP/FastAPI/WebSocket contract는 변경하지 않는다.
+외부 event의 기존 `mask.pixel_count`와 `mask.area_ratio`는 이 source-space estimate를
+전달한다.
+
+현재 상태:
+
+`C6-6 MASK_AREA_SEMANTICS_REPAIRED / GPU_REVALIDATION_PENDING`
+
+다음 단계:
+
+`C6-6 SERVICE_E2E_GPU_REVALIDATION`

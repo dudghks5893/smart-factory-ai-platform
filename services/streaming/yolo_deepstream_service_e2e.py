@@ -32,7 +32,7 @@ EXPECTED_RUNTIME_IMAGE = "c6-6-service-e2e:verify"
 EXPECTED_NVINFER_CONFIG_PATH = "/tmp/c6_6_service_e2e_nvinfer.txt"
 
 
-# ADD 2026-09-07: DeepStream C++ metadata를 compact stdout frame event로 직렬화한다.
+# ADD 2026-09-07: compact stdout 직렬화 → MODIFY 2026-09-07: mask grid 의미 명시
 def build_service_e2e_probe_source(config: DeepStreamSegmentationConfig) -> str:
     config.validate()
     nvinfer_config = build_nvinfer_config_text(config)
@@ -166,7 +166,7 @@ GstPadProbeReturn emit_compact_metadata(
         continue;
       }
 
-      unsigned int mask_pixel_count = 0U;
+      unsigned int mask_positive_sample_count = 0U;
       bool mask_valid = true;
       for (std::size_t index = 0; index < elements; ++index) {
         const float value = mask.data[index];
@@ -176,15 +176,15 @@ GstPadProbeReturn emit_compact_metadata(
           break;
         }
         if (value >= mask.threshold) {
-          ++mask_pixel_count;
+          ++mask_positive_sample_count;
         }
       }
       if (!mask_valid) {
         continue;
       }
-      if (mask_pixel_count == 0U ||
-          mask_pixel_count > kImageWidth * kImageHeight) {
-        mark_invalid(state, "mask pixel count outside compact contract");
+      if (mask_positive_sample_count == 0U ||
+          mask_positive_sample_count > elements) {
+        mark_invalid(state, "mask positive sample count outside mask grid");
         continue;
       }
 
@@ -199,7 +199,10 @@ GstPadProbeReturn emit_compact_metadata(
           << ",\"top\":" << top
           << ",\"width\":" << width
           << ",\"height\":" << height
-          << ",\"mask_pixel_count\":" << mask_pixel_count
+          << ",\"mask_width\":" << mask.width
+          << ",\"mask_height\":" << mask.height
+          << ",\"mask_positive_sample_count\":"
+          << mask_positive_sample_count
           << '}';
       ++emitted_instances;
     }
@@ -473,7 +476,7 @@ def _strict_number(value: object, *, label: str) -> float:
     return number
 
 
-# ADD 2026-09-07: C++ stdout frame line을 strict compact snapshot으로 변환한다.
+# ADD 2026-09-07: strict snapshot 변환 → MODIFY 2026-09-07: source-space 면적 환산
 def parse_service_e2e_frame_line(line: str) -> DeepStreamFrameSnapshot:
     if not line.startswith(EXPECTED_FRAME_PREFIX):
         raise ValueError("C6-6 E2E frame prefix mismatch.")
@@ -510,7 +513,9 @@ def parse_service_e2e_frame_line(line: str) -> DeepStreamFrameSnapshot:
             "top",
             "width",
             "height",
-            "mask_pixel_count",
+            "mask_width",
+            "mask_height",
+            "mask_positive_sample_count",
         }:
             raise ValueError("C6-6 E2E compact instance fields changed.")
 
@@ -518,17 +523,38 @@ def parse_service_e2e_frame_line(line: str) -> DeepStreamFrameSnapshot:
         if class_id not in EXPECTED_CLASSES:
             raise ValueError("C6-6 E2E class_id is outside the frozen mapping.")
 
+        left = _strict_number(instance["left"], label="left")
+        top = _strict_number(instance["top"], label="top")
+        width = _strict_number(instance["width"], label="width")
+        height = _strict_number(instance["height"], label="height")
+        mask_width = _strict_int(instance["mask_width"], label="mask_width")
+        mask_height = _strict_int(instance["mask_height"], label="mask_height")
+        positive_samples = _strict_int(
+            instance["mask_positive_sample_count"],
+            label="mask_positive_sample_count",
+        )
+        if mask_width <= 0 or mask_height <= 0:
+            raise ValueError("C6-6 E2E mask grid dimensions must be positive.")
+        mask_grid_area = mask_width * mask_height
+        if not 0 < positive_samples <= mask_grid_area:
+            raise ValueError("C6-6 E2E positive mask samples must fit the bbox-local mask grid.")
+
+        image_area = image_width * image_height
+        bbox_area = width * height
+        estimated_source_pixels = round((positive_samples / mask_grid_area) * bbox_area)
+        estimated_source_pixels = max(
+            1,
+            min(image_area, estimated_source_pixels),
+        )
+
         snapshot = DeepStreamInstanceSnapshot(
             class_id=class_id,
             confidence=_strict_number(instance["confidence"], label="confidence"),
-            left=_strict_number(instance["left"], label="left"),
-            top=_strict_number(instance["top"], label="top"),
-            width=_strict_number(instance["width"], label="width"),
-            height=_strict_number(instance["height"], label="height"),
-            mask_pixel_count=_strict_int(
-                instance["mask_pixel_count"],
-                label="mask_pixel_count",
-            ),
+            left=left,
+            top=top,
+            width=width,
+            height=height,
+            mask_pixel_count=estimated_source_pixels,
         )
         snapshot.to_streaming_instance(
             image_width=image_width,

@@ -48,7 +48,9 @@ def _frame_line() -> str:
                     "top": 20.0,
                     "width": 100.0,
                     "height": 80.0,
-                    "mask_pixel_count": 1000,
+                    "mask_width": 25,
+                    "mask_height": 20,
+                    "mask_positive_sample_count": 250,
                 }
             ],
         },
@@ -85,7 +87,7 @@ def _result_line() -> str:
     )
 
 
-# ADD 2026-09-07: Generated C++가 actual DeepStream metadata와 compact mask count를 사용하게 한다.
+# ADD 2026-09-07: actual metadata 검증 → MODIFY 2026-09-07: mask grid summary 검증
 def test_probe_source_uses_actual_deepstream_metadata_without_raw_media() -> None:
     config = load_deepstream_segmentation_config(SEGMENTATION_CONFIG)
     source = build_service_e2e_probe_source(config)
@@ -96,7 +98,10 @@ def test_probe_source_uses_actual_deepstream_metadata_without_raw_media() -> Non
     assert "NvDsObjectMeta" in source
     assert "object_meta->mask_params" in source
     assert "mask.data[index]" in source
-    assert "mask_pixel_count" in source
+    assert "mask.width" in source
+    assert "mask.height" in source
+    assert "mask_positive_sample_count" in source
+    assert "mask_pixel_count" not in source
     assert EXPECTED_FRAME_PREFIX in source
     assert EXPECTED_RESULT_PREFIX in source
     assert "nvinfer name=primary" in source
@@ -133,7 +138,18 @@ def test_frame_line_parses_to_publisher_snapshot() -> None:
     assert snapshot.image_height == EXPECTED_IMAGE_HEIGHT
     assert len(snapshot.instances) == 1
     assert snapshot.instances[0].class_id == 2
-    assert snapshot.instances[0].mask_pixel_count == 1000
+    assert snapshot.instances[0].mask_pixel_count == 4000
+
+
+# ADD 2026-09-07: bbox-local positive sample count가 mask grid를 넘으면 거부한다.
+def test_frame_line_rejects_positive_samples_beyond_mask_grid() -> None:
+    payload = json.loads(_frame_line()[len(EXPECTED_FRAME_PREFIX) :])
+    payload["instances"][0]["mask_positive_sample_count"] = 501
+
+    with pytest.raises(ValueError):
+        parse_service_e2e_frame_line(
+            EXPECTED_FRAME_PREFIX + json.dumps(payload, separators=(",", ":"))
+        )
 
 
 # ADD 2026-09-07: Raw mask 같은 추가 payload field는 compact process boundary에서 거부한다.
