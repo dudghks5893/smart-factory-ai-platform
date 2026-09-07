@@ -42,7 +42,7 @@ PatchCore는 알려진 defect class를 분류하지 않습니다. 현재 serving
 | Dashboard | Streamlit analytics와 browser-native latest-100 real-time inspection monitoring |
 | RAG | Immutable SOP index, exact cosine retrieval, grounded generation, citation, abstention |
 | Deployment | Kustomize base, CPU/GPU overlay, 별도 migration Job, gated rollout runbook |
-| Evidence | Source hash, lineage, repository provenance를 포함한 cross-domain final benchmark |
+| Evidence | [Evidence Index](docs/EVIDENCE_INDEX.md), source hash, lineage, repository provenance를 포함한 cross-domain final benchmark |
 
 ## 3. 시스템 아키텍처
 
