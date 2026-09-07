@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SmartFactory AI · Inspection Demo</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="./"><span class="mark">SF</span><span><strong>SmartFactory AI</strong><small>Quality Inspection Platform</small></span></a>
+      <nav><a class="active" href="./">Inspection</a><a href="/live/">Live Monitor</a></nav>
+      <div class="runtime" id="runtime-chip"><span class="dot"></span><span id="runtime-label">Checking GPU API…</span></div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">COMBINED VISUAL INSPECTION</p>
+        <h1>Inspect one image with two AI models.</h1>
+        <p>PatchCore detects anomalies. YOLO segments known defects. Policy v1 combines both observations into a manufacturing decision.</p>
+      </section>
+
+      <section class="workspace">
+        <article class="panel">
+          <div class="heading"><div><span>01 · INPUT</span><h2>Inspection image</h2></div><button id="reset-button">Reset</button></div>
+          <label class="drop" id="drop-zone" for="image-input">
+            <input id="image-input" type="file" accept="image/png,image/jpeg" hidden>
+            <div id="drop-placeholder"><b>Drop a JPEG or PNG here</b><em>or click to choose an image</em></div>
+            <img id="preview-image" alt="Inspection preview" hidden>
+            <div id="box-layer"></div>
+          </label>
+          <p id="file-meta">No image selected</p>
+          <button class="primary" id="inspect-button" disabled><span id="inspect-label">Run combined inspection</span><span id="inspect-spinner" hidden>●</span></button>
+          <p class="note">Combined image results are persisted. Live DeepStream frame events use a separate non-persisted streaming path.</p>
+        </article>
+
+        <article class="panel">
+          <div class="heading"><div><span>02 · DECISION</span><h2>Manufacturing result</h2></div><b class="pill idle" id="decision-pill">WAITING</b></div>
+          <div class="empty" id="empty-result">Select an image and run the combined inspection.</div>
+          <div id="result-content" hidden>
+            <section class="decision">
+              <div><span>Disposition</span><strong id="decision-disposition">—</strong></div>
+              <div><span>Reason code</span><strong id="decision-reason-code">—</strong></div>
+              <div class="wide"><span>Policy explanation</span><p id="decision-reason">—</p></div>
+            </section>
+            <section class="models">
+              <div class="model"><h3>PatchCore <small>Anomaly detection</small></h3><dl>
+                <div><dt>Prediction</dt><dd id="patchcore-prediction">—</dd></div>
+                <div><dt>Score</dt><dd id="patchcore-score">—</dd></div>
+                <div><dt>Threshold</dt><dd id="patchcore-threshold">—</dd></div>
+                <div><dt>Device</dt><dd id="patchcore-device">—</dd></div>
+              </dl></div>
+              <div class="model"><h3>YOLO <small>Known-defect segmentation</small></h3><dl>
+                <div><dt>Instances</dt><dd id="yolo-count">—</dd></div>
+                <div><dt>Classes</dt><dd id="yolo-classes">—</dd></div>
+                <div><dt>Inference</dt><dd id="yolo-inference">—</dd></div>
+                <div><dt>Device</dt><dd id="yolo-device">—</dd></div>
+              </dl></div>
+            </section>
+            <section class="defects"><div class="sub"><span>Detected instances</span><strong id="defect-summary">—</strong></div><div id="defect-list"></div></section>
+            <section class="trace">
+              <div><span>Combined ID</span><code id="combined-id">—</code></div>
+              <div><span>Image SHA256</span><code id="image-sha">—</code></div>
+              <div><span>PatchCore</span><code id="patchcore-ms">—</code></div>
+              <div><span>Orchestration</span><code id="orchestration-ms">—</code></div>
+            </section>
+          </div>
+          <div class="error" id="error-box" hidden></div>
+        </article>
+      </section>
+
+      <section class="panel history">
+        <div class="heading"><div><span>03 · RECENT</span><h2>Persisted combined inspections</h2></div><button id="refresh-history">Refresh</button></div>
+        <div id="history-list"><div class="empty small">Loading recent inspections…</div></div>
+      </section>
+    </main>
+
+    <footer><span>SmartFactory AI Quality Platform</span><span>Demo Web · Same-origin FastAPI · GPU inference</span></footer>
+  </div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

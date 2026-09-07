@@ -48,6 +48,8 @@ type RepositoryLoader = Callable[[DatabaseManager], InspectionRepository]
 type KnownDefectRepositoryLoader = Callable[[DatabaseManager], KnownDefectRepository]
 type CombinedInspectionRepositoryLoader = Callable[[DatabaseManager], CombinedInspectionRepository]
 
+# ADD 2026-09-07: Combined-inspection Demo Web static root를 정의한다.
+DEFAULT_DEMO_WEB_DIR = Path(__file__).resolve().parents[2] / "apps" / "demo_web"
 DEFAULT_LIVE_MONITOR_DIR = Path(__file__).resolve().parents[2] / "apps" / "live_monitor"
 
 
@@ -71,7 +73,7 @@ def load_combined_inspection_repository(
     return SqlAlchemyCombinedInspectionRepository(database.session_factory)
 
 
-# MODIFY 2026-08-26: Combined WS lifecycle → MODIFY 2026-09-06: C6-6B1 streaming lifecycle 추가.
+# MODIFY 2026-09-06: streaming lifecycle 추가 → MODIFY 2026-09-07: Demo Web static mount 추가.
 def create_app(
     *,
     settings: ServingSettings | None = None,
@@ -87,6 +89,7 @@ def create_app(
     known_defect_event_broadcaster: KnownDefectEventBroadcaster | None = None,
     combined_inspection_event_broadcaster: CombinedInspectionEventBroadcaster | None = None,
     streaming_known_defect_event_broadcaster: StreamingKnownDefectEventBroadcaster | None = None,
+    demo_web_dir: Path = DEFAULT_DEMO_WEB_DIR,
     live_monitor_dir: Path = DEFAULT_LIVE_MONITOR_DIR,
 ) -> FastAPI:
     """Create an app that requires database and model readiness during startup."""
@@ -180,7 +183,13 @@ def create_app(
     app.include_router(router)
     app.include_router(streaming_router)
 
-    # API와 같은 origin에서 REST/WebSocket을 사용하도록 available asset만 mount한다.
+    # MODIFY 2026-09-07: Demo Web과 Live Monitor를 same-origin static surface로 mount한다.
+    if demo_web_dir.is_dir():
+        app.mount(
+            "/demo",
+            StaticFiles(directory=demo_web_dir, html=True),
+            name="demo-web",
+        )
     if live_monitor_dir.is_dir():
         app.mount(
             "/live",

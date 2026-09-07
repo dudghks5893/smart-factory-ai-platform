@@ -52,6 +52,7 @@ RUN apt-get update && \
 
 FROM vision-application-base AS application
 COPY alembic.ini ./
+COPY apps/demo_web ./apps/demo_web
 COPY apps/live_monitor ./apps/live_monitor
 COPY configs ./configs
 COPY migrations ./migrations
