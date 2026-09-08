@@ -142,6 +142,27 @@
           <p>Best-effort frame metadata only · browser memory · no per-frame persistence.</p>
         </div>
 
+        <!-- ADD 2026-09-08: Browser-local input preview with live DeepStream bbox overlay. -->
+        <section class="stream-preview-panel" aria-labelledby="stream-preview-title">
+          <div class="stream-preview-heading">
+            <div>
+              <p class="eyebrow">REAL-TIME VISUALIZATION</p>
+              <h3 id="stream-preview-title">Video inference preview</h3>
+            </div>
+            <label class="stream-preview-file-button">
+              LOAD DEMO VIDEO
+              <input id="streaming-preview-file" type="file" accept="video/mp4,video/quicktime,video/webm" />
+            </label>
+          </div>
+          <div class="stream-preview-stage">
+            <video id="streaming-preview-video" controls muted playsinline preload="metadata"></video>
+            <canvas id="streaming-preview-canvas" aria-label="Live DeepStream bounding-box overlay"></canvas>
+          </div>
+          <p id="streaming-preview-status" class="stream-preview-status">
+            Load a browser-playable demo video. Live WebSocket bbox metadata will be overlaid while it plays.
+          </p>
+        </section>
+
         <section class="kpi-grid" aria-label="Latest 100 live DeepStream observation summary">
           <article class="kpi-card"><span>VISIBLE FRAMES</span><strong id="streaming-kpi-visible">0</strong></article>
           <article class="kpi-card known"><span>DEFECT FRAMES</span><strong id="streaming-kpi-defect-frames">0</strong></article>

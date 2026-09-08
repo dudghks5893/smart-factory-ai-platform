@@ -750,3 +750,70 @@ footer {
     grid-column: auto;
   }
 }
+
+/* ADD 2026-09-08: Browser-local video preview with live metadata-only bbox overlay. */
+.stream-preview-panel {
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  background: rgba(13, 26, 32, 0.96);
+}
+
+.stream-preview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.stream-preview-heading h3 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+.stream-preview-file-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--known);
+  border-radius: 4px;
+  color: var(--known);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.stream-preview-file-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.stream-preview-stage {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: #020607;
+  aspect-ratio: 16 / 9;
+}
+#streaming-preview-video,
+#streaming-preview-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+#streaming-preview-video { object-fit: contain; background: #020607; }
+#streaming-preview-canvas { z-index: 2; pointer-events: none; }
+.stream-preview-status {
+  margin: 0;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+}
+@media (max-width: 720px) {
+  .stream-preview-heading { align-items: stretch; flex-direction: column; }
+  .stream-preview-file-button { justify-content: center; }
+}

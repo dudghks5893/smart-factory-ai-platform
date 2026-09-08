@@ -411,11 +411,17 @@ export function combinedInspectionDetailUrl(combinedInspectionId) {
   return `/v1/combined-inspections/${encodeURIComponent(combinedInspectionId)}`;
 }
 
-// ADD 2026-09-07: Non-persisted DeepStream observation을 compact browser value로 strict하게 검증한다.
+// ADD 2026-09-07: Non-persisted DeepStream observation을 compact browser value로 strict하게 검증한다. → MODIFY 2026-09-08: raw/normalized 값을 모두 수용하고 bbox를 보존한다.
 export function normalizeStreamingObservation(value) {
+  if (value === null || typeof value !== "object") {
+    return null;
+  }
+
+  const imageWidth = value.image?.width ?? value.image_width;
+  const imageHeight = value.image?.height ?? value.image_height;
+  const decoderId = value.runtime?.decoder_id ?? value.decoder_id;
+
   if (
-    value === null ||
-    typeof value !== "object" ||
     !INSPECTION_ID_PATTERN.test(value.observation_id ?? "") ||
     !INSPECTION_ID_PATTERN.test(value.stream_session_id ?? "") ||
     !isNonEmptyString(value.source_id) ||
@@ -425,14 +431,14 @@ export function normalizeStreamingObservation(value) {
     value.pts_ns < 0 ||
     !isNonEmptyString(value.observed_at) ||
     !Number.isFinite(Date.parse(value.observed_at)) ||
-    !Number.isInteger(value.image?.width) ||
-    value.image.width <= 0 ||
-    !Number.isInteger(value.image?.height) ||
-    value.image.height <= 0 ||
+    !Number.isInteger(imageWidth) ||
+    imageWidth <= 0 ||
+    !Number.isInteger(imageHeight) ||
+    imageHeight <= 0 ||
     !isFiniteNumber(value.diagnostic_confidence) ||
     value.diagnostic_confidence !== 0.25 ||
     !Array.isArray(value.instances) ||
-    !isNonEmptyString(value.runtime?.decoder_id)
+    !isNonEmptyString(decoderId)
   ) {
     return null;
   }
@@ -440,6 +446,9 @@ export function normalizeStreamingObservation(value) {
   const instances = [];
   for (const instance of value.instances) {
     const expectedClass = { 0: "bent", 1: "color", 2: "scratch" }[instance?.class_id];
+    const maskPixelCount = instance?.mask?.pixel_count ?? instance?.mask_pixel_count;
+    const maskAreaRatio = instance?.mask?.area_ratio ?? instance?.mask_area_ratio;
+    const box = instance?.box;
     if (
       instance === null ||
       typeof instance !== "object" ||
@@ -448,11 +457,17 @@ export function normalizeStreamingObservation(value) {
       !isFiniteNumber(instance.confidence) ||
       instance.confidence < 0 ||
       instance.confidence > 1 ||
-      !Number.isInteger(instance.mask?.pixel_count) ||
-      instance.mask.pixel_count <= 0 ||
-      !isFiniteNumber(instance.mask?.area_ratio) ||
-      instance.mask.area_ratio <= 0 ||
-      instance.mask.area_ratio > 1
+      box === null ||
+      typeof box !== "object" ||
+      !isFiniteNumber(box.x_min) ||
+      !isFiniteNumber(box.y_min) ||
+      !isFiniteNumber(box.x_max) ||
+      !isFiniteNumber(box.y_max) ||
+      box.x_min < 0 || box.y_min < 0 ||
+      box.x_min > box.x_max || box.y_min > box.y_max ||
+      box.x_max > imageWidth || box.y_max > imageHeight ||
+      !Number.isInteger(maskPixelCount) || maskPixelCount <= 0 ||
+      !isFiniteNumber(maskAreaRatio) || maskAreaRatio <= 0 || maskAreaRatio > 1
     ) {
       return null;
     }
@@ -460,8 +475,15 @@ export function normalizeStreamingObservation(value) {
       class_id: instance.class_id,
       class_name: instance.class_name,
       confidence: instance.confidence,
-      mask_pixel_count: instance.mask.pixel_count,
-      mask_area_ratio: instance.mask.area_ratio,
+      box: {
+        x_min: box.x_min,
+        y_min: box.y_min,
+        x_max: box.x_max,
+        y_max: box.y_max,
+      },
+      mask: { pixel_count: maskPixelCount, area_ratio: maskAreaRatio },
+      mask_pixel_count: maskPixelCount,
+      mask_area_ratio: maskAreaRatio,
     });
   }
 
@@ -472,10 +494,10 @@ export function normalizeStreamingObservation(value) {
     frame_number: value.frame_number,
     pts_ns: value.pts_ns,
     observed_at: value.observed_at,
-    image_width: value.image.width,
-    image_height: value.image.height,
+    image_width: imageWidth,
+    image_height: imageHeight,
     diagnostic_confidence: value.diagnostic_confidence,
-    decoder_id: value.runtime.decoder_id,
+    decoder_id: decoderId,
     instances,
   };
 }

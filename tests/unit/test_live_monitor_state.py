@@ -366,3 +366,71 @@ def test_combined_live_monitor_kpi_reason_and_endpoint_contract() -> None:
         "Model disagreement requires review",
         "Confirmed known-defect evidence",
     ]
+
+
+# ADD 2026-09-08: Streaming event를 normalize 후 다시 merge해도 bbox와 KPI가 보존되는지 검증한다.
+def test_streaming_observation_merge_is_idempotent_and_preserves_bbox() -> None:
+    if shutil.which("node") is None:
+        pytest.skip("Node is unavailable; browser-state contract requires an ES module runtime.")
+    module_uri = json.dumps(_state_module_uri())
+    script = f"""
+      const state = await import({module_uri});
+      const observation = {{
+        observation_id: "30000000-0000-4000-8000-000000000001",
+        source_id: "deployment-demo-deepstream-recording-v1",
+        stream_session_id: "30000000-0000-4000-8000-000000000002",
+        frame_number: 45,
+        pts_ns: 3000000000,
+        observed_at: "2026-09-08T00:00:03.000Z",
+        image: {{width: 1280, height: 720}},
+        runtime: {{decoder_id: "c6_5d_yolo11n_seg_deepstream_decoder_v1"}},
+        diagnostic_confidence: 0.25,
+        instances: [{{
+          class_id: 0,
+          class_name: "bent",
+          confidence: 0.946,
+          box: {{x_min: 100, y_min: 120, x_max: 420, y_max: 500}},
+          mask: {{pixel_count: 12000, area_ratio: 12000 / (1280 * 720)}},
+        }}],
+      }};
+      const event = {{schema_version: "1", type: "streaming_known_defect.observed", observation}};
+      const parsed = state.parseStreamingObservationEvent(event);
+      const merged = state.mergeStreamingObservations([parsed]);
+      console.log(JSON.stringify({{parsed, merged, kpis: state.calculateStreamingKpis(merged)}}));
+    """
+    result = subprocess.run(  # noqa: S603
+        ["node", "--input-type=module", "--eval", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout)
+    assert len(payload["merged"]) == 1
+    assert payload["kpis"] == {
+        "visible": 1,
+        "defectFrames": 1,
+        "totalInstances": 1,
+        "latestFrame": 45,
+    }
+    assert payload["merged"][0]["instances"][0]["box"] == {
+        "x_min": 100,
+        "y_min": 120,
+        "x_max": 420,
+        "y_max": 500,
+    }
+
+
+# ADD 2026-09-08: Live Monitor video preview와 Canvas overlay asset contract를 검증한다.
+def test_live_monitor_video_preview_asset_contract() -> None:
+    root = Path(__file__).resolve().parents[2]
+    index = (root / "apps/live_monitor/index.html").read_text(encoding="utf-8")
+    app = (root / "apps/live_monitor/app.js").read_text(encoding="utf-8")
+    styles = (root / "apps/live_monitor/styles.css").read_text(encoding="utf-8")
+    assert 'id="streaming-preview-file"' in index
+    assert 'id="streaming-preview-video"' in index
+    assert 'id="streaming-preview-canvas"' in index
+    assert "syncStreamingPreview(event)" in app
+    assert "instance.box" in app
+    assert "URL.createObjectURL(file)" in app
+    assert "#streaming-preview-canvas" in styles
+    assert "pointer-events: none" in styles

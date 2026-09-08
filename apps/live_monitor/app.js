@@ -73,6 +73,10 @@ const elements = {
   streamingLatest: document.querySelector("#streaming-latest-observation"),
   streamingFeed: document.querySelector("#streaming-observation-feed"),
   streamingEmpty: document.querySelector("#streaming-empty-state"),
+  streamingPreviewFile: document.querySelector("#streaming-preview-file"),
+  streamingPreviewVideo: document.querySelector("#streaming-preview-video"),
+  streamingPreviewCanvas: document.querySelector("#streaming-preview-canvas"),
+  streamingPreviewStatus: document.querySelector("#streaming-preview-status"),
 };
 
 let inspections = [];
@@ -105,6 +109,8 @@ let streamingSocket = null;
 let streamingReconnectTimer = null;
 let streamingReconnectAttempt = 0;
 let streamingGeneration = 0;
+let streamingPreviewObjectUrl = null;
+let streamingPreviewLatestObservation = null;
 
 function setConnectionState(value) {
   elements.connection.textContent = value;
@@ -1030,7 +1036,88 @@ function connectKnownAndSynchronize() {
   });
 }
 
-// ADD 2026-09-07: Streaming frame event를 REST recovery 없이 browser-memory window에만 반영한다.
+// ADD 2026-09-08: Preview Canvas를 source-frame 좌표계와 맞춘다.
+function resizeStreamingPreviewCanvas(observation = streamingPreviewLatestObservation) {
+  const canvas = elements.streamingPreviewCanvas;
+  const video = elements.streamingPreviewVideo;
+  const width = video.videoWidth || observation?.image_width || 0;
+  const height = video.videoHeight || observation?.image_height || 0;
+  if (width > 0 && height > 0 && (canvas.width !== width || canvas.height !== height)) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+}
+
+// ADD 2026-09-08: Raw frame 전송 없이 live bbox/class/confidence만 Canvas에 그린다.
+function drawStreamingPreviewOverlay(observation) {
+  streamingPreviewLatestObservation = observation;
+  resizeStreamingPreviewCanvas(observation);
+  const canvas = elements.streamingPreviewCanvas;
+  const context = canvas.getContext("2d");
+  if (context === null || canvas.width === 0 || canvas.height === 0) {
+    return;
+  }
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.lineWidth = Math.max(2, canvas.width / 420);
+  context.font = `${Math.max(15, canvas.width / 52)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  context.textBaseline = "top";
+  for (const instance of observation.instances) {
+    const box = instance.box;
+    const label = `${instance.class_name} ${(instance.confidence * 100).toFixed(1)}%`;
+    const width = box.x_max - box.x_min;
+    const height = box.y_max - box.y_min;
+    context.strokeStyle = "#bd84ff";
+    context.fillStyle = "#bd84ff";
+    context.strokeRect(box.x_min, box.y_min, width, height);
+    const metrics = context.measureText(label);
+    const labelHeight = Math.max(22, canvas.height / 28);
+    const labelY = Math.max(0, box.y_min - labelHeight);
+    context.fillRect(box.x_min, labelY, metrics.width + 16, labelHeight);
+    context.fillStyle = "#071014";
+    context.fillText(label, box.x_min + 8, labelY + 3);
+  }
+}
+
+// ADD 2026-09-08: Preview 재생 중에는 DeepStream PTS와 큰 drift만 보정한다.
+function syncStreamingPreview(observation) {
+  drawStreamingPreviewOverlay(observation);
+  const video = elements.streamingPreviewVideo;
+  if (video.src === "" || video.readyState < HTMLMediaElement.HAVE_METADATA) {
+    elements.streamingPreviewStatus.textContent =
+      `Live frame ${observation.frame_number} received · load a demo video to visualize bbox overlay.`;
+    return;
+  }
+  const targetSeconds = observation.pts_ns / 1_000_000_000;
+  if (!video.paused && Math.abs(video.currentTime - targetSeconds) > 0.75) {
+    video.currentTime = Math.min(targetSeconds, video.duration || targetSeconds);
+  }
+  const classes = [...new Set(observation.instances.map((instance) => instance.class_name))].sort();
+  elements.streamingPreviewStatus.textContent =
+    `Live frame ${observation.frame_number} · ${observation.instances.length} instance${
+      observation.instances.length === 1 ? "" : "s"
+    } · ${classes.join(", ") || "clear"}`;
+}
+
+// ADD 2026-09-08: Demo video는 browser-local object URL로만 열고 backend/persistence를 사용하지 않는다.
+function loadStreamingPreviewFile() {
+  if (streamingPreviewObjectUrl !== null) {
+    URL.revokeObjectURL(streamingPreviewObjectUrl);
+    streamingPreviewObjectUrl = null;
+  }
+  const file = elements.streamingPreviewFile.files?.[0];
+  if (file === undefined) {
+    elements.streamingPreviewVideo.removeAttribute("src");
+    elements.streamingPreviewVideo.load();
+    elements.streamingPreviewStatus.textContent = "No demo video selected.";
+    return;
+  }
+  streamingPreviewObjectUrl = URL.createObjectURL(file);
+  elements.streamingPreviewVideo.src = streamingPreviewObjectUrl;
+  elements.streamingPreviewVideo.load();
+  elements.streamingPreviewStatus.textContent = `Loaded ${file.name} · press play, then run DeepStream.`;
+}
+
+// ADD 2026-09-07: Streaming frame event를 REST recovery 없이 browser-memory window에만 반영한다. → MODIFY 2026-09-08: KPI/feed와 video overlay를 같은 parsed event로 갱신한다.
 function acceptStreamingLiveMessage(rawValue) {
   let event;
   try {
@@ -1046,6 +1133,7 @@ function acceptStreamingLiveMessage(rawValue) {
     event.frame_number
   } · ${new Date().toLocaleTimeString()}`;
   renderStreamingObservations();
+  syncStreamingPreview(event);
 }
 
 // ADD 2026-09-07: Live-only video channel reconnect를 persisted REST-sync lifecycles와 격리한다.
@@ -1234,6 +1322,22 @@ function stopConnections() {
 elements.detailClose.addEventListener("click", () => elements.detail.close());
 elements.knownDetailClose.addEventListener("click", () => elements.knownDetail.close());
 elements.combinedDetailClose.addEventListener("click", () => elements.combinedDetail.close());
+elements.streamingPreviewFile.addEventListener("change", loadStreamingPreviewFile);
+elements.streamingPreviewVideo.addEventListener("loadedmetadata", () => {
+  resizeStreamingPreviewCanvas();
+  elements.streamingPreviewStatus.textContent =
+    "Video ready · press play, then start the DeepStream recording runner.";
+});
+elements.streamingPreviewVideo.addEventListener("seeked", () => {
+  if (streamingPreviewLatestObservation !== null) {
+    drawStreamingPreviewOverlay(streamingPreviewLatestObservation);
+  }
+});
+elements.streamingPreviewVideo.addEventListener("ended", () => {
+  const context = elements.streamingPreviewCanvas.getContext("2d");
+  context?.clearRect(0, 0, elements.streamingPreviewCanvas.width, elements.streamingPreviewCanvas.height);
+  elements.streamingPreviewStatus.textContent = "Preview ended.";
+});
 window.addEventListener("offline", () => {
   if (reconnectTimer !== null) {
     window.clearTimeout(reconnectTimer);
@@ -1272,7 +1376,12 @@ window.addEventListener("online", () => {
     connectStreaming();
   }
 });
-window.addEventListener("beforeunload", stopConnections);
+window.addEventListener("beforeunload", () => {
+  if (streamingPreviewObjectUrl !== null) {
+    URL.revokeObjectURL(streamingPreviewObjectUrl);
+  }
+  stopConnections();
+});
 
 Object.defineProperty(window, "__liveMonitorDebug", {
   value: Object.freeze({
