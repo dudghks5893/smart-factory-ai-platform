@@ -109,7 +109,7 @@ def test_probe_source_uses_actual_deepstream_metadata_without_raw_media() -> Non
     assert "pyds" not in source
 
 
-# ADD 2026-09-07: Sample identity와 networkless GPU boundary를 검증한다.
+# ADD 2026-09-07: GPU boundary 검증 → MODIFY 2026-09-09: resolved mount path 검증
 def test_shell_and_docker_boundary_are_fail_closed() -> None:
     config = load_deepstream_segmentation_config(SEGMENTATION_CONFIG)
     shell = build_service_e2e_shell_payload(config)
@@ -123,7 +123,8 @@ def test_shell_and_docker_boundary_are_fail_closed() -> None:
     assert "--network" in command
     assert command[command.index("--network") + 1] == "none"
     assert EXPECTED_CONTAINER_LABEL in command
-    assert "/tmp/model.plan:/model/model.plan:ro" in command
+    expected_plan_mount = f"{Path('/tmp/model.plan').resolve()}:/model/model.plan:ro"
+    assert expected_plan_mount in command
 
 
 # ADD 2026-09-07: C++ compact line의 publisher snapshot 변환을 검증한다.
