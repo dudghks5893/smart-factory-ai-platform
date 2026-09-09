@@ -45,6 +45,16 @@ PatchCore는 알려진 defect class를 분류하지 않습니다. 현재 serving
 | Deployment | Kustomize base, CPU/GPU overlay, 별도 migration Job, gated rollout runbook |
 | Evidence | [Evidence Index](docs/EVIDENCE_INDEX.md), source hash, lineage, repository provenance를 포함한 cross-domain final benchmark |
 
+## 🎬 End-to-End Demo
+
+**Smart Factory AI Quality Platform — End-to-End Demo · 1m 52s**
+
+[▶ 데모 시연 영상 보기 (Google Drive)](https://drive.google.com/file/d/1CI42z_0H1IKzGAjsq4y5Pop287tcPRM3/view?usp=drive_link)
+
+PatchCore + YOLO 기반 Combined Inspection부터 TensorRT INT8 / DeepStream 실시간 추론, Live Inspection Monitor, Operations Dashboard, Synthetic Drift, Prometheus / Grafana까지 전체 End-to-End 실행 흐름을 확인할 수 있습니다.
+
+> **Demo boundary:** Synthetic Drift는 deterministic synthetic fixture 기반 시연이며 실제 production drift observation이 아닙니다.
+
 ## 3. 시스템 아키텍처
 
 ```mermaid
