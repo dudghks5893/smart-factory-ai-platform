@@ -51,6 +51,30 @@ flowchart LR
 - RAG API는 Vision API, inspection database와 startup dependency가 없는 별도 process/port다.
 - Vision API는 model artifact나 threshold가 없으면 ready가 되지 않으며 production fake switch가 없다.
 
+
+### Portfolio presentation layer
+
+Portfolio UI는 core inference contract를 다시 구현하지 않고 기존 API/streaming boundary 위에 얹는다.
+
+```text
+apps/demo_web
+  → same-origin Combined Inspection REST
+  → persisted decision/history
+
+apps/live_monitor
+  → persisted REST/WebSocket inspection domains
+  + browser-local demo video
+  + non-persisted DeepStream WebSocket bbox metadata
+  → Canvas overlay
+
+apps/dashboard
+  → Vision API history + immutable drift report
+```
+
+Live Monitor의 video file은 browser-local object URL로만 사용한다. Backend는 raw video/frame을 presentation을
+위해 다시 받지 않으며, streaming overlay는 C6 compact metadata boundary를 유지한다. Portfolio screenshot/video는
+canonical benchmark evidence가 아니다.
+
 ## 3. Vision data and model lifecycle
 
 ```mermaid
@@ -178,8 +202,9 @@ model artifacts, GPU, GCP, private SOP or paid provider credentials. Registry pu
 production CD are future work.
 
 Kubernetes base includes a migration Job, API Deployment and ClusterIP Service only. PostgreSQL StatefulSet,
-LoadBalancer, HPA, Dashboard/RAG workloads and monitoring stack are intentionally absent. GCP target uses managed Cloud
-SQL and external artifact/secret delivery; no GCP resource has been created.
+LoadBalancer, HPA, Dashboard/RAG workloads and monitoring stack are intentionally absent. Production GKE target uses
+managed Cloud SQL and external artifact/secret delivery and remains undeployed. Separately, a single-VM NVIDIA L4
+portfolio runtime was exercised with `compose.gcp-l4.yaml`; this does not validate the GKE target architecture.
 
 ## 8. Configuration and security boundaries
 
@@ -204,6 +229,7 @@ Verified within the stated environments:
 - GitHub Actions quality/PostgreSQL/Docker/Kubernetes job definitions and main CI history
 - Prometheus/Grafana configuration, drift pipeline, dashboard and deterministic demo RAG evaluation
 - Kustomize base/CPU/GPU rendering and migration-gated deployment order
+- Single-VM NVIDIA L4 portfolio Compose profile and portfolio-facing Combined/Live UI boundary
 
 Pending production verification:
 

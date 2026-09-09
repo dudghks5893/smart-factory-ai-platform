@@ -137,19 +137,25 @@ Application Layer가 특정 LLM SDK에 직접 종속되지 않도록 한다.
 
 Kaggle은 실험 환경이며 Production 환경으로 사용하지 않는다.
 
-### GCP target
+### GCP deployment boundary
 
-다음 작업의 목표 환경이다. 현재 실제 GCP resource는 생성하지 않았다.
+초기 scope에서는 GCP를 production target으로 두었다. 이후 single-VM NVIDIA L4 portfolio runtime과
+DeepStream/TensorRT GPU verification은 실제 수행했지만, 이는 production GKE architecture와 분리한다.
+
+완료한 portfolio/runtime boundary:
+
+- NVIDIA L4 TensorRT / DeepStream runtime verification
+- single-VM GCP L4 Compose profile
+- portfolio-facing Combined / Live / Dashboard / Grafana demonstration
+
+여전히 target/pending인 production boundary:
 
 - Persistence-inclusive production benchmark
-- GPU deployment/inference validation
-- Production 유사 환경 배포
-- Kubernetes
-- Autoscaling
-- Rolling Update
-- Rollback
-- Monitoring
-- 최종 시스템 검증
+- GKE + Cloud SQL managed deployment
+- Autoscaling / HA
+- public ingress/TLS/authentication
+- production Rolling Update / Rollback
+- long-running production monitoring
 
 ---
 

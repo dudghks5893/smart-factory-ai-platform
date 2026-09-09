@@ -1677,5 +1677,12 @@ GStreamer ingress → RTSP reliability → TensorRT streaming →
 DeepStream GPU/NVMM segmentation → compact service integration이다.
 C4/C5 model-quality acceptance와 sealed final-test boundary는 다시 열지 않았다.
 
-다음 작업은 C6의 새 runtime stage가 아니라 프로젝트 최종화 단계다.
-README, evidence index, 재현 가능한 trained-model demo와 portfolio-facing artifact를 정리한다.
+C6 이후에는 model/runtime acceptance를 다시 열지 않고 portfolio-facing presentation layer를 정리했다.
+
+- `apps/demo_web/`: Combined Inspection REST/persistence 결과 시각화
+- `apps/live_monitor/`: browser-local demo video + live compact metadata Canvas overlay
+- `compose.gcp-l4.yaml`: single-VM NVIDIA L4 portfolio runtime profile
+
+이 presentation layer는 C6 canonical acceptance를 대체하거나 새 benchmark를 만들지 않는다. Live Monitor의
+demo video file은 browser 안에서만 열고, backend streaming path는 기존처럼 raw frame/raw mask가 아닌 compact
+metadata만 전달한다. 상세 경계는 `docs/PORTFOLIO_DEMO.md`를 따른다.

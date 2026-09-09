@@ -2,9 +2,9 @@
 
 시각 이상 탐지, 검사 이력, 실험 lineage, observability, drift 분석, 운영 대시보드, 근거 기반 SOP RAG assistant를 결합한 **production-oriented 스마트팩토리 AI 품질 플랫폼**입니다.
 
-> **상태:** STEP 0–16의 repository-scoped 구현과 YOLO C4 model quality, C5 deployment optimization, C6 real-time streaming/service integration lifecycle을 완료했습니다.
+> **상태:** STEP 0–16의 repository-scoped 구현과 YOLO C4 model quality, C5 deployment optimization, C6 real-time streaming/service integration lifecycle을 완료했고, portfolio-facing Combined Inspection Web UI, Live Monitor video overlay와 GCP L4 single-VM Compose profile까지 정리했습니다.
 >
-> C6는 NVIDIA L4에서 TensorRT INT8 + DeepStream GPU/NVMM + FastAPI/WebSocket service E2E runtime까지 검증했습니다. 실제 공장 데이터·live camera 검증, production GKE/Cloud SQL 배포, production LLM 및 private SOP 검증은 아직 수행하지 않았습니다.
+> C6 canonical evidence는 NVIDIA L4의 TensorRT INT8 + DeepStream GPU/NVMM + FastAPI/WebSocket service E2E runtime까지 검증합니다. 별도의 single-VM L4 portfolio runtime/demo는 production GKE deployment와 분리하며, 실제 공장 데이터·factory live camera, production GKE/Cloud SQL 배포, production LLM 및 private SOP 검증은 아직 수행하지 않았습니다.
 
 ## 1. 문제 정의와 목표
 
@@ -40,6 +40,7 @@ PatchCore는 알려진 defect class를 분류하지 않습니다. 현재 serving
 | Delivery | Multi-stage Docker image, Compose lifecycle, 4-job GitHub Actions CI |
 | Operations | Prometheus metric, provisioned Grafana dashboard, immutable batch drift report |
 | Dashboard | Streamlit analytics와 browser-native latest-100 real-time inspection monitoring |
+| Demo UI | Combined Inspection Web UI + browser-local video preview/live metadata overlay |
 | RAG | Immutable SOP index, exact cosine retrieval, grounded generation, citation, abstention |
 | Deployment | Kustomize base, CPU/GPU overlay, 별도 migration Job, gated rollout runbook |
 | Evidence | [Evidence Index](docs/EVIDENCE_INDEX.md), source hash, lineage, repository provenance를 포함한 cross-domain final benchmark |
@@ -156,7 +157,9 @@ C5-4B1에서는 train 84장만 사용한 ModelOpt INT8 PTQ로 explicit Q/DQ ONNX
 자세한 C4 provenance와 quality/resource evidence는 [YOLO Experiment Log](docs/vision/YOLO_SEGMENTATION_EXPERIMENT_LOG.md),
 C5 export/parity contract와 test seal은 [YOLO Deployment Optimization](docs/vision/YOLO_DEPLOYMENT_OPTIMIZATION.md)에 기록되어 있습니다.
 
-**C6 real-time streaming**은 accepted TensorRT INT8 engine을 다시 최적화하지 않고 GStreamer ingress → RTSP reliability → DeepStream GPU/NVMM segmentation → compact service integration까지 연결해 `CLOSED / REALTIME_STREAMING_ACCEPTED`로 종료했습니다. NVIDIA L4 corrected-semantics revalidation에서 DeepStream 34 frames, compact defect 32 frames / 54 instances, publisher 32 events, WebSocket 32 events를 확인했고 exact event match와 bbox-local mask grid → source-space area estimate 검증을 모두 통과했습니다. raw frame/raw mask는 Python/service boundary로 전송하지 않았으며, 이 runtime evidence는 구조·서비스 경로 검증용입니다. 실제 제조 불량 demo는 학습 모델과 별도 demo-only 입력으로 최종화 단계에서 구성합니다. 자세한 contract와 provenance는 [YOLO Real-Time Streaming](docs/vision/YOLO_REALTIME_STREAMING.md)에 기록되어 있습니다.
+**C6 real-time streaming**은 accepted TensorRT INT8 engine을 다시 최적화하지 않고 GStreamer ingress → RTSP reliability → DeepStream GPU/NVMM segmentation → compact service integration까지 연결해 `CLOSED / REALTIME_STREAMING_ACCEPTED`로 종료했습니다. NVIDIA L4 corrected-semantics revalidation에서 DeepStream 34 frames, compact defect 32 frames / 54 instances, publisher 32 events, WebSocket 32 events를 확인했고 exact event match와 bbox-local mask grid → source-space area estimate 검증을 모두 통과했습니다. raw frame/raw mask는 Python/service boundary로 전송하지 않았으며, 이 runtime evidence는 구조·서비스 경로 검증용입니다.
+
+Portfolio-facing layer에서는 `apps/demo_web/`의 Combined Inspection UI와 `apps/live_monitor/`의 browser-local demo video + live WebSocket bbox overlay를 추가했습니다. 이 presentation layer는 C6 acceptance나 model-quality benchmark를 새로 만들지 않으며, demo video 자체는 backend/persistence로 전송하지 않습니다. 자세한 contract와 provenance는 [YOLO Real-Time Streaming](docs/vision/YOLO_REALTIME_STREAMING.md), demo boundary는 [Portfolio Demo](docs/PORTFOLIO_DEMO.md)에 기록합니다.
 
 ## 5. Serving과 inspection data
 
@@ -260,6 +263,7 @@ T4 model benchmark, in-process pre-persistence API benchmark, local deterministi
 
 ```text
 apps/dashboard/           Streamlit 내부 운영 UI
+apps/demo_web/            Combined Inspection portfolio Web UI
 apps/live_monitor/        Same-origin HTML/CSS/JavaScript 실시간 inspection UI
 configs/                  Data, model, evaluation, benchmark evidence configuration
 docs/                     Architecture, contract, operations guide, benchmark history
@@ -395,6 +399,24 @@ make docker-down
 
 자세한 내용은 [Docker Lifecycle](docs/deployment/DOCKER.md)을 참고합니다.
 
+
+### GCP L4 single-VM portfolio profile
+
+Production GKE와 별도로 `compose.gcp-l4.yaml`은 portfolio용 single-VM NVIDIA L4 runtime을 구성합니다.
+GPU device reservation과 CUDA model device를 사용하고 API/Prometheus/Grafana/Dashboard host port는
+loopback으로 제한합니다.
+
+```bash
+cp configs/deployment/gcp-l4.env.example /path/outside/repo/gcp-l4.env
+# secret placeholder와 runtime artifact path를 실제 값으로 교체
+
+docker compose   --env-file /path/outside/repo/gcp-l4.env   -f compose.yaml   -f compose.gcp-l4.yaml   config --quiet
+```
+
+실제 실행 시 같은 두 Compose file을 사용하되 credential은 repository 밖에서 주입합니다.
+이 profile은 GKE/Cloud SQL/HA/public ingress 검증을 의미하지 않습니다.
+세부 경계는 [Portfolio Demo](docs/PORTFOLIO_DEMO.md)와 [Docker Lifecycle](docs/deployment/DOCKER.md)에 정리합니다.
+
 ## 12. 테스트와 CI
 
 ```bash
@@ -434,7 +456,7 @@ Repository에는 다음 항목이 포함되어 있습니다.
 
 Target architecture는 Artifact Registry, Cloud Storage, Cloud SQL, Secret Manager, GKE를 사용합니다.
 
-현재 실제 GCP resource, GPU node pool, public Load Balancer, production endpoint는 생성하지 않았습니다. PostgreSQL은 managed-service target이며 Kubernetes StatefulSet으로 운영하지 않습니다. HPA는 production load와 accelerator capacity를 측정한 이후의 future work입니다.
+Production GKE cluster, Cloud SQL, GPU node pool, public Load Balancer와 production endpoint는 아직 배포하지 않았습니다. 별도의 single-VM NVIDIA L4 portfolio runtime은 `compose.gcp-l4.yaml`로 검증했지만 이는 GKE production deployment와 다른 boundary입니다. PostgreSQL의 production target은 managed service이며 Kubernetes StatefulSet으로 운영하지 않습니다. HPA는 production load와 accelerator capacity를 측정한 이후의 future work입니다.
 
 자세한 내용은 [Kubernetes/GCP Foundation](docs/deployment/KUBERNETES_GCP.md)을 참고합니다.
 
@@ -447,6 +469,7 @@ Target architecture는 Artifact Registry, Cloud Storage, Cloud SQL, Secret Manag
 | Serving / Data | [PatchCore API](docs/serving/PATCHCORE_API.md), [YOLO API](docs/serving/YOLO_SEGMENTATION_API.md), [Combined API](docs/serving/COMBINED_INSPECTION_API.md), [Decision Engine](docs/decision/DECISION_ENGINE.md), [Inspection History](docs/serving/INSPECTION_HISTORY.md) |
 | MLOps | [MLflow](docs/mlops/MLFLOW_TRACKING.md), [Artifact Policy](docs/DATA_ARTIFACT_POLICY.md) |
 | Deployment | [Docker](docs/deployment/DOCKER.md), [CI](docs/deployment/CI_CD.md), [Kubernetes/GCP](docs/deployment/KUBERNETES_GCP.md) |
+| Portfolio Demo | [Presentation Layer / Demo Boundary](docs/PORTFOLIO_DEMO.md) |
 | Operations | [Monitoring](docs/monitoring/MONITORING.md), [Drift](docs/monitoring/DRIFT.md), [Dashboard](docs/dashboard/DASHBOARD.md) |
 | RAG | [Assistant](docs/rag/RAG_ASSISTANT.md), [Evaluation](docs/rag/RAG_EVALUATION.md) |
 | Benchmarks | [Final](docs/benchmarks/FINAL_BENCHMARK.md), [Vision Evaluation](docs/benchmarks/PATCHCORE_EVALUATION.md), [T4 Runtime](docs/benchmarks/PATCHCORE_INFERENCE_BENCHMARK.md), [Metric Definitions](docs/benchmarks/METRICS_CONTRACT.md) |

@@ -58,8 +58,9 @@ PatchCore memory bank가 process마다 복제되므로 worker 기본값은 1이�
 
 Apple Silicon Docker에서 실제 `linux/arm64`, `torch 2.13.0+cpu`, `torchvision 0.28.0+cpu`, CUDA False를
 확인했다. Linux x86_64 uv resolution은 `torch 2.13.0+cu130`, `torchvision 0.28.0+cu130`과 CUDA 13
-dependencies를 유지한다. Kaggle T4 real-model 실행 결과는 Docker GPU image 검증이 아니다. Future GCP GPU는
-NVIDIA runtime/driver compatibility와 필요시 GPU-specific target을 별도로 검증해야 한다.
+dependencies를 유지한다. Kaggle T4 real-model 실행 결과는 Docker GPU image 검증이 아니다. 이후 portfolio
+verification을 위해 GCP NVIDIA L4 single-VM Compose profile을 추가하고 CUDA model device/GPU reservation을
+사용했다. 이 경계는 production GKE image/runtime verification과 동일하지 않다.
 
 ## 4. Compose services
 
@@ -84,6 +85,11 @@ health 이후 시작하며 root filesystem은 read-only다.
 Migration 성공 후 시작한다. `/health`는 process liveness이고 `/ready`는 model runtime, DB connectivity와
 schema readiness를 함께 확인한다. Dockerfile 기본 healthcheck는 liveness, Compose healthcheck는 readiness를
 사용한다.
+
+
+Portfolio application image는 `apps/demo_web/`와 `apps/live_monitor/`의 same-origin static UI도 포함한다.
+Combined demo UI는 기존 `POST /v1/combined-inspections`와 history endpoint를 사용하고, Live Monitor는 기존
+REST/WebSocket contract를 사용한다. UI 때문에 별도의 inference backend를 만들지 않는다.
 
 ### test
 
@@ -197,7 +203,28 @@ make docker-clean-volumes
 Backup/보존 필요 여부를 확인하지 않고 이 명령을 실행하면 안 된다. `docker-test`에
 `COMPOSE_PROJECT_NAME=smartfactory`를 지정하면 persistent project 보호를 위해 거부한다.
 
-## 8. Actual local verification
+## 8. GCP L4 single-VM portfolio Compose override
+
+`compose.gcp-l4.yaml`은 production GKE와 별개의 portfolio verification profile이다.
+`configs/deployment/gcp-l4.env.example`을 repository 밖으로 복사하고 secret placeholder와 immutable runtime
+artifact path를 실제 값으로 교체한다.
+
+```bash
+docker compose   --env-file /path/outside/repo/gcp-l4.env   -f compose.yaml   -f compose.gcp-l4.yaml   config --quiet
+
+docker compose   --env-file /path/outside/repo/gcp-l4.env   -f compose.yaml   -f compose.gcp-l4.yaml   up -d --build
+```
+
+Override는 API에 NVIDIA GPU reservation을 추가하고 PatchCore/YOLO device를 CUDA로 설정한다.
+API, Prometheus, Grafana, Dashboard host port는 loopback에만 bind한다. Public HTTPS reverse proxy,
+authentication, Cloud SQL, HA와 GKE rollout은 이 profile의 검증 범위가 아니다.
+
+항상 켜진 cloud VM은 repository lifecycle의 요구사항이 아니다. 비용 때문에 VM을 종료/삭제해도 source,
+immutable runtime artifact와 external snapshot/storage recovery boundary를 별도로 유지할 수 있다.
+
+Portfolio recording/evidence boundary는 `docs/PORTFOLIO_DEMO.md`를 따른다.
+
+## 9. Actual local verification
 
 Apple Silicon Docker Desktop의 `linux/arm64`에서 다음을 실제 확인했다.
 

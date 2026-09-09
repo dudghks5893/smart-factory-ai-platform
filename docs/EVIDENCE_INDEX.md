@@ -242,25 +242,43 @@ Mac/VM mirror는 동일 SHA 검증을 통과한 durable copy로만 취급한다.
 - production GKE/Cloud SQL 배포 완료
 - factory certification 또는 production calibration 완료
 - NVIDIA sample runtime을 제조 불량 detection quality evidence로 사용하는 것
-- 아직 만들지 않은 portfolio demo를 이미 완료된 runtime evidence로 표현하는 것
+- portfolio UI screenshot/recording을 C4/C5/C6 model/runtime acceptance 또는 factory quality evidence로 사용하는 것
 
-## 9. Portfolio/demo 다음 단계
+## 9. Portfolio/demo presentation layer
 
-최종 portfolio demo는 C6 NVIDIA sample evidence와 분리한다.
+Portfolio-facing demo layer는 구현 완료됐지만 C4/C5/C6 canonical evidence와 분리한다.
 
-계획된 reproducible demo boundary:
+현재 presentation boundary:
 
 ```text
-demo-only original defect photos
-    ↓ image-sequence-derived unannotated video
-actual TensorRT + DeepStream + YOLO11n-seg runtime
-    ↓
-model-generated boxes / masks / compact events
+Combined image
+  → apps/demo_web
+  → POST /v1/combined-inspections
+  → persisted PatchCore + YOLO + Decision history
+
+Browser-local demo video
+  + non-persisted DeepStream compact WebSocket metadata
+  → apps/live_monitor Canvas bbox/class/confidence overlay
+
+Inspection / drift / API telemetry
+  → Streamlit Dashboard / Synthetic Drift fixture / Grafana
 ```
 
-Source image/video에 box나 mask를 미리 그리지 않는다.
-가능하면 sealed final-test data를 다시 사용하지 않고 demo-only/non-final input을 사용한다.
-이 demo가 실제 factory/live-camera recording이 아니라는 점도 명시한다.
+- `apps/demo_web/`는 persisted Combined Inspection 결과와 recent history를 표시한다.
+- `apps/live_monitor/`의 demo video는 browser-local object URL로만 열며 backend/DB로 업로드하지 않는다.
+- live overlay는 compact streaming metadata를 사용하며 raw frame/raw mask를 FastAPI streaming payload로 보내지 않는다.
+- `compose.gcp-l4.yaml`은 single-VM NVIDIA L4 portfolio runtime을 위한 Compose override이며 production GKE/Cloud SQL/HA를 의미하지 않는다.
+- Synthetic Drift는 deterministic fixture이며 production drift observation이 아니다.
+- Portfolio screenshot/recording 자체는 benchmark 또는 acceptance evidence가 아니다.
+
+Portfolio demo guide:
+[Portfolio Demo / Presentation Layer](PORTFOLIO_DEMO.md)
+
+Implementation identity:
+
+- Combined Inspection Web UI: `25a8f16b4cbc62e5b4f3af04ca06c0b268c1d069`
+- GCP L4 Compose profile: `ba8ed65810b3ed4b717b5247af6e98bcb5ad03f1`
+- Live Monitor video overlay: `01a1672966ab335f9be5776e93d2c10383cb73d5`
 
 ## 10. 빠른 탐색 순서
 
